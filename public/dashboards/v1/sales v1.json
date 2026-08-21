@@ -1,0 +1,547 @@
+{
+  "dashboard": {
+    "id": "sales-dashboard-2023",
+    "title": "Sales Dashboard | 2023",
+    "subtitle": "2023 vs. 2022 | Highest Month | Lowest Month | Design reference: Data with Baraa",
+    "hasKpis": true
+  },
+  "tiles": [
+    {
+      "id": "kpi-sales",
+      "label": "Total Sales",
+      "subtitle": "$788K Total Sales (+32.0% vs. PY). Lowest: Feb ($20.3K), Highest: Nov ($118.4K)",
+      "bounds": {
+        "x": 10,
+        "y": 110,
+        "w": 380,
+        "h": 280
+      },
+      "spec": {
+        "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+        "data": {
+          "values": [
+            {"Month": "Jan", "MonthNum": 1, "CY2023": 43971, "PY2022": 20100, "Type": "Normal"},
+            {"Month": "Feb", "MonthNum": 2, "CY2023": 20301, "PY2022": 22400, "Type": "Min"},
+            {"Month": "Mar", "MonthNum": 3, "CY2023": 58872, "PY2022": 38780, "Type": "Normal"},
+            {"Month": "Apr", "MonthNum": 4, "CY2023": 38748, "PY2022": 34195, "Type": "Normal"},
+            {"Month": "May", "MonthNum": 5, "CY2023": 56988, "PY2022": 56930, "Type": "Normal"},
+            {"Month": "Jun", "MonthNum": 6, "CY2023": 50271, "PY2022": 38240, "Type": "Normal"},
+            {"Month": "Jul", "MonthNum": 7, "CY2023": 67261, "PY2022": 28000, "Type": "Normal"},
+            {"Month": "Aug", "MonthNum": 8, "CY2023": 91643, "PY2022": 66520, "Type": "Normal"},
+            {"Month": "Sep", "MonthNum": 9, "CY2023": 80022, "PY2022": 52400, "Type": "Normal"},
+            {"Month": "Oct", "MonthNum": 10, "CY2023": 77776, "PY2022": 65200, "Type": "Normal"},
+            {"Month": "Nov", "MonthNum": 11, "CY2023": 118448, "PY2022": 79400, "Type": "Max"},
+            {"Month": "Dec", "MonthNum": 12, "CY2023": 83821, "PY2022": 95000, "Type": "Normal"}
+          ]
+        },
+        "vconcat": [
+          {
+            "width": 340,
+            "height": 65,
+            "layer": [
+              {
+                "mark": {"type": "text", "align": "left", "dx": -160, "dy": -20, "fontSize": 14, "color": "#555555"},
+                "encoding": {"text": {"value": "Total Sales"}}
+              },
+              {
+                "mark": {"type": "text", "align": "left", "dx": -160, "dy": 10, "fontSize": 28, "fontWeight": "bold", "color": "#212121"},
+                "encoding": {"text": {"value": "$788K"}}
+              },
+              {
+                "mark": {"type": "text", "align": "left", "dx": -160, "dy": 35, "fontSize": 12, "fontWeight": "bold", "color": "#212121"},
+                "encoding": {"text": {"value": "▲32.0%"}}
+              },
+              {
+                "mark": {"type": "text", "align": "left", "dx": -105, "dy": 35, "fontSize": 12, "color": "#999999"},
+                "encoding": {"text": {"value": "vs.PY"}}
+              }
+            ]
+          },
+          {
+            "width": 340,
+            "height": 140,
+            "layer": [
+              {
+                "mark": {"type": "line", "color": "#cecece", "strokeWidth": 2},
+                "encoding": {
+                  "x": {"field": "Month", "type": "ordinal", "sort": {"field": "MonthNum"}, "axis": {"domain": false, "ticks": false, "grid": false, "labels": false}},
+                  "y": {"field": "PY2022", "type": "quantitative", "axis": null}
+                }
+              },
+              {
+                "mark": {"type": "line", "color": "#212121", "strokeWidth": 2.5},
+                "encoding": {
+                  "x": {"field": "Month", "type": "ordinal", "sort": {"field": "MonthNum"}, "axis": {"domain": false, "ticks": false, "grid": false, "labelColor": "#888888", "labelPadding": 10}},
+                  "y": {"field": "CY2023", "type": "quantitative", "axis": null}
+                }
+              },
+              {
+                "mark": {"type": "point", "filled": true, "size": 150},
+                "encoding": {
+                  "x": {"field": "Month", "type": "ordinal", "sort": {"field": "MonthNum"}},
+                  "y": {"field": "CY2023", "type": "quantitative"},
+                  "color": {
+                    "field": "Type",
+                    "type": "nominal",
+                    "scale": {
+                      "domain": ["Min", "Max", "Normal"],
+                      "range": ["#ef5323", "#00a2d3", "transparent"]
+                    },
+                    "legend": null
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "kpi-profit",
+      "label": "Total Profits",
+      "subtitle": "$163K Total Profit (+52.9% vs. PY). Lowest: Feb (-$3.3K), Highest: Mar ($28.5K)",
+      "bounds": {
+        "x": 410,
+        "y": 110,
+        "w": 380,
+        "h": 280
+      },
+      "spec": {
+        "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+        "data": {
+          "values": [
+            {"Month": "Jan", "MonthNum": 1, "CY2023": 7140, "PY2022": 2100, "Type": "Normal"},
+            {"Month": "Feb", "MonthNum": 2, "CY2023": -3258, "PY2022": 4800, "Type": "Min"},
+            {"Month": "Mar", "MonthNum": 3, "CY2023": 28485, "PY2022": 3100, "Type": "Max"},
+            {"Month": "Apr", "MonthNum": 4, "CY2023": 1158, "PY2022": 1800, "Type": "Normal"},
+            {"Month": "May", "MonthNum": 5, "CY2023": 13763, "PY2022": 9500, "Type": "Normal"},
+            {"Month": "Jun", "MonthNum": 6, "CY2023": 16332, "PY2022": 4800, "Type": "Normal"},
+            {"Month": "Jul", "MonthNum": 7, "CY2023": 1414, "PY2022": 4200, "Type": "Normal"},
+            {"Month": "Aug", "MonthNum": 8, "CY2023": 18034, "PY2022": 1800, "Type": "Normal"},
+            {"Month": "Sep", "MonthNum": 9, "CY2023": 22992, "PY2022": 11100, "Type": "Normal"},
+            {"Month": "Oct", "MonthNum": 10, "CY2023": 19275, "PY2022": 27500, "Type": "Normal"},
+            {"Month": "Nov", "MonthNum": 11, "CY2023": 19692, "PY2022": 3800, "Type": "Normal"},
+            {"Month": "Dec", "MonthNum": 12, "CY2023": 17483, "PY2022": 31800, "Type": "Normal"}
+          ]
+        },
+        "vconcat": [
+          {
+            "width": 340,
+            "height": 65,
+            "layer": [
+              {
+                "mark": {"type": "text", "align": "left", "dx": -160, "dy": -20, "fontSize": 14, "color": "#555555"},
+                "encoding": {"text": {"value": "Total Profits"}}
+              },
+              {
+                "mark": {"type": "text", "align": "left", "dx": -160, "dy": 10, "fontSize": 28, "fontWeight": "bold", "color": "#212121"},
+                "encoding": {"text": {"value": "$163K"}}
+              },
+              {
+                "mark": {"type": "text", "align": "left", "dx": -160, "dy": 35, "fontSize": 12, "fontWeight": "bold", "color": "#212121"},
+                "encoding": {"text": {"value": "▲52.9%"}}
+              },
+              {
+                "mark": {"type": "text", "align": "left", "dx": -105, "dy": 35, "fontSize": 12, "color": "#999999"},
+                "encoding": {"text": {"value": "vs PY"}}
+              }
+            ]
+          },
+          {
+            "width": 340,
+            "height": 140,
+            "layer": [
+              {
+                "mark": {"type": "line", "color": "#cecece", "strokeWidth": 2},
+                "encoding": {
+                  "x": {"field": "Month", "type": "ordinal", "sort": {"field": "MonthNum"}, "axis": {"domain": false, "ticks": false, "grid": false, "labels": false}},
+                  "y": {"field": "PY2022", "type": "quantitative", "axis": null}
+                }
+              },
+              {
+                "mark": {"type": "line", "color": "#212121", "strokeWidth": 2.5},
+                "encoding": {
+                  "x": {"field": "Month", "type": "ordinal", "sort": {"field": "MonthNum"}, "axis": {"domain": false, "ticks": false, "grid": false, "labelColor": "#888888", "labelPadding": 10}},
+                  "y": {"field": "CY2023", "type": "quantitative", "axis": null}
+                }
+              },
+              {
+                "mark": {"type": "point", "filled": true, "size": 150},
+                "encoding": {
+                  "x": {"field": "Month", "type": "ordinal", "sort": {"field": "MonthNum"}},
+                  "y": {"field": "CY2023", "type": "quantitative"},
+                  "color": {
+                    "field": "Type",
+                    "type": "nominal",
+                    "scale": {
+                      "domain": ["Min", "Max", "Normal"],
+                      "range": ["#ef5323", "#00a2d3", "transparent"]
+                    },
+                    "legend": null
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "kpi-quantity",
+      "label": "Total Quantity",
+      "subtitle": "15K Total Quantity (+26.8% vs. PY). Lowest: Feb (624), Highest: Nov (1,803)",
+      "bounds": {
+        "x": 790,
+        "y": 110,
+        "w": 380,
+        "h": 280
+      },
+      "spec": {
+        "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+        "data": {
+          "values": [
+            {"Month": "Jan", "MonthNum": 1, "CY2023": 914, "PY2022": 512, "Type": "Normal"},
+            {"Month": "Feb", "MonthNum": 2, "CY2023": 624, "PY2022": 420, "Type": "Min"},
+            {"Month": "Mar", "MonthNum": 3, "CY2023": 1210, "PY2022": 790, "Type": "Normal"},
+            {"Month": "Apr", "MonthNum": 4, "CY2023": 957, "PY2022": 810, "Type": "Normal"},
+            {"Month": "May", "MonthNum": 5, "CY2023": 1122, "PY2022": 1040, "Type": "Normal"},
+            {"Month": "Jun", "MonthNum": 6, "CY2023": 1183, "PY2022": 920, "Type": "Normal"},
+            {"Month": "Jul", "MonthNum": 7, "CY2023": 1102, "PY2022": 950, "Type": "Normal"},
+            {"Month": "Aug", "MonthNum": 8, "CY2023": 1123, "PY2022": 910, "Type": "Normal"},
+            {"Month": "Sep", "MonthNum": 9, "CY2023": 1612, "PY2022": 1310, "Type": "Normal"},
+            {"Month": "Oct", "MonthNum": 10, "CY2023": 1221, "PY2022": 980, "Type": "Normal"},
+            {"Month": "Nov", "MonthNum": 11, "CY2023": 1803, "PY2022": 1425, "Type": "Max"},
+            {"Month": "Dec", "MonthNum": 12, "CY2023": 1685, "PY2022": 1410, "Type": "Normal"}
+          ]
+        },
+        "vconcat": [
+          {
+            "width": 340,
+            "height": 65,
+            "layer": [
+              {
+                "mark": {"type": "text", "align": "left", "dx": -160, "dy": -20, "fontSize": 14, "color": "#555555"},
+                "encoding": {"text": {"value": "Total Quantity"}}
+              },
+              {
+                "mark": {"type": "text", "align": "left", "dx": -160, "dy": 10, "fontSize": 28, "fontWeight": "bold", "color": "#212121"},
+                "encoding": {"text": {"value": "15K"}}
+              },
+              {
+                "mark": {"type": "text", "align": "left", "dx": -160, "dy": 35, "fontSize": 12, "fontWeight": "bold", "color": "#212121"},
+                "encoding": {"text": {"value": "▲26.8%"}}
+              },
+              {
+                "mark": {"type": "text", "align": "left", "dx": -105, "dy": 35, "fontSize": 12, "color": "#999999"},
+                "encoding": {"text": {"value": "vs PY"}}
+              }
+            ]
+          },
+          {
+            "width": 340,
+            "height": 140,
+            "layer": [
+              {
+                "mark": {"type": "line", "color": "#cecece", "strokeWidth": 2},
+                "encoding": {
+                  "x": {"field": "Month", "type": "ordinal", "sort": {"field": "MonthNum"}, "axis": {"domain": false, "ticks": false, "grid": false, "labels": false}},
+                  "y": {"field": "PY2022", "type": "quantitative", "axis": null}
+                }
+              },
+              {
+                "mark": {"type": "line", "color": "#212121", "strokeWidth": 2.5},
+                "encoding": {
+                  "x": {"field": "Month", "type": "ordinal", "sort": {"field": "MonthNum"}, "axis": {"domain": false, "ticks": false, "grid": false, "labelColor": "#888888", "labelPadding": 10}},
+                  "y": {"field": "CY2023", "type": "quantitative", "axis": null}
+                }
+              },
+              {
+                "mark": {"type": "point", "filled": true, "size": 150},
+                "encoding": {
+                  "x": {"field": "Month", "type": "ordinal", "sort": {"field": "MonthNum"}},
+                  "y": {"field": "CY2023", "type": "quantitative"},
+                  "color": {
+                    "field": "Type",
+                    "type": "nominal",
+                    "scale": {
+                      "domain": ["Min", "Max", "Normal"],
+                      "range": ["#ef5323", "#00a2d3", "transparent"]
+                    },
+                    "legend": null
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "sales-profit-by-subcategory",
+      "label": "Sales and Profit by Subcategory",
+      "subtitle": "2023 Sales vs. 2022 Sales & 2023 Profit / Loss per Subcategory",
+      "bounds": {
+        "x": 10,
+        "y": 410,
+        "w": 580,
+        "h": 370
+      },
+      "spec": {
+        "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+        "data": {
+          "values": [
+            {"SubCategory": "Phones", "Sales2023": 109301, "Sales2022": 91800, "Profit2023": 12841, "NegativeGrowth": false, "SortOrder": 1},
+            {"SubCategory": "Chairs", "Sales2023": 101882, "Sales2022": 88400, "Profit2023": 7684, "NegativeGrowth": false, "SortOrder": 2},
+            {"SubCategory": "Binders", "Sales2023": 72810, "Sales2022": 62100, "Profit2023": 7830, "NegativeGrowth": false, "SortOrder": 3},
+            {"SubCategory": "Storage", "Sales2023": 70250, "Sales2022": 61300, "Profit2023": 7419, "NegativeGrowth": false, "SortOrder": 4},
+            {"SubCategory": "Copiers", "Sales2023": 62899, "Sales2022": 49200, "Profit2023": 25051, "NegativeGrowth": false, "SortOrder": 5},
+            {"SubCategory": "Tables", "Sales2023": 60894, "Sales2022": 51200, "Profit2023": -8141, "NegativeGrowth": false, "SortOrder": 6},
+            {"SubCategory": "Accessories", "Sales2023": 59935, "Sales2022": 50400, "Profit2023": 15672, "NegativeGrowth": false, "SortOrder": 7},
+            {"SubCategory": "Machines", "Sales2023": 43546, "Sales2022": 66220, "Profit2023": -2869, "NegativeGrowth": true, "SortOrder": 8},
+            {"SubCategory": "Appliances", "Sales2023": 43425, "Sales2022": 31500, "Profit2023": 8236, "NegativeGrowth": false, "SortOrder": 9},
+            {"SubCategory": "Bookcases", "Sales2023": 30184, "Sales2022": 26100, "Profit2023": -584, "NegativeGrowth": false, "SortOrder": 10},
+            {"SubCategory": "Furnishings", "Sales2023": 28971, "Sales2022": 24200, "Profit2023": 4295, "NegativeGrowth": false, "SortOrder": 11},
+            {"SubCategory": "Paper", "Sales2023": 27848, "Sales2022": 22100, "Profit2023": 12238, "NegativeGrowth": false, "SortOrder": 12},
+            {"SubCategory": "Supplies", "Sales2023": 16139, "Sales2022": 12800, "Profit2023": -1190, "NegativeGrowth": false, "SortOrder": 13},
+            {"SubCategory": "Art", "Sales2023": 8831, "Sales2022": 7200, "Profit2023": 2228, "NegativeGrowth": false, "SortOrder": 14},
+            {"SubCategory": "Labels", "Sales2023": 3371, "Sales2022": 2900, "Profit2023": 1555, "NegativeGrowth": false, "SortOrder": 15},
+            {"SubCategory": "Envelopes", "Sales2023": 3370, "Sales2022": 4586, "Profit2023": 1471, "NegativeGrowth": true, "SortOrder": 16},
+            {"SubCategory": "Fasteners", "Sales2023": 932, "Sales2022": 1003, "Profit2023": 305, "NegativeGrowth": true, "SortOrder": 17}
+          ]
+        },
+        "transform": [
+          {"calculate": "datum.Profit2023 >= 0 ? 'Profit' : 'Loss'", "as": "ProfitStatus"}
+        ],
+        "hconcat": [
+          {
+            "width": 260,
+            "height": 310,
+            "title": {"text": "2023 Sales vs. 2022 Sales", "fontSize": 11, "color": "#888888", "anchor": "start"},
+            "layer": [
+              {
+                "mark": {"type": "bar", "color": "#cecece", "height": 12},
+                "encoding": {
+                  "y": {
+                    "field": "SubCategory",
+                    "type": "ordinal",
+                    "sort": {"field": "SortOrder"},
+                    "axis": {"domain": false, "ticks": false, "labelFontSize": 11, "title": null}
+                  },
+                  "x": {"field": "Sales2022", "type": "quantitative", "axis": null}
+                }
+              },
+              {
+                "mark": {"type": "bar", "color": "#212121", "height": 4},
+                "encoding": {
+                  "y": {"field": "SubCategory", "type": "ordinal", "sort": {"field": "SortOrder"}},
+                  "x": {"field": "Sales2023", "type": "quantitative"}
+                }
+              },
+              {
+                "mark": {"type": "point", "filled": true, "size": 70, "color": "#ef5323", "dx": -100},
+                "encoding": {
+                  "y": {"field": "SubCategory", "type": "ordinal", "sort": {"field": "SortOrder"}},
+                  "opacity": {
+                    "condition": {"test": "datum.NegativeGrowth === true", "value": 1},
+                    "value": 0
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "width": 180,
+            "height": 310,
+            "title": {"text": "2023 Profit Loss", "fontSize": 11, "color": "#888888", "anchor": "start"},
+            "mark": {"type": "bar", "height": 12},
+            "encoding": {
+              "y": {
+                "field": "SubCategory",
+                "type": "ordinal",
+                "sort": {"field": "SortOrder"},
+                "axis": null
+              },
+              "x": {
+                "field": "Profit2023",
+                "type": "quantitative",
+                "axis": null
+              },
+              "color": {
+                "field": "ProfitStatus",
+                "type": "nominal",
+                "scale": {
+                  "domain": ["Profit", "Loss"],
+                  "range": ["#00a2d3", "#ef5323"]
+                },
+                "legend": null
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "sales-profit-trends-over-time",
+      "label": "Sales & Profit Trends over Time",
+      "subtitle": "2023 Weekly Sales ($14K avg) & Weekly Profit ($2K avg) by Week Number",
+      "bounds": {
+        "x": 610,
+        "y": 410,
+        "w": 580,
+        "h": 370
+      },
+      "spec": {
+        "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+        "data": {
+          "values": [
+            {"Week": 1, "Sales": 9200, "Profit": 1200, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 2, "Sales": 7500, "Profit": -1500, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 3, "Sales": 13800, "Profit": 3800, "SalesStatus": "Below", "ProfitStatus": "Above"},
+            {"Week": 4, "Sales": 9500, "Profit": 2800, "SalesStatus": "Below", "ProfitStatus": "Above"},
+            {"Week": 5, "Sales": 6000, "Profit": 900, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 6, "Sales": 5200, "Profit": 300, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 7, "Sales": 5500, "Profit": 700, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 8, "Sales": 4200, "Profit": 1200, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 9, "Sales": 6500, "Profit": 1100, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 10, "Sales": 6800, "Profit": 900, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 11, "Sales": 8800, "Profit": 1800, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 12, "Sales": 26100, "Profit": 8500, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 13, "Sales": 19400, "Profit": 3200, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 14, "Sales": 10200, "Profit": 2400, "SalesStatus": "Below", "ProfitStatus": "Above"},
+            {"Week": 15, "Sales": 5100, "Profit": 1100, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 16, "Sales": 8500, "Profit": -3800, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 17, "Sales": 5200, "Profit": -4100, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 18, "Sales": 12100, "Profit": 500, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 19, "Sales": 11800, "Profit": 2600, "SalesStatus": "Below", "ProfitStatus": "Above"},
+            {"Week": 20, "Sales": 14500, "Profit": 3100, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 21, "Sales": 4200, "Profit": 800, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 22, "Sales": 11100, "Profit": 2100, "SalesStatus": "Below", "ProfitStatus": "Above"},
+            {"Week": 23, "Sales": 6400, "Profit": 600, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 24, "Sales": 15100, "Profit": 3100, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 25, "Sales": 6500, "Profit": 1800, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 26, "Sales": 17200, "Profit": 2400, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 27, "Sales": 11800, "Profit": 2100, "SalesStatus": "Below", "ProfitStatus": "Above"},
+            {"Week": 28, "Sales": 9900, "Profit": 1000, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 29, "Sales": 11200, "Profit": 1000, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 30, "Sales": 9800, "Profit": 2500, "SalesStatus": "Below", "ProfitStatus": "Above"},
+            {"Week": 31, "Sales": 5100, "Profit": 800, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 32, "Sales": 11200, "Profit": 2800, "SalesStatus": "Below", "ProfitStatus": "Above"},
+            {"Week": 33, "Sales": 22100, "Profit": 1500, "SalesStatus": "Above", "ProfitStatus": "Below"},
+            {"Week": 34, "Sales": 15500, "Profit": 2800, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 35, "Sales": 21800, "Profit": 5100, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 36, "Sales": 17500, "Profit": 1100, "SalesStatus": "Above", "ProfitStatus": "Below"},
+            {"Week": 37, "Sales": 21200, "Profit": 2400, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 38, "Sales": 26200, "Profit": 3100, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 39, "Sales": 12500, "Profit": 1800, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 40, "Sales": 22100, "Profit": 2900, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 41, "Sales": 16500, "Profit": 2700, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 42, "Sales": 13200, "Profit": -1500, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 43, "Sales": 21500, "Profit": 4800, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 44, "Sales": 29200, "Profit": 4800, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 45, "Sales": 19800, "Profit": -1400, "SalesStatus": "Above", "ProfitStatus": "Below"},
+            {"Week": 46, "Sales": 31200, "Profit": 6200, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 47, "Sales": 22500, "Profit": 3800, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 48, "Sales": 35800, "Profit": 3100, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 49, "Sales": 21500, "Profit": 800, "SalesStatus": "Above", "ProfitStatus": "Below"},
+            {"Week": 50, "Sales": 12200, "Profit": 1100, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 51, "Sales": 19500, "Profit": 3100, "SalesStatus": "Above", "ProfitStatus": "Above"}
+          ]
+        },
+        "vconcat": [
+          {
+            "width": 500,
+            "height": 130,
+            "layer": [
+              {
+                "mark": {"type": "line", "interpolate": "step-after", "strokeWidth": 2},
+                "encoding": {
+                  "x": {
+                    "field": "Week",
+                    "type": "quantitative",
+                    "axis": {"domain": true, "ticks": true, "grid": false, "title": null, "labelColor": "#777777"}
+                  },
+                  "y": {
+                    "field": "Sales",
+                    "type": "quantitative",
+                    "axis": {
+                      "title": "Sales",
+                      "titleColor": "#555555",
+                      "format": "$.0s",
+                      "values": [0, 10000, 20000, 30000],
+                      "domain": false,
+                      "grid": true,
+                      "gridColor": "#f0f0f0"
+                    }
+                  },
+                  "color": {
+                    "field": "SalesStatus",
+                    "type": "nominal",
+                    "scale": {
+                      "domain": ["Above", "Below"],
+                      "range": ["#00a2d3", "#ef5323"]
+                    },
+                    "legend": null
+                  }
+                }
+              },
+              {
+                "mark": {"type": "rule", "strokeDash": [4, 4], "color": "#777777", "size": 1.2},
+                "encoding": {"y": {"datum": 14100}}
+              },
+              {
+                "mark": {"type": "text", "align": "left", "dx": -240, "dy": -8, "fontSize": 11, "fill": "#333333"},
+                "encoding": {"text": {"value": "Avg. $14K"}}
+              }
+            ]
+          },
+          {
+            "width": 500,
+            "height": 130,
+            "layer": [
+              {
+                "mark": {"type": "line", "interpolate": "step-after", "strokeWidth": 2},
+                "encoding": {
+                  "x": {
+                    "field": "Week",
+                    "type": "quantitative",
+                    "axis": {"domain": true, "ticks": true, "grid": false, "title": null, "labelColor": "#777777", "values": [0, 10, 20, 30, 40, 50]}
+                  },
+                  "y": {
+                    "field": "Profit",
+                    "type": "quantitative",
+                    "axis": {
+                      "title": "Profit",
+                      "titleColor": "#555555",
+                      "format": "$.0s",
+                      "values": [0, 5000],
+                      "domain": false,
+                      "grid": true,
+                      "gridColor": "#f0f0f0"
+                    }
+                  },
+                  "color": {
+                    "field": "ProfitStatus",
+                    "type": "nominal",
+                    "scale": {
+                      "domain": ["Above", "Below"],
+                      "range": ["#00a2d3", "#ef5323"]
+                    },
+                    "legend": null
+                  }
+                }
+              },
+              {
+                "mark": {"type": "rule", "strokeDash": [4, 4], "color": "#777777", "size": 1.2},
+                "encoding": {"y": {"datum": 1800}}
+              },
+              {
+                "mark": {"type": "text", "align": "left", "dx": -240, "dy": -8, "fontSize": 11, "fill": "#333333"},
+                "encoding": {"text": {"value": "Avg. $2K"}}
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

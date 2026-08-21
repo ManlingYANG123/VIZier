@@ -1,0 +1,312 @@
+{
+  "dashboard": {
+    "id": "workspace-performance",
+    "title": "Team Delivery Pulse",
+    "subtitle": "Team momentum, capacity utilization, and delivery health · Q3 2026",
+    "hasKpis": false,
+    "filters": [
+      {
+        "id": "department-filter",
+        "label": "Department",
+        "kind": "category",
+        "field": "department",
+        "targets": ["task-velocity", "department-tasks", "project-status"],
+        "options": ["Design", "Eng", "Research", "QA", "Ops"],
+        "value": null,
+        "wired": true,
+        "variant": "chips",
+        "placement": "floating",
+        "container": "pill",
+        "tone": "neutral",
+        "accent": "#0f766e",
+        "position": { "x": 514, "y": 91, "w": 558 }
+      }
+    ]
+  },
+  "tiles": [
+    {
+      "id": "task-velocity",
+      "label": "Task Velocity Trend",
+      "subtitle": "Completed tasks vs. monthly target — reflects the selected department (all departments by default)",
+      "bounds": { "x": 28, "y": 144, "w": 508, "h": 258 },
+      "spec": {
+        "width": 468,
+        "height": 200,
+        "background": null,
+        "config": {
+          "view": { "stroke": null },
+          "axis": {
+            "domainColor": "#cbd5e1",
+            "gridColor": "#f1f5f9",
+            "tickColor": "#cbd5e1",
+            "labelColor": "#475569",
+            "labelFontSize": 11,
+            "labelFont": "JetBrains Mono, monospace",
+            "titleFontSize": 12
+          },
+          "legend": { "labelColor": "#1e293b", "labelFontSize": 11 }
+        },
+        "data": {
+          "values": [
+            { "month": "Jan", "completed": 3, "target": 3, "department": "Design" },
+            { "month": "Feb", "completed": 3, "target": 3, "department": "Design" },
+            { "month": "Mar", "completed": 4, "target": 4, "department": "Design" },
+            { "month": "Apr", "completed": 5, "target": 4, "department": "Design" },
+            { "month": "May", "completed": 6, "target": 5, "department": "Design" },
+            { "month": "Jun", "completed": 7, "target": 5, "department": "Design" },
+            { "month": "Jul", "completed": 6, "target": 5, "department": "Design" },
+            { "month": "Jan", "completed": 5, "target": 6, "department": "Eng" },
+            { "month": "Feb", "completed": 7, "target": 6, "department": "Eng" },
+            { "month": "Mar", "completed": 6, "target": 7, "department": "Eng" },
+            { "month": "Apr", "completed": 8, "target": 7, "department": "Eng" },
+            { "month": "May", "completed": 10, "target": 8, "department": "Eng" },
+            { "month": "Jun", "completed": 11, "target": 9, "department": "Eng" },
+            { "month": "Jul", "completed": 10, "target": 9, "department": "Eng" },
+            { "month": "Jan", "completed": 2, "target": 3, "department": "Research" },
+            { "month": "Feb", "completed": 3, "target": 3, "department": "Research" },
+            { "month": "Mar", "completed": 2, "target": 3, "department": "Research" },
+            { "month": "Apr", "completed": 3, "target": 3, "department": "Research" },
+            { "month": "May", "completed": 4, "target": 3, "department": "Research" },
+            { "month": "Jun", "completed": 4, "target": 4, "department": "Research" },
+            { "month": "Jul", "completed": 4, "target": 4, "department": "Research" },
+            { "month": "Jan", "completed": 2, "target": 3, "department": "QA" },
+            { "month": "Feb", "completed": 3, "target": 3, "department": "QA" },
+            { "month": "Mar", "completed": 2, "target": 3, "department": "QA" },
+            { "month": "Apr", "completed": 4, "target": 3, "department": "QA" },
+            { "month": "May", "completed": 5, "target": 4, "department": "QA" },
+            { "month": "Jun", "completed": 6, "target": 5, "department": "QA" },
+            { "month": "Jul", "completed": 5, "target": 5, "department": "QA" },
+            { "month": "Jan", "completed": 2, "target": 3, "department": "Ops" },
+            { "month": "Feb", "completed": 3, "target": 3, "department": "Ops" },
+            { "month": "Mar", "completed": 2, "target": 3, "department": "Ops" },
+            { "month": "Apr", "completed": 3, "target": 3, "department": "Ops" },
+            { "month": "May", "completed": 3, "target": 3, "department": "Ops" },
+            { "month": "Jun", "completed": 3, "target": 4, "department": "Ops" },
+            { "month": "Jul", "completed": 2, "target": 4, "department": "Ops" }
+          ]
+        },
+        "transform": [
+          { "fold": ["completed", "target"], "as": ["series", "value"] }
+        ],
+        "mark": { "type": "line", "point": false, "strokeWidth": 3 },
+        "encoding": {
+          "x": {
+            "field": "month",
+            "type": "ordinal",
+            "sort": null,
+            "axis": { "title": null, "labelAngle": 0 }
+          },
+          "y": {
+            "field": "value",
+            "type": "quantitative",
+            "aggregate": "sum",
+            "axis": { "title": "Task Count", "grid": true }
+          },
+          "color": {
+            "field": "series",
+            "type": "nominal",
+            "scale": { "domain": ["completed", "target"], "range": ["#10b981", "#94a3b8"] },
+            "legend": { "orient": "top-right", "title": null }
+          },
+          "strokeDash": {
+            "field": "series",
+            "scale": { "domain": ["completed", "target"], "range": [[1, 0], [8, 4]] },
+            "legend": null
+          }
+        }
+      }
+    },
+    {
+      "id": "department-tasks",
+      "label": "Workload by Department",
+      "subtitle": "Done vs. open tasks per team — click a bar to filter velocity and project status by department",
+      "bounds": { "x": 564, "y": 144, "w": 508, "h": 258 },
+      "spec": {
+        "width": 468,
+        "height": 200,
+        "background": null,
+        "config": {
+          "view": { "stroke": null },
+          "axis": {
+            "domainColor": "#cbd5e1",
+            "gridColor": "#f1f5f9",
+            "tickColor": "#cbd5e1",
+            "labelColor": "#475569",
+            "labelFontSize": 11,
+            "labelFont": "JetBrains Mono, monospace",
+            "titleFontSize": 12
+          },
+          "legend": { "labelColor": "#1e293b", "labelFontSize": 11 }
+        },
+        "data": {
+          "values": [
+            { "department": "Design", "done": 22, "open": 12 },
+            { "department": "Eng", "done": 27, "open": 31 },
+            { "department": "Research", "done": 12, "open": 9 },
+            { "department": "QA", "done": 9, "open": 8 },
+            { "department": "Ops", "done": 7, "open": 5 }
+          ]
+        },
+        "params": [
+          { "name": "department_select", "select": { "type": "point", "fields": ["department"] } }
+        ],
+        "transform": [
+          { "fold": ["done", "open"], "as": ["status", "value"] }
+        ],
+        "mark": { "type": "bar", "cornerRadiusEnd": 4, "cursor": "pointer" },
+        "encoding": {
+          "x": {
+            "field": "department",
+            "type": "nominal",
+            "sort": null,
+            "axis": { "title": null, "labelAngle": 0 }
+          },
+          "y": {
+            "field": "value",
+            "type": "quantitative",
+            "stack": "zero",
+            "axis": { "title": "Task Count", "grid": true }
+          },
+          "color": {
+            "field": "status",
+            "type": "nominal",
+            "scale": { "domain": ["done", "open"], "range": ["#3b82f6", "#e2e8f0"] },
+            "legend": { "orient": "top-right", "title": null }
+          },
+          "opacity": { "condition": { "param": "department_select", "value": 1 }, "value": 0.35 },
+          "tooltip": [
+            { "field": "department", "type": "nominal", "title": "Department" },
+            { "field": "status", "type": "nominal", "title": "Status" },
+            { "field": "value", "type": "quantitative", "title": "Tasks" }
+          ]
+        },
+        "usermeta": {
+          "crossFilter": {
+            "role": "source",
+            "param": "department_select",
+            "field": "department",
+            "source": "department-tasks",
+            "targets": ["task-velocity", "project-status"]
+          }
+        }
+      }
+    },
+    {
+      "id": "project-status",
+      "label": "Project Status Distribution",
+      "subtitle": "8 active projects tracked — 50% on track; reflects the selected department",
+      "bounds": { "x": 564, "y": 448, "w": 508, "h": 272 },
+      "spec": {
+        "width": 468,
+        "height": 210,
+        "background": null,
+        "config": {
+          "view": { "stroke": null },
+          "legend": { "labelColor": "#1e293b", "labelFontSize": 11 }
+        },
+        "data": {
+          "values": [
+            { "status": "On Track", "value": 1, "department": "Design" },
+            { "status": "At Risk", "value": 1, "department": "Design" },
+            { "status": "On Track", "value": 2, "department": "Eng" },
+            { "status": "Blocked", "value": 1, "department": "Eng" },
+            { "status": "On Track", "value": 1, "department": "Research" },
+            { "status": "At Risk", "value": 1, "department": "QA" },
+            { "status": "Completed", "value": 1, "department": "Ops" }
+          ]
+        },
+        "mark": {
+          "type": "arc",
+          "innerRadius": 50,
+          "outerRadius": 80,
+          "padAngle": 0.02,
+          "cornerRadius": 3
+        },
+        "encoding": {
+          "theta": { "field": "value", "type": "quantitative", "aggregate": "sum" },
+          "color": {
+            "field": "status",
+            "type": "nominal",
+            "scale": {
+              "domain": ["On Track", "At Risk", "Blocked", "Completed"],
+              "range": ["#10b981", "#f59e0b", "#ef4444", "#94a3b8"]
+            },
+            "legend": { "orient": "right", "title": null }
+          },
+          "tooltip": [
+            { "field": "status", "type": "nominal", "title": "Status" },
+            { "field": "value", "type": "quantitative", "aggregate": "sum", "title": "Projects" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "sprint-burndown",
+      "label": "Sprint Burndown Progress",
+      "subtitle": "Remaining story points vs. ideal trajectory — ahead of schedule with 31 points left",
+      "bounds": { "x": 28, "y": 448, "w": 508, "h": 272 },
+      "spec": {
+        "width": 468,
+        "height": 210,
+        "background": null,
+        "config": {
+          "view": { "stroke": null },
+          "axis": {
+            "domainColor": "#cbd5e1",
+            "gridColor": "#f1f5f9",
+            "tickColor": "#cbd5e1",
+            "labelColor": "#475569",
+            "labelFontSize": 11,
+            "labelFont": "JetBrains Mono, monospace",
+            "titleFontSize": 12
+          },
+          "legend": { "labelColor": "#1e293b", "labelFontSize": 11 }
+        },
+        "data": {
+          "values": [
+            { "week": "Jan", "remaining": 280, "ideal": 280 },
+            { "week": "Feb", "remaining": 231, "ideal": 240 },
+            { "week": "Mar", "remaining": 188, "ideal": 200 },
+            { "week": "Apr", "remaining": 142, "ideal": 160 },
+            { "week": "May", "remaining": 97, "ideal": 120 },
+            { "week": "Jun", "remaining": 52, "ideal": 80 },
+            { "week": "Jul", "remaining": 31, "ideal": 40 }
+          ]
+        },
+        "transform": [
+          { "fold": ["remaining", "ideal"], "as": ["series", "value"] }
+        ],
+        "mark": { "type": "line", "point": { "filled": true, "size": 100 }, "strokeWidth": 3 },
+        "encoding": {
+          "x": {
+            "field": "week",
+            "type": "ordinal",
+            "sort": null,
+            "axis": { "title": null, "labelAngle": 0 }
+          },
+          "y": {
+            "field": "value",
+            "type": "quantitative",
+            "axis": { "title": "Story Points Remaining", "grid": true }
+          },
+          "color": {
+            "field": "series",
+            "type": "nominal",
+            "scale": { "domain": ["remaining", "ideal"], "range": ["#6366f1", "#cbd5e1"] },
+            "legend": { "orient": "top-right", "title": null }
+          },
+          "strokeDash": {
+            "field": "series",
+            "scale": { "domain": ["remaining", "ideal"], "range": [[1, 0], [8, 4]] },
+            "legend": null
+          },
+          "tooltip": [
+            { "field": "week", "type": "ordinal", "title": "Month" },
+            { "field": "series", "type": "nominal", "title": "Series" },
+            { "field": "value", "type": "quantitative", "title": "Story Points" }
+          ]
+        }
+      }
+    }
+  ]
+}

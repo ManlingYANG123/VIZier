@@ -1,0 +1,215 @@
+{
+  "dashboard": {
+    "id": "air-quality",
+    "title": "Air Quality Where You Live",
+    "subtitle": "Daily Air Quality Index (AQI) · lower is cleaner · compare years and isolate cleaner periods",
+    "hasKpis": false,
+    "filters": [
+      {
+        "id": "aqi-year-filter",
+        "label": "Year",
+        "kind": "category",
+        "field": "year",
+        "targets": ["aqi-trend"],
+        "options": ["2024", "2025"],
+        "value": null,
+        "wired": true,
+        "variant": "segmented",
+        "placement": "top-row",
+        "container": "ruled",
+        "tone": "accent",
+        "accent": "#1a4480"
+      }
+    ]
+  },
+  "tiles": [
+    {
+      "id": "aqi-trend",
+      "label": "Monthly Air Quality Index: 2025 vs 2024",
+      "subtitle": "Solid = 2025, dashed = 2024 · 0–50 is 'Good', 51–100 is 'Moderate' · click a legend year to focus",
+      "bounds": { "x": 28, "y": 144, "w": 440, "h": 576 },
+      "spec": {
+        "width": 400,
+        "height": 536,
+        "background": null,
+        "config": {
+          "font": "'Trebuchet MS', 'Segoe UI', -apple-system, sans-serif",
+          "view": { "stroke": null },
+          "axis": {
+            "labelColor": "#1b1b1b",
+            "titleColor": "#3d4551",
+            "gridColor": "#dfe1e2",
+            "domain": true,
+            "domainColor": "#1b1b1b",
+            "tickColor": "#1b1b1b",
+            "labelFontSize": 12,
+            "titleFontSize": 12
+          },
+          "legend": { "labelColor": "#1b1b1b", "labelFontSize": 13 }
+        },
+        "data": {
+          "values": [
+            { "month": "Jan", "year": "2025", "aqi": 42 },
+            { "month": "Feb", "year": "2025", "aqi": 45 },
+            { "month": "Mar", "year": "2025", "aqi": 50 },
+            { "month": "Apr", "year": "2025", "aqi": 58 },
+            { "month": "May", "year": "2025", "aqi": 66 },
+            { "month": "Jun", "year": "2025", "aqi": 82 },
+            { "month": "Jul", "year": "2025", "aqi": 95 },
+            { "month": "Aug", "year": "2025", "aqi": 88 },
+            { "month": "Sep", "year": "2025", "aqi": 71 },
+            { "month": "Oct", "year": "2025", "aqi": 55 },
+            { "month": "Nov", "year": "2025", "aqi": 48 },
+            { "month": "Dec", "year": "2025", "aqi": 44 },
+            { "month": "Jan", "year": "2024", "aqi": 48 },
+            { "month": "Feb", "year": "2024", "aqi": 52 },
+            { "month": "Mar", "year": "2024", "aqi": 57 },
+            { "month": "Apr", "year": "2024", "aqi": 64 },
+            { "month": "May", "year": "2024", "aqi": 74 },
+            { "month": "Jun", "year": "2024", "aqi": 92 },
+            { "month": "Jul", "year": "2024", "aqi": 108 },
+            { "month": "Aug", "year": "2024", "aqi": 99 },
+            { "month": "Sep", "year": "2024", "aqi": 80 },
+            { "month": "Oct", "year": "2024", "aqi": 62 },
+            { "month": "Nov", "year": "2024", "aqi": 53 },
+            { "month": "Dec", "year": "2024", "aqi": 50 }
+          ]
+        },
+        "params": [
+          { "name": "year_sel", "select": { "type": "point", "fields": ["year"] }, "bind": "legend" }
+        ],
+        "mark": { "type": "line", "point": { "filled": true, "size": 55 }, "strokeWidth": 3 },
+        "encoding": {
+          "x": {
+            "field": "month",
+            "type": "ordinal",
+            "sort": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+            "axis": { "title": null, "labelAngle": 0 }
+          },
+          "y": {
+            "field": "aqi",
+            "type": "quantitative",
+            "scale": { "zero": true, "domain": [0, 150] },
+            "axis": { "title": "AQI (lower is cleaner)", "grid": true, "values": [0, 50, 100, 150] }
+          },
+          "color": {
+            "field": "year",
+            "type": "nominal",
+            "scale": { "domain": ["2025", "2024"], "range": ["#1a4480", "#71767a"] },
+            "legend": { "title": null, "orient": "top-left" }
+          },
+          "strokeDash": {
+            "field": "year",
+            "type": "nominal",
+            "scale": { "domain": ["2025", "2024"], "range": [[1, 0], [6, 4]] },
+            "legend": { "title": null, "orient": "top-left" }
+          },
+          "opacity": { "condition": { "param": "year_sel", "value": 1 }, "value": 0.25 },
+          "tooltip": [
+            { "field": "month", "type": "ordinal", "title": "Month" },
+            { "field": "year", "type": "nominal", "title": "Year" },
+            { "field": "aqi", "type": "quantitative", "title": "AQI" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "days-by-category",
+      "label": "Days in Each AQI Category, 2024",
+      "subtitle": "How many days fell in each health band · click a band to highlight it",
+      "bounds": { "x": 492, "y": 144, "w": 300, "h": 576 },
+      "spec": {
+        "width": 260,
+        "height": 536,
+        "background": null,
+        "config": {
+          "font": "'Trebuchet MS', 'Segoe UI', -apple-system, sans-serif",
+          "view": { "stroke": null },
+          "axis": {
+            "labelColor": "#1b1b1b",
+            "titleColor": "#3d4551",
+            "gridColor": "#dfe1e2",
+            "domain": true,
+            "domainColor": "#1b1b1b",
+            "tickColor": "#1b1b1b",
+            "labelFontSize": 12,
+            "titleFontSize": 12
+          }
+        },
+        "data": {
+          "values": [
+            { "band": "Good (0-50)", "days": 238, "order": 1 },
+            { "band": "Moderate (51-100)", "days": 104, "order": 2 },
+            { "band": "Unhealthy for Sensitive (101-150)", "days": 19, "order": 3 },
+            { "band": "Unhealthy (151+)", "days": 4, "order": 4 }
+          ]
+        },
+        "params": [
+          { "name": "band_sel", "select": { "type": "point", "fields": ["band"], "on": "click", "clear": "dblclick" } }
+        ],
+        "mark": { "type": "bar", "cornerRadiusEnd": 2, "cursor": "pointer" },
+        "encoding": {
+          "y": {
+            "field": "band",
+            "type": "nominal",
+            "sort": { "field": "order" },
+            "axis": { "title": null, "labelLimit": 170, "labelFontSize": 12 }
+          },
+          "x": {
+            "field": "days",
+            "type": "quantitative",
+            "axis": { "title": "Number of days", "grid": true }
+          },
+          "color": {
+            "field": "band",
+            "type": "nominal",
+            "scale": {
+              "domain": ["Good (0-50)", "Moderate (51-100)", "Unhealthy for Sensitive (101-150)", "Unhealthy (151+)"],
+              "range": ["#c5d9ed", "#7fa9d0", "#3d6ea5", "#1a4480"]
+            },
+            "legend": null
+          },
+          "opacity": { "condition": { "param": "band_sel", "value": 1 }, "value": 0.35 },
+          "tooltip": [
+            { "field": "band", "type": "nominal", "title": "Category" },
+            { "field": "days", "type": "quantitative", "title": "Days" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "takeaway",
+      "label": "What the numbers say",
+      "subtitle": "Plain-language summary",
+      "bounds": { "x": 816, "y": 144, "w": 256, "h": 576 },
+      "spec": {
+        "width": 216,
+        "height": 536,
+        "background": null,
+        "config": {
+          "font": "'Trebuchet MS', 'Segoe UI', -apple-system, sans-serif",
+          "view": { "stroke": null }
+        },
+        "data": { "values": [{ "x": 0 }] },
+        "layer": [
+          {
+            "mark": { "type": "text", "fontSize": 15, "lineHeight": 22, "color": "#1b1b1b", "align": "left", "baseline": "top", "x": 4, "y": 6, "limit": 214, "lineBreak": "\n" },
+            "encoding": { "text": { "value": "Air quality was 'Good'\non 238 days in 2024.\n\nMost 'Moderate' days\nfell in July and August,\nwhen ozone peaks in\nthe summer heat." } }
+          },
+          {
+            "mark": { "type": "text", "fontSize": 14, "fontWeight": "bold", "color": "#1a4480", "align": "left", "baseline": "top", "x": 4, "y": 256, "limit": 214 },
+            "encoding": { "text": { "value": "On a bad-air day:" } }
+          },
+          {
+            "mark": { "type": "text", "fontSize": 14, "lineHeight": 21, "color": "#1b1b1b", "align": "left", "baseline": "top", "x": 4, "y": 282, "limit": 214, "lineBreak": "\n" },
+            "encoding": { "text": { "value": "• Limit long or intense\n  time outdoors\n• Keep windows closed\n• Check the forecast\n  before exercising\n  outside" } }
+          },
+          {
+            "mark": { "type": "text", "fontSize": 11, "lineHeight": 15, "color": "#71767a", "align": "left", "baseline": "top", "x": 4, "y": 430, "limit": 214, "lineBreak": "\n" },
+            "encoding": { "text": { "value": "Source: EPA AQI bands;\nvalues illustrative." } }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,306 @@
+{
+  "dashboard": {
+    "id": "ocean-life",
+    "title": "Life Below Light",
+    "subtitle": "Marine diversity across the sunlit, twilight, and midnight zones",
+    "hasKpis": true
+  },
+  "tiles": [
+    {
+      "id": "species-diversity",
+      "label": "Species Diversity by Group",
+      "subtitle": "Estimated known species count — crustaceans dominate with 67,000+ species",
+      "bounds": { "x": 748, "y": 96, "w": 324, "h": 180 },
+      "spec": {
+        "width": 580,
+        "height": 280,
+        "background": null,
+        "config": {
+          "view": { "stroke": null },
+          "axis": {
+            "domainColor": "#cbd5e0",
+            "gridColor": "#f1f5f9",
+            "tickColor": "#cbd5e0",
+            "labelColor": "#64748b",
+            "labelFontSize": 11,
+            "titleColor": "#475569",
+            "titleFontSize": 12,
+            "titleFont": "Inter, sans-serif"
+          },
+          "legend": {
+            "labelColor": "#1e293b",
+            "labelFontSize": 11,
+            "titleColor": "#475569"
+          }
+        },
+        "data": {
+          "values": [
+            { "group": "Crustaceans", "count": 67000, "icon": "🦐" },
+            { "group": "Fish", "count": 34000, "icon": "🐟" },
+            { "group": "Molluscs", "count": 85000, "icon": "🐚" },
+            { "group": "Cephalopods", "count": 800, "icon": "🐙" },
+            { "group": "Marine Mammals", "count": 130, "icon": "🐋" },
+            { "group": "Seabirds", "count": 350, "icon": "🐦" }
+          ]
+        },
+        "mark": {
+          "type": "bar",
+          "cornerRadiusEnd": 6,
+          "width": { "band": 0.7 }
+        },
+        "encoding": {
+          "y": {
+            "field": "group",
+            "type": "nominal",
+            "sort": { "field": "count", "order": "descending" },
+            "axis": {
+              "title": null,
+              "labelPadding": 8
+            }
+          },
+          "x": {
+            "field": "count",
+            "type": "quantitative",
+            "scale": { "type": "sqrt", "nice": true, "zero": true },
+            "axis": {
+              "title": "Known Species (square-root scale)",
+              "format": ",",
+              "tickCount": 5
+            }
+          },
+          "color": {
+            "field": "group",
+            "type": "nominal",
+            "scale": {
+              "domain": ["Molluscs", "Crustaceans", "Fish", "Cephalopods", "Seabirds", "Marine Mammals"],
+              "range": ["#ff9f6e", "#56d6b5", "#54b4d3", "#bd8cff", "#ffd166", "#6bd5e8"]
+            },
+            "legend": null
+          },
+          "tooltip": [
+            { "field": "group", "type": "nominal", "title": "Group" },
+            { "field": "count", "type": "quantitative", "format": ",", "title": "Known Species" },
+            { "field": "icon", "type": "nominal", "title": " " }
+          ]
+        }
+      }
+    },
+    {
+      "id": "depth-capability",
+      "label": "Maximum Diving Depth",
+      "subtitle": "Deepest recorded dive per group — crustaceans reach Mariana Trench depths at 10,924m",
+      "bounds": { "x": 748, "y": 294, "w": 324, "h": 180 },
+      "spec": {
+        "width": 580,
+        "height": 280,
+        "background": null,
+        "config": {
+          "view": { "stroke": null },
+          "axis": {
+            "domainColor": "#cbd5e0",
+            "gridColor": "#f1f5f9",
+            "tickColor": "#cbd5e0",
+            "labelColor": "#64748b",
+            "labelFontSize": 11,
+            "titleColor": "#475569",
+            "titleFontSize": 12
+          }
+        },
+        "data": {
+          "values": [
+            { "group": "Crustaceans", "depth": 10924, "zone": "Hadal" },
+            { "group": "Fish", "depth": 8400, "zone": "Abyssal" },
+            { "group": "Cephalopods", "depth": 7000, "zone": "Abyssal" },
+            { "group": "Marine Mammals", "depth": 2992, "zone": "Bathyal" },
+            { "group": "Seabirds", "depth": 500, "zone": "Epipelagic" }
+          ]
+        },
+        "mark": {
+          "type": "bar",
+          "cornerRadiusEnd": 6,
+          "width": { "band": 0.7 }
+        },
+        "encoding": {
+          "y": {
+            "field": "group",
+            "type": "nominal",
+            "sort": { "field": "depth", "order": "descending" },
+            "axis": { "title": null, "labelPadding": 8 }
+          },
+          "x": {
+            "field": "depth",
+            "type": "quantitative",
+            "axis": { "title": "Maximum Depth (meters)", "format": "," }
+          },
+          "color": {
+            "field": "zone",
+            "type": "nominal",
+            "scale": {
+              "domain": ["Epipelagic", "Bathyal", "Abyssal", "Hadal"],
+              "range": ["#8bd6e6", "#4aa8c8", "#276985", "#183f59"]
+            },
+            "legend": { "orient": "top-right", "title": "Ocean Zone" }
+          },
+          "tooltip": [
+            { "field": "group", "type": "nominal", "title": "Group" },
+            { "field": "depth", "type": "quantitative", "format": ",", "title": "Max Depth (m)" },
+            { "field": "zone", "type": "nominal", "title": "Ocean Zone" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "diversity-depth-scatter",
+      "label": "Biodiversity vs Depth Adaptation",
+      "subtitle": "Relationship between species count and maximum diving depth capability",
+      "bounds": { "x": 28, "y": 96, "w": 700, "h": 576 },
+      "spec": {
+        "width": 600,
+        "height": 260,
+        "background": null,
+        "config": {
+          "view": { "stroke": null },
+          "axis": {
+            "domainColor": "#cbd5e0",
+            "gridColor": "#f1f5f9",
+            "tickColor": "#cbd5e0",
+            "labelColor": "#64748b",
+            "labelFontSize": 11,
+            "titleColor": "#475569",
+            "titleFontSize": 12
+          },
+          "legend": {
+            "labelColor": "#1e293b",
+            "labelFontSize": 11
+          }
+        },
+        "data": {
+          "values": [
+            { "group": "Molluscs", "count": 85000, "depth": 10190, "biomass": 1.2 },
+            { "group": "Crustaceans", "count": 67000, "depth": 10924, "biomass": 0.8 },
+            { "group": "Fish", "count": 34000, "depth": 8400, "biomass": 0.6 },
+            { "group": "Cephalopods", "count": 800, "depth": 7000, "biomass": 0.05 },
+            { "group": "Seabirds", "count": 350, "depth": 500, "biomass": 0.01 },
+            { "group": "Marine Mammals", "count": 130, "depth": 2992, "biomass": 0.15 }
+          ]
+        },
+        "mark": {
+          "type": "circle",
+          "opacity": 0.8,
+          "stroke": "white",
+          "strokeWidth": 2
+        },
+        "encoding": {
+          "x": {
+            "field": "depth",
+            "type": "quantitative",
+            "scale": { "type": "log", "nice": true },
+            "axis": { "title": "Maximum Depth (meters, log scale)", "format": "," }
+          },
+          "y": {
+            "field": "count",
+            "type": "quantitative",
+            "scale": { "type": "log", "nice": true },
+            "axis": { "title": "Species Count (log scale)", "format": "," }
+          },
+          "size": {
+            "field": "biomass",
+            "type": "quantitative",
+            "scale": { "range": [200, 2500] },
+            "legend": { "title": "Est. Biomass (billion tonnes)", "orient": "top-right" }
+          },
+          "color": {
+            "field": "group",
+            "type": "nominal",
+            "scale": {
+              "domain": ["Molluscs", "Crustaceans", "Fish", "Cephalopods", "Seabirds", "Marine Mammals"],
+              "range": ["#ff9f6e", "#56d6b5", "#54b4d3", "#bd8cff", "#ffd166", "#6bd5e8"]
+            },
+            "legend": { "title": "Marine Group", "orient": "bottom" }
+          },
+          "tooltip": [
+            { "field": "group", "type": "nominal", "title": "Group" },
+            { "field": "count", "type": "quantitative", "format": ",", "title": "Species Count" },
+            { "field": "depth", "type": "quantitative", "format": ",", "title": "Max Depth (m)" },
+            { "field": "biomass", "type": "quantitative", "format": ".2f", "title": "Biomass (Gt)" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "ocean-zones",
+      "label": "Species Distribution by Ocean Zone",
+      "subtitle": "Biodiversity across depth layers — 90% of marine life lives in the sunlit zone",
+      "bounds": { "x": 748, "y": 492, "w": 324, "h": 180 },
+      "spec": {
+        "width": 560,
+        "height": 260,
+        "background": null,
+        "config": {
+          "view": { "stroke": null },
+          "axis": {
+            "domainColor": "#cbd5e0",
+            "gridColor": "#f1f5f9",
+            "tickColor": "#cbd5e0",
+            "labelColor": "#64748b",
+            "labelFontSize": 11,
+            "titleColor": "#475569",
+            "titleFontSize": 12
+          },
+          "legend": {
+            "labelColor": "#1e293b",
+            "labelFontSize": 11
+          }
+        },
+        "data": {
+          "values": [
+            { "zone": "Epipelagic (0-200m)", "species_pct": 90, "depth_range": "0-200" },
+            { "zone": "Mesopelagic (200-1000m)", "species_pct": 7, "depth_range": "200-1000" },
+            { "zone": "Bathypelagic (1000-4000m)", "species_pct": 2, "depth_range": "1000-4000" },
+            { "zone": "Abyssal (4000-6000m)", "species_pct": 0.8, "depth_range": "4000-6000" },
+            { "zone": "Hadal (6000m+)", "species_pct": 0.2, "depth_range": "6000+" }
+          ]
+        },
+        "mark": {
+          "type": "bar",
+          "cornerRadiusEnd": 5
+        },
+        "encoding": {
+          "y": {
+            "field": "zone",
+            "type": "nominal",
+            "sort": { "field": "species_pct", "order": "descending" },
+            "axis": {
+              "title": null,
+              "labelLimit": 150,
+              "labelExpr": "replace(datum.label, /\\s*\\([^)]*\\)/, '')"
+            }
+          },
+          "x": {
+            "field": "species_pct",
+            "type": "quantitative",
+            "scale": { "domain": [0, 100] },
+            "axis": {
+              "title": "Share of known species (%)",
+              "tickCount": 5
+            }
+          },
+          "color": {
+            "field": "species_pct",
+            "type": "quantitative",
+            "scale": {
+              "domain": [0, 100],
+              "range": ["#245b75", "#9ce4ed"]
+            },
+            "legend": null
+          },
+          "tooltip": [
+            { "field": "zone", "type": "nominal", "title": "Zone" },
+            { "field": "species_pct", "type": "quantitative", "format": ".1f", "title": "% of Species" },
+            { "field": "depth_range", "type": "nominal", "title": "Depth Range (m)" }
+          ]
+        }
+      }
+    }
+  ]
+}

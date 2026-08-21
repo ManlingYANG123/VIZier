@@ -1,0 +1,6 @@
+code,definition,color
+general design principle,"a general visualization, usability, accessibility, perception, or interaction principle that can apply across dashboards",blue
+analytical task,"based on the question, comparison, decision, etc., the dashboard is intended to support",green
+audience,"claims about fit for users’ knowledge, goals, responsibilities, or viewing conditions",green
+author constraint,"a stated requirement or limitation, such as brand, scope, data, technical, or assignment constraints",orange
+personal preference,"the giver’s individual taste, habitual practice, or personal experience rather than a general rule",red

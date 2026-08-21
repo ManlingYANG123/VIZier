@@ -1,0 +1,458 @@
+{
+  "dashboard": {
+    "id": "workspace-performance",
+    "title": "Delivery Pulse",
+    "subtitle": "A focused operating view of momentum, capacity, and delivery risk · Q3 2026",
+    "hasKpis": true
+  },
+  "tiles": [
+    {
+      "id": "velocity-trend",
+      "label": "Sprint Velocity Trend",
+      "subtitle": "Story points completed per sprint — consistent upward trend since Q2",
+      "bounds": { "x": 40, "y": 120, "w": 390, "h": 280 },
+      "spec": {
+        "width": 560,
+        "height": 300,
+        "background": null,
+        "config": {
+          "view": { "stroke": null },
+          "axis": {
+            "domainColor": "#e5e7eb",
+            "gridColor": "#f9fafb",
+            "tickColor": "#e5e7eb",
+            "labelColor": "#6b7280",
+            "labelFontSize": 11,
+            "titleColor": "#374151",
+            "titleFontSize": 12
+          },
+          "legend": {
+            "labelColor": "#1f2937",
+            "labelFontSize": 11,
+            "titleColor": "#374151"
+          }
+        },
+        "data": {
+          "values": [
+            { "sprint": "Sprint 1", "completed": 42, "planned": 45, "team_capacity": 50 },
+            { "sprint": "Sprint 2", "completed": 48, "planned": 50, "team_capacity": 55 },
+            { "sprint": "Sprint 3", "completed": 51, "planned": 50, "team_capacity": 55 },
+            { "sprint": "Sprint 4", "completed": 58, "planned": 55, "team_capacity": 60 },
+            { "sprint": "Sprint 5", "completed": 62, "planned": 60, "team_capacity": 65 },
+            { "sprint": "Sprint 6", "completed": 67, "planned": 65, "team_capacity": 70 },
+            { "sprint": "Sprint 7", "completed": 71, "planned": 70, "team_capacity": 75 },
+            { "sprint": "Sprint 8", "completed": 75, "planned": 72, "team_capacity": 80 }
+          ]
+        },
+        "transform": [
+          { "fold": ["completed", "planned"], "as": ["metric", "value"] }
+        ],
+        "mark": {
+          "type": "line",
+          "point": { "filled": true, "size": 80 },
+          "strokeWidth": 3
+        },
+        "encoding": {
+          "x": {
+            "field": "sprint",
+            "type": "ordinal",
+            "axis": { "title": null, "labelAngle": -45 }
+          },
+          "y": {
+            "field": "value",
+            "type": "quantitative",
+            "scale": { "domain": [30, 85] },
+            "axis": { "title": "Story Points", "tickCount": 6 }
+          },
+          "color": {
+            "field": "metric",
+            "type": "nominal",
+            "scale": {
+              "domain": ["completed", "planned"],
+              "range": ["#3f8f7b", "#b5bdc9"]
+            },
+            "legend": {
+              "title": null,
+              "orient": "top",
+              "direction": "horizontal",
+              "labelExpr": "datum.label == 'completed' ? 'Completed' : 'Planned'"
+            }
+          },
+          "strokeDash": {
+            "field": "metric",
+            "scale": {
+              "domain": ["completed", "planned"],
+              "range": [[1, 0], [4, 3]]
+            },
+            "legend": null
+          },
+          "tooltip": [
+            { "field": "sprint", "type": "ordinal", "title": "Sprint" },
+            { "field": "metric", "type": "nominal", "title": "Metric" },
+            { "field": "value", "type": "quantitative", "title": "Points" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "team-capacity",
+      "label": "Team Capacity Utilization",
+      "subtitle": "Current sprint allocation — most teams operating at 85-95% capacity",
+      "bounds": { "x": 450, "y": 120, "w": 390, "h": 280 },
+      "spec": {
+        "width": 600,
+        "height": 300,
+        "background": null,
+        "config": {
+          "view": { "stroke": null },
+          "axis": {
+            "domainColor": "#e5e7eb",
+            "gridColor": "#f9fafb",
+            "tickColor": "#e5e7eb",
+            "labelColor": "#6b7280",
+            "labelFontSize": 11,
+            "titleColor": "#374151",
+            "titleFontSize": 12
+          },
+          "legend": {
+            "labelColor": "#1f2937",
+            "labelFontSize": 11
+          }
+        },
+        "data": {
+          "values": [
+            { "team": "Platform", "allocated": 68, "capacity": 75, "utilization": 91 },
+            { "team": "Frontend", "allocated": 52, "capacity": 60, "utilization": 87 },
+            { "team": "Backend", "allocated": 58, "capacity": 65, "utilization": 89 },
+            { "team": "Mobile", "allocated": 42, "capacity": 50, "utilization": 84 },
+            { "team": "Data", "allocated": 38, "capacity": 40, "utilization": 95 },
+            { "team": "QA", "allocated": 28, "capacity": 35, "utilization": 80 }
+          ]
+        },
+        "transform": [
+          { "fold": ["allocated", "capacity"], "as": ["type", "points"] }
+        ],
+        "mark": {
+          "type": "line",
+          "point": { "filled": true, "size": 70 },
+          "strokeWidth": 3
+        },
+        "encoding": {
+          "x": {
+            "field": "team",
+            "type": "nominal",
+            "axis": { "title": null, "labelAngle": 0 }
+          },
+          "y": {
+            "field": "points",
+            "type": "quantitative",
+            "axis": { "title": "Story Points", "tickCount": 5 }
+          },
+          "color": {
+            "field": "type",
+            "type": "nominal",
+            "scale": {
+              "domain": ["allocated", "capacity"],
+              "range": ["#5267c9", "#dce1ee"]
+            },
+            "legend": {
+              "title": null,
+              "orient": "top",
+              "labelExpr": "datum.label == 'allocated' ? 'Allocated' : 'Total Capacity'"
+            }
+          },
+          "tooltip": [
+            { "field": "team", "type": "nominal", "title": "Team" },
+            { "field": "type", "type": "nominal", "title": "Type" },
+            { "field": "points", "type": "quantitative", "title": "Points" },
+            { "field": "utilization", "type": "quantitative", "format": ".0f", "title": "Utilization %" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "project-health",
+      "label": "Delivery Confidence Trend",
+      "subtitle": "Share of projects expected to deliver on time — improving across six reviews",
+      "bounds": { "x": 860, "y": 120, "w": 390, "h": 280 },
+      "spec": {
+        "width": 360,
+        "height": 240,
+        "background": null,
+        "config": {
+          "view": { "stroke": null },
+          "legend": {
+            "labelColor": "#1f2937",
+            "labelFontSize": 12,
+            "symbolSize": 120
+          }
+        },
+        "data": {
+          "values": [
+            { "review": "R1", "confidence": 61, "target": 75 },
+            { "review": "R2", "confidence": 64, "target": 75 },
+            { "review": "R3", "confidence": 68, "target": 75 },
+            { "review": "R4", "confidence": 66, "target": 75 },
+            { "review": "R5", "confidence": 72, "target": 75 },
+            { "review": "R6", "confidence": 76, "target": 75 }
+          ]
+        },
+        "transform": [
+          { "fold": ["confidence", "target"], "as": ["metric", "value"] }
+        ],
+        "mark": {
+          "type": "line",
+          "point": { "filled": true, "size": 70 },
+          "strokeWidth": 3
+        },
+        "encoding": {
+          "x": {
+            "field": "review",
+            "type": "ordinal",
+            "axis": { "title": null }
+          },
+          "y": {
+            "field": "value",
+            "type": "quantitative",
+            "scale": { "domain": [55, 82] },
+            "axis": { "title": "On-time confidence %", "tickCount": 5 }
+          },
+          "color": {
+            "field": "metric",
+            "type": "nominal",
+            "scale": {
+              "domain": ["confidence", "target"],
+              "range": ["#5267c9", "#b5bdc9"]
+            },
+            "legend": {
+              "title": null,
+              "orient": "top",
+              "labelExpr": "datum.label == 'confidence' ? 'Confidence' : 'Target'"
+            }
+          },
+          "strokeDash": {
+            "field": "metric",
+            "scale": { "domain": ["confidence", "target"], "range": [[1, 0], [4, 3]] },
+            "legend": null
+          },
+          "tooltip": [
+            { "field": "review", "type": "ordinal", "title": "Review" },
+            { "field": "metric", "type": "nominal", "title": "Metric" },
+            { "field": "value", "type": "quantitative", "title": "Percent" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "bug-backlog",
+      "label": "Bug Backlog Trend",
+      "subtitle": "Open bugs by severity — P0/P1 count reduced by 66.7% this quarter",
+      "bounds": { "x": 40, "y": 430, "w": 390, "h": 280 },
+      "spec": {
+        "width": 380,
+        "height": 240,
+        "background": null,
+        "config": {
+          "view": { "stroke": null },
+          "axis": {
+            "domainColor": "#e5e7eb",
+            "gridColor": "#f9fafb",
+            "tickColor": "#e5e7eb",
+            "labelColor": "#6b7280",
+            "labelFontSize": 11,
+            "titleColor": "#374151",
+            "titleFontSize": 12
+          },
+          "legend": {
+            "labelColor": "#1f2937",
+            "labelFontSize": 11
+          }
+        },
+        "data": {
+          "values": [
+            { "week": "W1", "P0": 3, "P1": 12, "P2": 45, "P3": 78 },
+            { "week": "W2", "P0": 2, "P1": 11, "P2": 48, "P3": 82 },
+            { "week": "W3", "P0": 2, "P1": 9, "P2": 43, "P3": 79 },
+            { "week": "W4", "P0": 1, "P1": 8, "P2": 39, "P3": 75 },
+            { "week": "W5", "P0": 1, "P1": 7, "P2": 41, "P3": 73 },
+            { "week": "W6", "P0": 1, "P1": 6, "P2": 38, "P3": 70 },
+            { "week": "W7", "P0": 0, "P1": 5, "P2": 35, "P3": 68 }
+          ]
+        },
+        "transform": [
+          { "fold": ["P0", "P1", "P2", "P3"], "as": ["severity", "count"] }
+        ],
+        "mark": {
+          "type": "bar",
+          "cornerRadiusTopLeft": 2,
+          "cornerRadiusTopRight": 2
+        },
+        "encoding": {
+          "x": {
+            "field": "week",
+            "type": "ordinal",
+            "axis": { "title": null }
+          },
+          "y": {
+            "field": "count",
+            "type": "quantitative",
+            "stack": "zero",
+            "axis": { "title": "Open Bugs", "tickCount": 5 }
+          },
+          "color": {
+            "field": "severity",
+            "type": "nominal",
+            "scale": {
+              "domain": ["P0", "P1", "P2", "P3"],
+              "range": ["#c9505c", "#dfa34d", "#5877bf", "#aeb7c5"]
+            },
+            "legend": {
+              "title": "Priority",
+              "orient": "top",
+              "direction": "horizontal"
+            }
+          },
+          "tooltip": [
+            { "field": "week", "type": "ordinal", "title": "Week" },
+            { "field": "severity", "type": "nominal", "title": "Priority" },
+            { "field": "count", "type": "quantitative", "title": "Count" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "deployment-frequency",
+      "label": "Deployment Frequency",
+      "subtitle": "Production deployments per week — averaging 4.2 deployments/week in Q3",
+      "bounds": { "x": 450, "y": 430, "w": 390, "h": 280 },
+      "spec": {
+        "width": 380,
+        "height": 240,
+        "background": null,
+        "config": {
+          "view": { "stroke": null },
+          "axis": {
+            "domainColor": "#e5e7eb",
+            "gridColor": "#f9fafb",
+            "tickColor": "#e5e7eb",
+            "labelColor": "#6b7280",
+            "labelFontSize": 11,
+            "titleColor": "#374151",
+            "titleFontSize": 12
+          },
+          "legend": {
+            "labelColor": "#1f2937",
+            "labelFontSize": 11
+          }
+        },
+        "data": {
+          "values": [
+            { "week": "W1", "deployments": 3, "success_rate": 100 },
+            { "week": "W2", "deployments": 4, "success_rate": 100 },
+            { "week": "W3", "deployments": 5, "success_rate": 80 },
+            { "week": "W4", "deployments": 4, "success_rate": 100 },
+            { "week": "W5", "deployments": 6, "success_rate": 83 },
+            { "week": "W6", "deployments": 5, "success_rate": 100 },
+            { "week": "W7", "deployments": 4, "success_rate": 100 },
+            { "week": "W8", "deployments": 5, "success_rate": 100 }
+          ]
+        },
+        "mark": {
+          "type": "bar",
+          "cornerRadiusEnd": 4,
+          "width": { "band": 0.6 }
+        },
+        "encoding": {
+          "x": {
+            "field": "week",
+            "type": "ordinal",
+            "axis": { "title": null }
+          },
+          "y": {
+            "field": "deployments",
+            "type": "quantitative",
+            "axis": { "title": "Deployments", "tickCount": 6 }
+          },
+          "color": {
+            "field": "success_rate",
+            "type": "quantitative",
+            "scale": {
+              "domain": [70, 100],
+              "range": ["#d8a64f", "#3f8f7b"]
+            },
+            "legend": {
+              "title": "Success Rate %",
+              "orient": "top",
+              "direction": "horizontal",
+              "gradientLength": 100
+            }
+          },
+          "tooltip": [
+            { "field": "week", "type": "ordinal", "title": "Week" },
+            { "field": "deployments", "type": "quantitative", "title": "Deployments" },
+            { "field": "success_rate", "type": "quantitative", "format": ".0f", "title": "Success Rate %" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "cycle-time",
+      "label": "Median Cycle Time by Team",
+      "subtitle": "Days from first commit to production — Platform has the longest delivery path",
+      "bounds": { "x": 860, "y": 430, "w": 390, "h": 280 },
+      "spec": {
+        "width": 380,
+        "height": 240,
+        "background": null,
+        "config": {
+          "view": { "stroke": null },
+          "axis": {
+            "domainColor": "#e5e7eb",
+            "gridColor": "#f9fafb",
+            "tickColor": "#e5e7eb",
+            "labelColor": "#6b7280",
+            "labelFontSize": 11,
+            "titleColor": "#374151",
+            "titleFontSize": 12
+          }
+        },
+        "data": {
+          "values": [
+            { "team": "Platform", "days": 8.4, "target": 6 },
+            { "team": "Data", "days": 7.1, "target": 6 },
+            { "team": "Backend", "days": 5.8, "target": 6 },
+            { "team": "Mobile", "days": 5.2, "target": 6 },
+            { "team": "Frontend", "days": 4.6, "target": 6 },
+            { "team": "QA", "days": 3.9, "target": 6 }
+          ]
+        },
+        "mark": {
+          "type": "bar",
+          "cornerRadiusEnd": 4
+        },
+        "encoding": {
+          "y": {
+            "field": "team",
+            "type": "nominal",
+            "sort": "-x",
+            "axis": { "title": null }
+          },
+          "x": {
+            "field": "days",
+            "type": "quantitative",
+            "axis": { "title": "Median days", "tickCount": 5 }
+          },
+          "color": {
+            "condition": { "test": "datum.days > datum.target", "value": "#d8a64f" },
+            "value": "#3f8f7b"
+          },
+          "tooltip": [
+            { "field": "team", "type": "nominal", "title": "Team" },
+            { "field": "days", "type": "quantitative", "format": ".1f", "title": "Median days" },
+            { "field": "target", "type": "quantitative", "title": "Target days" }
+          ]
+        }
+      }
+    }
+  ]
+}

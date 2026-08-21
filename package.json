@@ -1,0 +1,27 @@
+{
+  "name": "dashboard-critique-studio-v2",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:ui": "vite --port 8082 --strictPort",
+    "dev:api": "node re_api/src/server.ts",
+    "build": "vite build",
+    "start": "node re_api/src/server.ts",
+    "test": "node --test tests/*.test.js",
+    "preview": "vite preview",
+    "deploy-heroku": "bash scripts/deploy-heroku.sh"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^4.10.38",
+    "vega": "^6.2.0",
+    "vega-embed": "^7.1.0",
+    "vega-lite": "^6.4.3",
+    "vite": "^8.1.4"
+  },
+  "devDependencies": {}
+}

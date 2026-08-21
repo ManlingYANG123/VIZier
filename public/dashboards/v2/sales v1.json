@@ -1,0 +1,310 @@
+{
+  "dashboard": {
+    "id": "sales-dashboard-2023",
+    "title": "Sales Dashboard | 2023",
+    "subtitle": "Subcategory performance and weekly trends · use the controls to focus the analysis",
+    "hasKpis": false,
+    "filters": [
+      {
+        "id": "subcategory-filter",
+        "label": "Subcategory",
+        "kind": "category",
+        "field": "SubCategory",
+        "targets": ["sales-profit-by-subcategory"],
+        "options": ["Phones", "Chairs", "Binders", "Storage", "Copiers", "Tables", "Accessories", "Machines", "Appliances", "Bookcases", "Furnishings", "Paper", "Supplies", "Art", "Labels", "Envelopes", "Fasteners"],
+        "value": null,
+        "wired": true,
+        "variant": "select",
+        "placement": "floating",
+        "container": "panel",
+        "tone": "accent",
+        "accent": "#2f5597",
+        "position": { "x": 28, "y": 91, "w": 280 }
+      },
+      {
+        "id": "week-threshold",
+        "label": "Through week",
+        "kind": "range",
+        "field": "Week",
+        "targets": ["sales-profit-trends-over-time"],
+        "min": 1,
+        "max": 51,
+        "step": 1,
+        "value": 51,
+        "wired": true,
+        "variant": "slider",
+        "placement": "floating",
+        "container": "ruled",
+        "tone": "accent",
+        "accent": "#d98c00",
+        "position": { "x": 612, "y": 91, "w": 300 }
+      }
+    ]
+  },
+  "tiles": [
+    {
+      "id": "sales-profit-by-subcategory",
+      "label": "Sales and Profit by Subcategory",
+      "subtitle": "2023 Sales vs. 2022 Sales & 2023 Profit / Loss per Subcategory — click a row to highlight it",
+      "bounds": {
+        "x": 28,
+        "y": 144,
+        "w": 560,
+        "h": 600
+      },
+      "spec": {
+        "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+        "config": {
+          "font": "'Courier New', Courier, monospace",
+          "view": { "stroke": null }
+        },
+        "data": {
+          "values": [
+            {"SubCategory": "Phones", "Sales2023": 109301, "Sales2022": 91800, "Profit2023": 12841, "NegativeGrowth": false, "SortOrder": 1},
+            {"SubCategory": "Chairs", "Sales2023": 101882, "Sales2022": 88400, "Profit2023": 7684, "NegativeGrowth": false, "SortOrder": 2},
+            {"SubCategory": "Binders", "Sales2023": 72810, "Sales2022": 62100, "Profit2023": 7830, "NegativeGrowth": false, "SortOrder": 3},
+            {"SubCategory": "Storage", "Sales2023": 70250, "Sales2022": 61300, "Profit2023": 7419, "NegativeGrowth": false, "SortOrder": 4},
+            {"SubCategory": "Copiers", "Sales2023": 62899, "Sales2022": 49200, "Profit2023": 25051, "NegativeGrowth": false, "SortOrder": 5},
+            {"SubCategory": "Tables", "Sales2023": 60894, "Sales2022": 51200, "Profit2023": -8141, "NegativeGrowth": false, "SortOrder": 6},
+            {"SubCategory": "Accessories", "Sales2023": 59935, "Sales2022": 50400, "Profit2023": 15672, "NegativeGrowth": false, "SortOrder": 7},
+            {"SubCategory": "Machines", "Sales2023": 43546, "Sales2022": 66220, "Profit2023": -2869, "NegativeGrowth": true, "SortOrder": 8},
+            {"SubCategory": "Appliances", "Sales2023": 43425, "Sales2022": 31500, "Profit2023": 8236, "NegativeGrowth": false, "SortOrder": 9},
+            {"SubCategory": "Bookcases", "Sales2023": 30184, "Sales2022": 26100, "Profit2023": -584, "NegativeGrowth": false, "SortOrder": 10},
+            {"SubCategory": "Furnishings", "Sales2023": 28971, "Sales2022": 24200, "Profit2023": 4295, "NegativeGrowth": false, "SortOrder": 11},
+            {"SubCategory": "Paper", "Sales2023": 27848, "Sales2022": 22100, "Profit2023": 12238, "NegativeGrowth": false, "SortOrder": 12},
+            {"SubCategory": "Supplies", "Sales2023": 16139, "Sales2022": 12800, "Profit2023": -1190, "NegativeGrowth": false, "SortOrder": 13},
+            {"SubCategory": "Art", "Sales2023": 8831, "Sales2022": 7200, "Profit2023": 2228, "NegativeGrowth": false, "SortOrder": 14},
+            {"SubCategory": "Labels", "Sales2023": 3371, "Sales2022": 2900, "Profit2023": 1555, "NegativeGrowth": false, "SortOrder": 15},
+            {"SubCategory": "Envelopes", "Sales2023": 3370, "Sales2022": 4586, "Profit2023": 1471, "NegativeGrowth": true, "SortOrder": 16},
+            {"SubCategory": "Fasteners", "Sales2023": 932, "Sales2022": 1003, "Profit2023": 305, "NegativeGrowth": true, "SortOrder": 17}
+          ]
+        },
+        "transform": [
+          {"calculate": "datum.Profit2023 >= 0 ? 'Profit' : 'Loss'", "as": "ProfitStatus"}
+        ],
+        "params": [
+          {"name": "subcat_sel", "select": {"type": "point", "fields": ["SubCategory"], "on": "click", "clear": "dblclick"}}
+        ],
+        "hconcat": [
+          {
+            "width": 300,
+            "height": 520,
+            "title": {"text": "2023 Sales", "fontSize": 11, "color": "#888888", "anchor": "start"},
+            "mark": {"type": "bar", "color": "#212121", "height": 14, "cornerRadiusEnd": 2, "cursor": "pointer"},
+            "encoding": {
+              "y": {
+                "field": "SubCategory",
+                "type": "ordinal",
+                "sort": {"field": "SortOrder"},
+                "axis": {"domain": false, "ticks": false, "labelFontSize": 11, "title": null}
+              },
+              "x": {"field": "Sales2023", "type": "quantitative", "axis": {"title": null, "format": "$.0s", "grid": false}},
+              "opacity": {"condition": {"param": "subcat_sel", "value": 1}, "value": 0.3},
+              "tooltip": [
+                {"field": "SubCategory", "type": "nominal", "title": "Subcategory"},
+                {"field": "Sales2023", "type": "quantitative", "format": "$,", "title": "2023 Sales"},
+                {"field": "Sales2022", "type": "quantitative", "format": "$,", "title": "2022 Sales"}
+              ]
+            }
+          },
+          {
+            "width": 200,
+            "height": 520,
+            "title": {"text": "2023 Profit / Loss", "fontSize": 11, "color": "#888888", "anchor": "start"},
+            "mark": {"type": "bar", "height": 14, "cornerRadiusEnd": 2, "cursor": "pointer"},
+            "encoding": {
+              "y": {
+                "field": "SubCategory",
+                "type": "ordinal",
+                "sort": {"field": "SortOrder"},
+                "axis": null
+              },
+              "x": {
+                "field": "Profit2023",
+                "type": "quantitative",
+                "axis": {"title": null, "format": "$.0s", "grid": false}
+              },
+              "color": {
+                "field": "ProfitStatus",
+                "type": "nominal",
+                "scale": {
+                  "domain": ["Profit", "Loss"],
+                  "range": ["#00a2d3", "#ef5323"]
+                },
+                "legend": null
+              },
+              "opacity": {"condition": {"param": "subcat_sel", "value": 1}, "value": 0.3},
+              "tooltip": [
+                {"field": "SubCategory", "type": "nominal", "title": "Subcategory"},
+                {"field": "Profit2023", "type": "quantitative", "format": "$,", "title": "2023 Profit"}
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "sales-profit-trends-over-time",
+      "label": "Sales & Profit Trends over Time",
+      "subtitle": "2023 Weekly Sales ($14K avg) & Weekly Profit ($2K avg) by Week Number",
+      "bounds": {
+        "x": 612,
+        "y": 144,
+        "w": 560,
+        "h": 600
+      },
+      "spec": {
+        "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+        "data": {
+          "values": [
+            {"Week": 1, "Sales": 9200, "Profit": 1200, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 2, "Sales": 7500, "Profit": -1500, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 3, "Sales": 13800, "Profit": 3800, "SalesStatus": "Below", "ProfitStatus": "Above"},
+            {"Week": 4, "Sales": 9500, "Profit": 2800, "SalesStatus": "Below", "ProfitStatus": "Above"},
+            {"Week": 5, "Sales": 6000, "Profit": 900, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 6, "Sales": 5200, "Profit": 300, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 7, "Sales": 5500, "Profit": 700, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 8, "Sales": 4200, "Profit": 1200, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 9, "Sales": 6500, "Profit": 1100, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 10, "Sales": 6800, "Profit": 900, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 11, "Sales": 8800, "Profit": 1800, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 12, "Sales": 26100, "Profit": 8500, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 13, "Sales": 19400, "Profit": 3200, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 14, "Sales": 10200, "Profit": 2400, "SalesStatus": "Below", "ProfitStatus": "Above"},
+            {"Week": 15, "Sales": 5100, "Profit": 1100, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 16, "Sales": 8500, "Profit": -3800, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 17, "Sales": 5200, "Profit": -4100, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 18, "Sales": 12100, "Profit": 500, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 19, "Sales": 11800, "Profit": 2600, "SalesStatus": "Below", "ProfitStatus": "Above"},
+            {"Week": 20, "Sales": 14500, "Profit": 3100, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 21, "Sales": 4200, "Profit": 800, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 22, "Sales": 11100, "Profit": 2100, "SalesStatus": "Below", "ProfitStatus": "Above"},
+            {"Week": 23, "Sales": 6400, "Profit": 600, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 24, "Sales": 15100, "Profit": 3100, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 25, "Sales": 6500, "Profit": 1800, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 26, "Sales": 17200, "Profit": 2400, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 27, "Sales": 11800, "Profit": 2100, "SalesStatus": "Below", "ProfitStatus": "Above"},
+            {"Week": 28, "Sales": 9900, "Profit": 1000, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 29, "Sales": 11200, "Profit": 1000, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 30, "Sales": 9800, "Profit": 2500, "SalesStatus": "Below", "ProfitStatus": "Above"},
+            {"Week": 31, "Sales": 5100, "Profit": 800, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 32, "Sales": 11200, "Profit": 2800, "SalesStatus": "Below", "ProfitStatus": "Above"},
+            {"Week": 33, "Sales": 22100, "Profit": 1500, "SalesStatus": "Above", "ProfitStatus": "Below"},
+            {"Week": 34, "Sales": 15500, "Profit": 2800, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 35, "Sales": 21800, "Profit": 5100, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 36, "Sales": 17500, "Profit": 1100, "SalesStatus": "Above", "ProfitStatus": "Below"},
+            {"Week": 37, "Sales": 21200, "Profit": 2400, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 38, "Sales": 26200, "Profit": 3100, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 39, "Sales": 12500, "Profit": 1800, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 40, "Sales": 22100, "Profit": 2900, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 41, "Sales": 16500, "Profit": 2700, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 42, "Sales": 13200, "Profit": -1500, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 43, "Sales": 21500, "Profit": 4800, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 44, "Sales": 29200, "Profit": 4800, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 45, "Sales": 19800, "Profit": -1400, "SalesStatus": "Above", "ProfitStatus": "Below"},
+            {"Week": 46, "Sales": 31200, "Profit": 6200, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 47, "Sales": 22500, "Profit": 3800, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 48, "Sales": 35800, "Profit": 3100, "SalesStatus": "Above", "ProfitStatus": "Above"},
+            {"Week": 49, "Sales": 21500, "Profit": 800, "SalesStatus": "Above", "ProfitStatus": "Below"},
+            {"Week": 50, "Sales": 12200, "Profit": 1100, "SalesStatus": "Below", "ProfitStatus": "Below"},
+            {"Week": 51, "Sales": 19500, "Profit": 3100, "SalesStatus": "Above", "ProfitStatus": "Above"}
+          ]
+        },
+        "vconcat": [
+          {
+            "width": 480,
+            "height": 240,
+            "layer": [
+              {
+                "mark": {"type": "line", "interpolate": "step-after", "strokeWidth": 2},
+                "encoding": {
+                  "x": {
+                    "field": "Week",
+                    "type": "quantitative",
+                    "axis": {"domain": true, "ticks": true, "grid": false, "title": null, "labelColor": "#777777"}
+                  },
+                  "y": {
+                    "field": "Sales",
+                    "type": "quantitative",
+                    "axis": {
+                      "title": "Sales",
+                      "titleColor": "#555555",
+                      "format": "$.0s",
+                      "values": [0, 10000, 20000, 30000],
+                      "domain": false,
+                      "grid": true,
+                      "gridColor": "#f0f0f0"
+                    }
+                  },
+                  "color": {
+                    "field": "SalesStatus",
+                    "type": "nominal",
+                    "scale": {
+                      "domain": ["Above", "Below"],
+                      "range": ["#00a2d3", "#ef5323"]
+                    },
+                    "legend": null
+                  }
+                }
+              },
+              {
+                "mark": {"type": "rule", "strokeDash": [4, 4], "color": "#777777", "size": 1.2},
+                "encoding": {"y": {"datum": 14100}}
+              },
+              {
+                "mark": {"type": "text", "align": "left", "dx": -230, "dy": -8, "fontSize": 11, "fill": "#333333"},
+                "encoding": {"text": {"value": "Avg. $14K"}}
+              }
+            ]
+          },
+          {
+            "width": 480,
+            "height": 240,
+            "layer": [
+              {
+                "mark": {"type": "line", "interpolate": "step-after", "strokeWidth": 2},
+                "encoding": {
+                  "x": {
+                    "field": "Week",
+                    "type": "quantitative",
+                    "axis": {"domain": true, "ticks": true, "grid": false, "title": null, "labelColor": "#777777", "values": [0, 10, 20, 30, 40, 50]}
+                  },
+                  "y": {
+                    "field": "Profit",
+                    "type": "quantitative",
+                    "axis": {
+                      "title": "Profit",
+                      "titleColor": "#555555",
+                      "format": "$.0s",
+                      "values": [0, 5000],
+                      "domain": false,
+                      "grid": true,
+                      "gridColor": "#f0f0f0"
+                    }
+                  },
+                  "color": {
+                    "field": "ProfitStatus",
+                    "type": "nominal",
+                    "scale": {
+                      "domain": ["Above", "Below"],
+                      "range": ["#00a2d3", "#ef5323"]
+                    },
+                    "legend": null
+                  }
+                }
+              },
+              {
+                "mark": {"type": "rule", "strokeDash": [4, 4], "color": "#777777", "size": 1.2},
+                "encoding": {"y": {"datum": 1800}}
+              },
+              {
+                "mark": {"type": "text", "align": "left", "dx": -230, "dy": -8, "fontSize": 11, "fill": "#333333"},
+                "encoding": {"text": {"value": "Avg. $2K"}}
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

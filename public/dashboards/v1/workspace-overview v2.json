@@ -1,0 +1,248 @@
+{
+  "dashboard": {
+    "id": "workspace-overview",
+    "title": "Workspace Overview",
+    "subtitle": "",
+    "hasKpis": false
+  },
+  "tiles": [
+    {
+      "id": "task-velocity",
+      "label": "Task Velocity",
+      "subtitle": "Monthly completed tasks vs. team target — team is trending above target since April.",
+      "bounds": { "x": 28, "y": 96, "w": 508, "h": 258 },
+      "spec": {
+        "background": null,
+        "autosize": { "type": "fit", "contains": "padding", "resize": false },
+        "config": {
+          "view": { "stroke": null },
+          "axis": {
+            "domain": false,
+            "tickSize": 0,
+            "labelColor": "#8b9ab2",
+            "labelFont": "ui-monospace",
+            "labelFontSize": 11,
+            "title": null,
+            "gridColor": "#edf0f5"
+          },
+          "legend": { "labelColor": "#526078", "labelFontSize": 11, "title": null, "symbolSize": 70 }
+        },
+        "data": {
+          "values": [
+            { "month": "Jan", "completed": 14, "target": 18, "department": "All" },
+            { "month": "Feb", "completed": 19, "target": 18, "department": "All" },
+            { "month": "Mar", "completed": 16, "target": 20, "department": "All" },
+            { "month": "Apr", "completed": 23, "target": 20, "department": "All" },
+            { "month": "May", "completed": 28, "target": 22, "department": "All" },
+            { "month": "Jun", "completed": 31, "target": 25, "department": "All" },
+            { "month": "Jul", "completed": 27, "target": 25, "department": "All" },
+            { "month": "Jan", "completed": 3, "target": 3, "department": "Design" },
+            { "month": "Feb", "completed": 3, "target": 3, "department": "Design" },
+            { "month": "Mar", "completed": 3, "target": 4, "department": "Design" },
+            { "month": "Apr", "completed": 4, "target": 4, "department": "Design" },
+            { "month": "May", "completed": 5, "target": 4, "department": "Design" },
+            { "month": "Jun", "completed": 6, "target": 5, "department": "Design" },
+            { "month": "Jul", "completed": 5, "target": 5, "department": "Design" },
+            { "month": "Jan", "completed": 5, "target": 6, "department": "Eng" },
+            { "month": "Feb", "completed": 6, "target": 6, "department": "Eng" },
+            { "month": "Mar", "completed": 5, "target": 7, "department": "Eng" },
+            { "month": "Apr", "completed": 8, "target": 7, "department": "Eng" },
+            { "month": "May", "completed": 10, "target": 7, "department": "Eng" },
+            { "month": "Jun", "completed": 11, "target": 9, "department": "Eng" },
+            { "month": "Jul", "completed": 9, "target": 9, "department": "Eng" },
+            { "month": "Jan", "completed": 2, "target": 3, "department": "Research" },
+            { "month": "Feb", "completed": 3, "target": 3, "department": "Research" },
+            { "month": "Mar", "completed": 2, "target": 3, "department": "Research" },
+            { "month": "Apr", "completed": 3, "target": 3, "department": "Research" },
+            { "month": "May", "completed": 4, "target": 3, "department": "Research" },
+            { "month": "Jun", "completed": 4, "target": 4, "department": "Research" },
+            { "month": "Jul", "completed": 4, "target": 4, "department": "Research" },
+            { "month": "Jan", "completed": 3, "target": 3, "department": "QA" },
+            { "month": "Feb", "completed": 3, "target": 3, "department": "QA" },
+            { "month": "Mar", "completed": 3, "target": 4, "department": "QA" },
+            { "month": "Apr", "completed": 4, "target": 4, "department": "QA" },
+            { "month": "May", "completed": 5, "target": 4, "department": "QA" },
+            { "month": "Jun", "completed": 6, "target": 5, "department": "QA" },
+            { "month": "Jul", "completed": 5, "target": 5, "department": "QA" },
+            { "month": "Jan", "completed": 2, "target": 3, "department": "Ops" },
+            { "month": "Feb", "completed": 3, "target": 3, "department": "Ops" },
+            { "month": "Mar", "completed": 3, "target": 3, "department": "Ops" },
+            { "month": "Apr", "completed": 4, "target": 3, "department": "Ops" },
+            { "month": "May", "completed": 4, "target": 4, "department": "Ops" },
+            { "month": "Jun", "completed": 5, "target": 4, "department": "Ops" },
+            { "month": "Jul", "completed": 4, "target": 4, "department": "Ops" }
+          ]
+        },
+        "transform": [
+          { "filter": "datum.department === 'All'" },
+          { "fold": ["completed", "target"], "as": ["series", "value"] }
+        ],
+        "mark": { "type": "line", "point": false, "strokeWidth": 2 },
+        "encoding": {
+          "x": { "field": "month", "type": "ordinal", "sort": null },
+          "y": { "field": "value", "type": "quantitative" },
+          "color": {
+            "field": "series",
+            "type": "nominal",
+            "scale": { "range": ["#1f3b64", "#aeb9ca"] },
+            "legend": { "orient": "top-right" }
+          },
+          "strokeDash": {
+            "field": "series",
+            "scale": { "domain": ["completed", "target"], "range": [[1, 0], [5, 4]] },
+            "legend": null
+          }
+        }
+      }
+    },
+    {
+      "id": "department-tasks",
+      "label": "Tasks by Department",
+      "subtitle": "Engineering carries the largest share; Ops and QA are under-resourced relative to open work.",
+      "bounds": { "x": 564, "y": 96, "w": 508, "h": 258 },
+      "spec": {
+        "background": null,
+        "autosize": { "type": "fit", "contains": "padding", "resize": false },
+        "config": {
+          "view": { "stroke": null },
+          "axis": {
+            "domain": false,
+            "tickSize": 0,
+            "labelColor": "#8b9ab2",
+            "labelFont": "ui-monospace",
+            "labelFontSize": 11,
+            "title": null,
+            "gridColor": "#edf0f5"
+          },
+          "legend": { "labelColor": "#526078", "labelFontSize": 11, "title": null, "symbolSize": 70 }
+        },
+        "data": {
+          "values": [
+            { "department": "Design", "tasks": 34 },
+            { "department": "Eng", "tasks": 58 },
+            { "department": "Research", "tasks": 21 },
+            { "department": "QA", "tasks": 17 },
+            { "department": "Ops", "tasks": 12 }
+          ]
+        },
+        "mark": { "type": "bar", "cornerRadiusTopLeft": 4, "cornerRadiusTopRight": 4, "color": "#23446f" },
+        "encoding": {
+          "x": { "field": "department", "type": "nominal", "sort": null },
+          "y": { "field": "tasks", "type": "quantitative" },
+          "tooltip": [
+            { "field": "department", "type": "nominal" },
+            { "field": "tasks", "type": "quantitative" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "sprint-burndown",
+      "label": "Sprint Burndown",
+      "subtitle": "Remaining open tasks across the current 7-week sprint — on pace for full clearance by W8.",
+      "bounds": { "x": 28, "y": 400, "w": 508, "h": 272 },
+      "spec": {
+        "background": null,
+        "autosize": { "type": "fit", "contains": "padding", "resize": false },
+        "config": {
+          "view": { "stroke": null },
+          "axis": {
+            "domain": false,
+            "tickSize": 0,
+            "labelColor": "#8b9ab2",
+            "labelFont": "ui-monospace",
+            "labelFontSize": 11,
+            "title": null,
+            "gridColor": "#edf0f5"
+          },
+          "legend": { "labelColor": "#526078", "labelFontSize": 11, "title": null, "symbolSize": 70 }
+        },
+        "data": {
+          "values": [
+            { "week": "W1", "remaining": 142 },
+            { "week": "W2", "remaining": 118 },
+            { "week": "W3", "remaining": 97 },
+            { "week": "W4", "remaining": 81 },
+            { "week": "W5", "remaining": 60 },
+            { "week": "W6", "remaining": 44 },
+            { "week": "W7", "remaining": 31 }
+          ]
+        },
+        "mark": { "type": "line", "point": { "filled": true, "size": 55 }, "strokeWidth": 2.4, "color": "#cc5f17" },
+        "encoding": {
+          "x": { "field": "week", "type": "ordinal", "sort": null },
+          "y": { "field": "remaining", "type": "quantitative" },
+          "tooltip": [
+            { "field": "week", "type": "ordinal" },
+            { "field": "remaining", "type": "quantitative" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "project-status",
+      "label": "Project Status Distribution",
+      "subtitle": "Half of all projects are on track; two need immediate attention before month-end deadlines.",
+      "bounds": { "x": 564, "y": 400, "w": 508, "h": 272 },
+      "spec": {
+        "background": null,
+        "autosize": { "type": "fit", "contains": "padding", "resize": false },
+        "config": {
+          "view": { "stroke": null },
+          "axis": {
+            "domain": false,
+            "tickSize": 0,
+            "labelColor": "#8b9ab2",
+            "labelFont": "ui-monospace",
+            "labelFontSize": 11,
+            "title": null,
+            "gridColor": "#edf0f5"
+          },
+          "legend": { "labelColor": "#526078", "labelFontSize": 11, "title": null, "symbolSize": 70 }
+        },
+        "data": {
+          "values": [
+            { "status": "On Track", "value": 11, "department": "All" },
+            { "status": "At Risk", "value": 5, "department": "All" },
+            { "status": "Blocked", "value": 3, "department": "All" },
+            { "status": "Completed", "value": 6, "department": "All" },
+            { "status": "On Track", "value": 2, "department": "Design" },
+            { "status": "At Risk", "value": 1, "department": "Design" },
+            { "status": "Completed", "value": 1, "department": "Design" },
+            { "status": "On Track", "value": 5, "department": "Eng" },
+            { "status": "At Risk", "value": 2, "department": "Eng" },
+            { "status": "Blocked", "value": 1, "department": "Eng" },
+            { "status": "Completed", "value": 2, "department": "Eng" },
+            { "status": "On Track", "value": 2, "department": "Research" },
+            { "status": "At Risk", "value": 1, "department": "Research" },
+            { "status": "On Track", "value": 1, "department": "QA" },
+            { "status": "At Risk", "value": 1, "department": "QA" },
+            { "status": "Blocked", "value": 1, "department": "QA" },
+            { "status": "On Track", "value": 1, "department": "Ops" },
+            { "status": "Blocked", "value": 1, "department": "Ops" }
+          ]
+        },
+        "transform": [
+          { "filter": "datum.department === 'All'" }
+        ],
+        "mark": { "type": "arc", "innerRadius": 48, "outerRadius": 82, "padAngle": 0.025, "cornerRadius": 2 },
+        "encoding": {
+          "theta": { "field": "value", "type": "quantitative" },
+          "color": {
+            "field": "status",
+            "type": "nominal",
+            "scale": {
+              "domain": ["On Track", "At Risk", "Blocked", "Completed"],
+              "range": ["#2e7356", "#dc7900", "#f14242", "#95a5bd"]
+            },
+            "legend": { "orient": "right" }
+          },
+          "tooltip": [
+            { "field": "status", "type": "nominal" },
+            { "field": "value", "type": "quantitative" }
+          ]
+        }
+      }
+    }
+  ]
+}

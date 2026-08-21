@@ -1,0 +1,24 @@
+code,definition,color
+"unpolished | poorly done",needs improvement,orange
+"cluttered | crowded",Too many elements or concepts,orange
+"inconsistent | mismatched",Breaks patterns,orange
+not purposeful,unclear rationale for choices,orange
+breaks established principles,"accessibility, gestalt, usability...",orange
+misaligned or disorganized,Not neat enough,orange
+
+"missing | absent | unsupported","not available, not present, but should",green
+incomplete,something is missing,green
+"obscured | not discoverable","available, but hard to find",green
+"unclear | ambiguous","message present but vague, confusing",green
+misleading,sends a different message than intended,green
+"incorrect | invalid",message or execution is wrong,green
+conflicting,two or more elements coming in contradiction,green
+unfamiliar,hard to relate to,green
+"overly complex | difficult",cognitively challenging to understand or navigate,green
+"slow, time-consuming","doable, but takes time and effort",green
+
+limited affordance,poor coverage of capabilities,blue
+too granular,too much detail,blue
+not granular enough,not detailed enough,blue
+not significant | irrelevant,focus on unimportant facets,blue
+distracting,elements take attention away from what matters,blue

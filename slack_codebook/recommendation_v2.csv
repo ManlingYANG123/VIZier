@@ -1,0 +1,85 @@
+code,operation,code_new,definition,notes/rationale
+chart:support perception,,,"make marks, axes, labels, and other chart elements directly legible at the needed level of detail",
+chart:use suitable shape,merge to,chart:choose suitable encoding,pick a shape or aspect ratio that fits the comparison,"Shape is part of encoding. Often coded together (148.2.9, 1.3.3) -> merge."
+chart:keep encoding consistent,,,use the same visual encoding for the same idea,
+chart:differentiate views,,,make different views or meanings easy to tell apart,
+chart:choose suitable encoding,,,use a chart form that fits the thing being shown,
+,,,,
+color:use color purposefully,,,"use color because it helps, not just because it is available"
+color:keep color consistent,,,reuse colors for the same attributes across the dashboard
+color:encode and distinguish meaning,,,"use color to carry meaning and distinguish categories, scales, or status clearly"
+,,,,
+layout:show relationships among views,merge to,layout:organize related views,"use placement, coordination, or alignment to show how views connect",Almost same as organize related views. Placement/coordination vs. grouping is hard to separate.
+layout:organize related views,,,group or integrate related views so their connection is easy to understand,
+layout:maintain reading order,,,support a natural reading flow,
+layout:fit page and space,,,choose page structure and fit available screen space without awkward crowding
+layout:organize clearly,merge to,layout:organize related views,make things easy to find on the screen,"148.2.2 coded as both. ""easy to find"" vs. ""group related views"" is too close."
+layout:reduce layout complexity,,,keep the layout simple and remove unnecessary repeated views
+layout:prioritize component placement,,,"place and size components according to role, importance, hierarchy, and purpose",""
+layout:support comparison,,,place comparable things where they can be compared fairly
+layout:keep layout consistent,,,keep repeated elements in predictable places,
+,,,,
+data:summarize key information,,,"summarize and surface key values, trends, status, or performance signals",""
+data:select and scope data,,,include relevant data and indicators at a focused scope that supports real questions or actions
+data:show appropriate detail,,,"match the level of detail to the task, including raw detail when needed"
+data:define and manage metrics,,,"define, balance, and maintain metrics as a coherent set"
+data:show relationships in data,,,"show how metrics, signals, or related information connect or trade off",
+data:ensure data quality and infrastructure,,,"ensure data is accurate, fresh, trustworthy, and supported by necessary systems"
+data:support valid inference,,,"avoid misleading conclusions from small samples, weak significance, confounds, or invalid comparisons"
+,,,,
+text:support interpretation and analysis,,,"use labels, axes, symbols, or short explanatory text to make values and encodings interpretable",""
+text:communicate takeaways,clarify,,"state a conclusion, implication, key takeaway, or call to action in text","vs. text:support interpretation and analysis: takeaway = what to conclude/do; interpretation = help read the chart. 10.1.2 (""add a call to action"") = takeaway."
+text:keep text readable and concise,,,make text easy to read and scan without unnecessary wording
+text:guide reading,,,use text to guide the reading path
+text:pair with symbols,,,let text and symbols clarify each other
+text:use familiar terms,,,use words users would naturally use
+,,,,
+visual design:manage visual complexity,,,reduce clutter and balance visual complexity with usefulness so the display stays organized,
+visual design:keep appearance consistent,,,keep the overall look consistent
+visual design:guide attention,,,draw attention to what matters,
+visual design:support acceptance,,,"make the visual design feel credible, acceptable, and engaging enough to use"
+visual design:provide redundant cues,clarify,,"add a second visual cue—such as a label, icon, shape, pattern, or border—so meaning is not conveyed by color alone","vs. color:encode and distinguish meaning: add icon/label/shape besides color vs. change the color itself. keep accessible = broader accessibility."
+visual design:use common visual vocabulary,,,use visual conventions readers can pick up quickly
+visual design:keep accessible,,,keep the visual display easy enough to access
+visual design:use meaningful familiar components,,,"use icons, symbols, widgets, or components that are recognizable and clarify meaning"
+,,,,
+,,,,
+,,,,
+cognition:make understandable,delete,,make the dashboard fit users' understanding and feel easy enough to interpret and use,Too broad; overlaps text/context/chart/etc. -> delete.
+cognition:manage load,delete,,avoid making people hold too much in their head,Usually an outcome not a separate action (1.1.3). Often added as one extra label -> delete.
+cognition:reduce recall,,,keep cues visible so users do not have to remember everything
+cognition:match users and needs,delete,,"fit the actual users, roles, context, and information needs",Too broad; overlaps task/context/data.
+,,,,
+context:provide interpretive context,,,"add descriptions, explanations, and surrounding context needed to interpret the view"
+context:disclose source,,,say where the data comes from and how it was handled
+context:state assumptions,,,"make assumptions, caveats, and data freshness visible"
+context:show history,,,show past state when it helps explain the current one
+,,,,
+,,,,
+interaction:support exploration and detail access,,,"let users explore, filter, and access more detail when needed"
+interaction:support personalization,,,"let users access or tailor settings, views, and formats to their needs"
+interaction:support efficient use,,,support faster paths for repeated use
+interaction:show system status and response,,,"make system state, feedback, and responses to user actions visible"
+interaction:guide and orient users,,,"help users know where they are, what to do next, and how to proceed"
+interaction:support control and recovery,,,let users control the flow and recover from unwanted or dead-end states
+interaction:alert and advise,,,warn users when something important needs attention
+interaction:ensure functional fit,,,make sure features and functions match the dashboard purpose,
+interaction:support evolution,,,leave room for feedback and dashboard changes over time
+interaction:support flexible formats,,,let the format or level of aggregation change when useful
+interaction:handle empty states,,,"avoid blank or empty states, or explain them clearly when no data is shown"
+,,,,
+task:task support analysis,,,"support the questions, monitoring, comparisons, and decisions users need to handle",
+task:support action,,,help people decide what to do next,
+,,,,
+,,,,
+design process:iterate and evaluate,,,"revise and validate the dashboard through feedback, usability testing, or regular evaluation"
+design process:balance tradeoffs,,,notice the tradeoffs and choose a workable balance
+design process:choose data and encoding,,,think about both what to show and how to show it
+design process:prototype early,,,try rough versions before locking in the design
+design process:involve stakeholders,,,bring relevant people into decisions and build shared understanding
+design process:formalize process,,,"make ownership, updates, review, and change processes explicit"
+design process:study users,,,learn from users before deciding what to build
+design process:adapt methods,,,adjust the design method to fit the dashboard context
+design process:align with strategic goals,,,"connect the dashboard to goals, strategy, and changing conditions"
+design process:fit and socialize workflow,,,fit existing work practices and make the dashboard purpose and use process clear to the team
+design process:maintain load performance,,,keep dashboard performance responsive enough to support smooth use and analysis workflow

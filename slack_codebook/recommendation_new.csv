@@ -1,0 +1,85 @@
+code,definition,color
+chart:support perception,"make marks, axes, labels, and other chart elements directly legible at the needed level of detail",orange
+chart:use suitable shape（chart:choose suitable encoding）,pick a shape or aspect ratio that fits the comparison,orange
+chart:keep encoding consistent,use the same visual encoding for the same idea,orange
+chart:differentiate views,make different views or meanings easy to tell apart,orange
+chart:choose suitable encoding,use a chart form that fits the thing being shown,orange
+
+color:use color purposefully,"use color because it helps, not just because it is available",red
+color:keep color consistent,reuse colors for the same attributes across the dashboard,red
+color:encode and distinguish meaning,"use color to carry meaning and distinguish categories, scales, or status clearly",red
+
+layout:show relationships among views（layout:organize related views）,"use placement, coordination, or alignment to show how views connect",blue
+layout:organize related views,group or integrate related views so their connection is easy to understand,blue
+layout:maintain reading order,support a natural reading flow,blue
+layout:fit page and space,choose page structure and fit available screen space without awkward crowding,blue
+layout:organize clearly（layout:organize related views）,make things easy to find on the screen,blue
+layout:reduce layout complexity,keep the layout simple and remove unnecessary repeated views,blue
+layout:prioritize component placement,"place and size components according to role, importance, hierarchy, and purpose",blue
+layout:support comparison,place comparable things where they can be compared fairly,blue
+layout:keep layout consistent,keep repeated elements in predictable places,blue
+
+data:summarize key information,"summarize and surface key values, trends, status, or performance signals",yellow
+data:select and scope data,include relevant data and indicators at a focused scope that supports real questions or actions,yellow
+data:show appropriate detail,"match the level of detail to the task, including raw detail when needed",yellow
+data:define and manage metrics,"define, balance, and maintain metrics as a coherent set",yellow
+data:show relationships in data,"show how metrics, signals, or related information connect or trade off",yellow
+data:ensure data quality and infrastructure,"ensure data is accurate, fresh, trustworthy, and supported by necessary systems",yellow
+data:support valid inference,"avoid misleading conclusions from small samples, weak significance, confounds, or invalid comparisons",yellow
+
+text:support interpretation and analysis,"use labels, axes, symbols, or short explanatory text to make values and encodings interpretable",green
+text:communicate takeaways,"state a conclusion, implication, key takeaway, or call to action in text",green
+text:keep text readable and concise,make text easy to read and scan without unnecessary wording,green
+text:guide reading,use text to guide the reading path,green
+text:pair with symbols,let text and symbols clarify each other,green
+text:use familiar terms,use words users would naturally use,green
+
+visual design:manage visual complexity,reduce clutter and balance visual complexity with usefulness so the display stays organized,purple
+visual design:keep appearance consistent,keep the overall look consistent,purple
+visual design:guide attention,draw attention to what matters,purple
+visual design:support acceptance,"make the visual design feel credible, acceptable, and engaging enough to use",purple
+visual design:provide redundant cues,"add a second visual cue—such as a label, icon, shape, pattern, or border—so meaning is not conveyed by color alone",purple
+visual design:use common visual vocabulary,use visual conventions readers can pick up quickly,purple
+visual design:keep accessible,keep the visual display easy enough to access,purple
+visual design:use meaningful familiar components,"use icons, symbols, widgets, or components that are recognizable and clarify meaning",purple
+
+
+
+cognition:make understandable（deleted）,make the dashboard fit users' understanding and feel easy enough to interpret and use,green
+cognition:manage load（deleted）,avoid making people hold too much in their head,green
+cognition:reduce recall,keep cues visible so users do not have to remember everything,green
+cognition:match users and needs（deleted）,"fit the actual users, roles, context, and information needs",green
+
+context:provide interpretive context,"add descriptions, explanations, and surrounding context needed to interpret the view",green
+context:disclose source,say where the data comes from and how it was handled,green
+context:state assumptions,"make assumptions, caveats, and data freshness visible",green
+context:show history,show past state when it helps explain the current one,green
+
+
+interaction:support exploration and detail access,"let users explore, filter, and access more detail when needed",yellow
+interaction:support personalization,"let users access or tailor settings, views, and formats to their needs",yellow
+interaction:support efficient use,support faster paths for repeated use,yellow
+interaction:show system status and response,"make system state, feedback, and responses to user actions visible",yellow
+interaction:guide and orient users,"help users know where they are, what to do next, and how to proceed",yellow
+interaction:support control and recovery,let users control the flow and recover from unwanted or dead-end states,yellow
+interaction:alert and advise,warn users when something important needs attention,yellow
+interaction:ensure functional fit,make sure features and functions match the dashboard purpose,yellow
+interaction:support evolution,leave room for feedback and dashboard changes over time,yellow
+interaction:support flexible formats,let the format or level of aggregation change when useful,yellow
+interaction:handle empty states,"avoid blank or empty states, or explain them clearly when no data is shown",yellow
+
+task:task support analysis,"support the questions, monitoring, comparisons, and decisions users need to handle",yellow
+task:support action,help people decide what to do next,yellow
+
+
+design process:iterate and evaluate,"revise and validate the dashboard through feedback, usability testing, or regular evaluation",grey
+design process:balance tradeoffs,notice the tradeoffs and choose a workable balance,grey
+design process:choose data and encoding,think about both what to show and how to show it,grey
+design process:prototype early,try rough versions before locking in the design,grey
+design process:involve stakeholders,bring relevant people into decisions and build shared understanding,grey
+design process:formalize process,"make ownership, updates, review, and change processes explicit",grey
+design process:study users,learn from users before deciding what to build,grey
+design process:adapt methods,adjust the design method to fit the dashboard context,grey
+design process:align with strategic goals,"connect the dashboard to goals, strategy, and changing conditions",grey
+design process:fit and socialize workflow,fit existing work practices and make the dashboard purpose and use process clear to the team,grey
+design process:maintain load performance,keep dashboard performance responsive enough to support smooth use and analysis workflow,grey

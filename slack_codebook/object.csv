@@ -1,0 +1,25 @@
+code,definition,color
+component,"generic dashboard element mention, either unspecified, or that doesn't fit the other categories",red
+chart,generic mentions to data-encoding views on the dashboard,red
+color,,red
+layout,,red
+tooltip,,red
+text,"refers to text elements and their properties, including text, labels, annotations, and formatting",red
+visual design,"high-level references to design aspects like visual polish, look & feel",red
+
+data,,yellow
+metadata,"source, metric details, context",yellow
+performance,refers to slowness and opportunities for optimization,yellow
+interaction,refers to interaction aspects. We may choose to break this down further later.,yellow
+usability,refers to usage and usability aspects that don't fit anywhere else,yellow
+accessibility,"refers to "
+
+cognition,refers to aspects of preemptive processing and cognitive load,green
+readability,refers to aspects of reading and interpretability,green
+clarity,"refers to issues of clarity and understanding, e.g. ambiguity",green
+storytelling,refers to issues of flow and narrative,green
+insights,refers to aspects and issues related to extracting insights from the dashboard,green
+
+usage context,refers to contextual aspects of users and usage,blue
+design process,refers to practices and strategies related to dashboard authoring,blue
+task,refers to support for user's analytical goals,blue

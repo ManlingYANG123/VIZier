@@ -1,0 +1,404 @@
+{
+  "_meta": {
+    "source": "vizier_slack_data/data/slack-replies/coders/{manling,nicole}.csv",
+    "filter": "type=critique",
+    "critiqueRows": 90,
+    "coders": [
+      "manling",
+      "nicole"
+    ],
+    "note": "Co-occurrence counts of object x problem from completed Slack critique coding. Used only to set priorWeight (prior confidence / required grounding strength). Absence from this list does NOT bar a combo — the engine covers all object x problem combinations; unobserved combos default to priorWeight 'low'.",
+    "tiers": {
+      "high": ">=4 occurrences",
+      "medium": "2-3",
+      "low": "1 (observed once)",
+      "unobserved": "low (default, not listed)"
+    }
+  },
+  "observedCombos": [
+    {
+      "object": "text",
+      "problem": "unclear | ambiguous",
+      "count": 8,
+      "priorWeight": "high"
+    },
+    {
+      "object": "layout",
+      "problem": "misaligned or disorganized",
+      "count": 4,
+      "priorWeight": "high"
+    },
+    {
+      "object": "task",
+      "problem": "unclear | ambiguous",
+      "count": 4,
+      "priorWeight": "high"
+    },
+    {
+      "object": "component",
+      "problem": "not purposeful",
+      "count": 3,
+      "priorWeight": "medium"
+    },
+    {
+      "object": "task",
+      "problem": "not purposeful",
+      "count": 3,
+      "priorWeight": "medium"
+    },
+    {
+      "object": "tooltip",
+      "problem": "not significant | irrelevant",
+      "count": 3,
+      "priorWeight": "medium"
+    },
+    {
+      "object": "chart",
+      "problem": "limited affordance",
+      "count": 2,
+      "priorWeight": "medium"
+    },
+    {
+      "object": "chart",
+      "problem": "not purposeful",
+      "count": 2,
+      "priorWeight": "medium"
+    },
+    {
+      "object": "chart",
+      "problem": "overly complex | difficult",
+      "count": 2,
+      "priorWeight": "medium"
+    },
+    {
+      "object": "chart",
+      "problem": "unclear | ambiguous",
+      "count": 2,
+      "priorWeight": "medium"
+    },
+    {
+      "object": "color",
+      "problem": "breaks established principles",
+      "count": 2,
+      "priorWeight": "medium"
+    },
+    {
+      "object": "color",
+      "problem": "inconsistent | mismatched",
+      "count": 2,
+      "priorWeight": "medium"
+    },
+    {
+      "object": "color",
+      "problem": "unclear | ambiguous",
+      "count": 2,
+      "priorWeight": "medium"
+    },
+    {
+      "object": "color",
+      "problem": "unpolished | poorly done",
+      "count": 2,
+      "priorWeight": "medium"
+    },
+    {
+      "object": "data",
+      "problem": "too granular",
+      "count": 2,
+      "priorWeight": "medium"
+    },
+    {
+      "object": "interaction",
+      "problem": "slow, time-consuming",
+      "count": 2,
+      "priorWeight": "medium"
+    },
+    {
+      "object": "interaction",
+      "problem": "unclear | ambiguous",
+      "count": 2,
+      "priorWeight": "medium"
+    },
+    {
+      "object": "layout",
+      "problem": "cluttered | crowded",
+      "count": 2,
+      "priorWeight": "medium"
+    },
+    {
+      "object": "text",
+      "problem": "unpolished | poorly done",
+      "count": 2,
+      "priorWeight": "medium"
+    },
+    {
+      "object": "tooltip",
+      "problem": "not granular enough",
+      "count": 2,
+      "priorWeight": "medium"
+    },
+    {
+      "object": "visual design",
+      "problem": "cluttered | crowded",
+      "count": 2,
+      "priorWeight": "medium"
+    },
+    {
+      "object": "visual design",
+      "problem": "distracting",
+      "count": 2,
+      "priorWeight": "medium"
+    },
+    {
+      "object": "chart",
+      "problem": "breaks established principles",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "chart",
+      "problem": "cluttered | crowded",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "chart",
+      "problem": "incorrect | invalid",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "chart",
+      "problem": "missing | absent | unsupported",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "color",
+      "problem": "conflicting",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "color",
+      "problem": "incorrect | invalid",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "color",
+      "problem": "overly complex | difficult",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "component",
+      "problem": "misaligned or disorganized",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "component",
+      "problem": "unpolished | poorly done",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "data",
+      "problem": "cluttered | crowded",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "data",
+      "problem": "not granular enough",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "data",
+      "problem": "not purposeful",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "design process",
+      "problem": "cluttered | crowded",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "insights",
+      "problem": "not purposeful",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "interaction",
+      "problem": "breaks established principles",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "interaction",
+      "problem": "cluttered | crowded",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "interaction",
+      "problem": "conflicting",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "interaction",
+      "problem": "incorrect | invalid",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "interaction",
+      "problem": "missing | absent | unsupported",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "interaction",
+      "problem": "not purposeful",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "interaction",
+      "problem": "unpolished | poorly done",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "layout",
+      "problem": "obscured | not discoverable",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "metadata",
+      "problem": "missing | absent | unsupported",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "metadata",
+      "problem": "unclear | ambiguous",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "storytelling",
+      "problem": "too granular",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "task",
+      "problem": "missing | absent | unsupported",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "task",
+      "problem": "unpolished | poorly done",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "text",
+      "problem": "limited affordance",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "text",
+      "problem": "not purposeful",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "text",
+      "problem": "overly complex | difficult",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "text",
+      "problem": "unfamiliar",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "tooltip",
+      "problem": "not purposeful",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "tooltip",
+      "problem": "unclear | ambiguous",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "usability",
+      "problem": "slow, time-consuming",
+      "count": 1,
+      "priorWeight": "low"
+    },
+    {
+      "object": "visual design",
+      "problem": "too granular",
+      "count": 1,
+      "priorWeight": "low"
+    }
+  ],
+  "objectOnly": [
+    {
+      "object": "task",
+      "count": 11
+    },
+    {
+      "object": "chart",
+      "count": 5
+    },
+    {
+      "object": "design process",
+      "count": 3
+    },
+    {
+      "object": "layout",
+      "count": 3
+    },
+    {
+      "object": "text",
+      "count": 2
+    },
+    {
+      "object": "performance",
+      "count": 2
+    },
+    {
+      "object": "interaction",
+      "count": 1
+    },
+    {
+      "object": "tooltip",
+      "count": 1
+    },
+    {
+      "object": "visual design",
+      "count": 1
+    },
+    {
+      "object": "insights",
+      "count": 1
+    }
+  ]
+}

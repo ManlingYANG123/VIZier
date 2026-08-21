@@ -1,0 +1,22 @@
+category,code,definition
+visuals & layout,component,"a generic dashboard element, unspecified or not fitting another category"
+visuals & layout,chart,a data-encoding view on the dashboard
+visuals & layout,color,color choices and their use
+visuals & layout,layout,spatial arrangement and organization of views
+visuals & layout,tooltip,hover/detail tooltips and their content
+visuals & layout,text,"text elements and properties: labels, annotations, titles, formatting"
+visuals & layout,visual design,"high-level design aspects: visual polish, look & feel"
+data & performance,data,"the data shown, its scope, granularity, and relationships"
+data & performance,metadata,"source, metric definitions, and surrounding context"
+data & performance,performance,slowness and opportunities for optimization
+interaction & usability,interaction,interaction aspects and affordances
+interaction & usability,usability,usage and usability aspects not fitting elsewhere
+interaction & usability,accessibility,access for a broader range of users and conditions
+clarity & insight,cognition,preemptive processing and cognitive load
+clarity & insight,readability,reading and interpretability
+clarity & insight,clarity,"clarity and understanding, e.g. ambiguity"
+clarity & insight,storytelling,flow and narrative
+clarity & insight,insights,extracting insights from the dashboard
+purpose & fit,task,support for the user's analytical goals
+purpose & fit,usage context,contextual aspects of users and usage
+purpose & fit,design process,practices and strategies for authoring the dashboard

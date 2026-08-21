@@ -1,0 +1,199 @@
+{
+  "dashboard": {
+    "id": "ocean-life",
+    "title": "Ocean Biodiversity Atlas",
+    "subtitle": "Exploring species diversity and depth capabilities across major marine groups",
+    "hasKpis": false
+  },
+  "tiles": [
+    {
+      "id": "species-diversity",
+      "label": "Species Diversity by Group",
+      "subtitle": "Known species count across major marine groups — crustaceans dominate with 67,000+ species",
+      "bounds": { "x": 748, "y": 96, "w": 324, "h": 180 },
+      "spec": {
+        "width": 580,
+        "height": 240,
+        "background": null,
+        "config": {
+          "view": { "stroke": null },
+          "axis": {
+            "domainColor": "#1e3a5f",
+            "gridColor": "#e8f1f5",
+            "tickColor": "#1e3a5f",
+            "labelColor": "#1e3a5f",
+            "labelFontSize": 11,
+            "labelFont": "JetBrains Mono, monospace",
+            "titleFontSize": 12
+          }
+        },
+        "data": {
+          "values": [
+            { "group": "Crustaceans", "count": 67000, "species": "Crustaceans" },
+            { "group": "Fish", "count": 34000, "species": "Fish" },
+            { "group": "Cephalopods", "count": 800, "species": "Cephalopods" },
+            { "group": "Seabirds", "count": 350, "species": "Seabirds" },
+            { "group": "Cetaceans", "count": 89, "species": "Cetaceans" }
+          ]
+        },
+        "mark": { "type": "bar", "cornerRadiusEnd": 6, "opacity": 0.9 },
+        "encoding": {
+          "y": {
+            "field": "group",
+            "type": "nominal",
+            "sort": { "field": "count", "order": "descending" },
+            "axis": { "title": null, "labelFontSize": 12 }
+          },
+          "x": {
+            "field": "count",
+            "type": "quantitative",
+            "scale": { "type": "sqrt", "zero": true },
+            "axis": { "title": "Known Species (square-root scale)", "titleFontSize": 11 }
+          },
+          "color": {
+            "field": "group",
+            "type": "nominal",
+            "scale": {
+              "domain": ["Crustaceans", "Fish", "Cephalopods", "Seabirds", "Cetaceans"],
+              "range": ["#ff7f50", "#4682b4", "#9370db", "#ffd700", "#20b2aa"]
+            },
+            "legend": { "orient": "bottom", "title": null, "labelFontSize": 11 }
+          },
+          "tooltip": [
+            { "field": "group", "type": "nominal", "title": "Marine Group" },
+            { "field": "count", "type": "quantitative", "format": ",", "title": "Species Count" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "depth-range",
+      "label": "Maximum Recorded Depth",
+      "subtitle": "Vertical range by group — crustaceans reach the deepest depths at 10,924 meters (Mariana Trench)",
+      "bounds": { "x": 748, "y": 294, "w": 324, "h": 180 },
+      "spec": {
+        "width": 580,
+        "height": 300,
+        "background": null,
+        "config": {
+          "view": { "stroke": null },
+          "axis": {
+            "domainColor": "#1e3a5f",
+            "gridColor": "#e8f1f5",
+            "tickColor": "#1e3a5f",
+            "labelColor": "#1e3a5f",
+            "labelFontSize": 11,
+            "labelFont": "JetBrains Mono, monospace",
+            "titleFontSize": 12
+          },
+          "legend": { "labelColor": "#1a140a", "labelFontSize": 11 }
+        },
+        "data": {
+          "values": [
+            { "group": "Crustaceans", "depth": 10924, "species": "Crustaceans", "fact": "Amphipods found in the Mariana Trench survive under 1,100 atmospheres of pressure" },
+            { "group": "Fish", "depth": 8400, "species": "Fish", "fact": "Mariana snailfish — the deepest living vertebrate ever recorded" },
+            { "group": "Cephalopods", "depth": 7000, "species": "Cephalopods", "fact": "Dumbo octopuses live deeper than any other known octopod species" },
+            { "group": "Cetaceans", "depth": 2992, "species": "Cetaceans", "fact": "Cuvier's beaked whales can dive for 137 minutes without surfacing" },
+            { "group": "Seabirds", "depth": 564, "species": "Seabirds", "fact": "Emperor penguins hold the deepest and longest diving record among birds" }
+          ]
+        },
+        "mark": { "type": "bar", "cornerRadiusEnd": 6, "opacity": 0.9 },
+        "encoding": {
+          "y": {
+            "field": "group",
+            "type": "nominal",
+            "sort": { "field": "depth", "order": "descending" },
+            "axis": { "title": null, "labelFontSize": 12 }
+          },
+          "x": {
+            "field": "depth",
+            "type": "quantitative",
+            "axis": { "title": "Maximum Depth (meters)", "format": ",", "titleFontSize": 11 }
+          },
+          "color": {
+            "field": "group",
+            "type": "nominal",
+            "scale": {
+              "domain": ["Crustaceans", "Fish", "Cephalopods", "Seabirds", "Cetaceans"],
+              "range": ["#ff7f50", "#4682b4", "#9370db", "#ffd700", "#20b2aa"]
+            },
+            "legend": null
+          },
+          "tooltip": [
+            { "field": "group", "type": "nominal", "title": "Marine Group" },
+            { "field": "depth", "type": "quantitative", "format": ",", "title": "Max Depth (m)" },
+            { "field": "fact", "type": "nominal", "title": "Fact" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "species-comparison",
+      "label": "Biodiversity vs Depth Capability",
+      "subtitle": "Species count plotted against maximum recorded depth — larger bubbles indicate higher diversity",
+      "bounds": { "x": 28, "y": 96, "w": 700, "h": 576 },
+      "spec": {
+        "width": 560,
+        "height": 560,
+        "background": null,
+        "config": {
+          "view": { "stroke": null },
+          "axis": {
+            "domainColor": "#1e3a5f",
+            "gridColor": "#e8f1f5",
+            "tickColor": "#1e3a5f",
+            "labelColor": "#1e3a5f",
+            "labelFontSize": 11,
+            "labelFont": "JetBrains Mono, monospace",
+            "titleFontSize": 12
+          },
+          "legend": { "labelColor": "#1a140a", "labelFontSize": 12 }
+        },
+        "data": {
+          "values": [
+            { "group": "Crustaceans", "count": 67000, "depth": 10924, "species": "Crustaceans" },
+            { "group": "Fish", "count": 34000, "depth": 8400, "species": "Fish" },
+            { "group": "Cephalopods", "count": 800, "depth": 7000, "species": "Cephalopods" },
+            { "group": "Seabirds", "count": 350, "depth": 564, "species": "Seabirds" },
+            { "group": "Cetaceans", "count": 89, "depth": 2992, "species": "Cetaceans" }
+          ]
+        },
+        "mark": { "type": "circle", "size": 600, "opacity": 0.8, "stroke": "#ffffff", "strokeWidth": 2.5 },
+        "encoding": {
+          "x": {
+            "field": "depth",
+            "type": "quantitative",
+            "scale": { "type": "log" },
+            "axis": { "title": "Maximum Depth (meters, log scale)", "format": ",", "grid": true }
+          },
+          "y": {
+            "field": "count",
+            "type": "quantitative",
+            "scale": { "type": "log" },
+            "axis": { "title": "Species Count (log scale)", "format": ",", "grid": true }
+          },
+          "color": {
+            "field": "group",
+            "type": "nominal",
+            "scale": {
+              "domain": ["Crustaceans", "Fish", "Cephalopods", "Seabirds", "Cetaceans"],
+              "range": ["#ff7f50", "#4682b4", "#9370db", "#ffd700", "#20b2aa"]
+            },
+            "legend": { "orient": "bottom-right", "title": "Marine Group", "labelFontSize": 12 }
+          },
+          "size": {
+            "field": "count",
+            "type": "quantitative",
+            "scale": { "type": "log", "range": [200, 3500] },
+            "legend": null
+          },
+          "tooltip": [
+            { "field": "group", "type": "nominal", "title": "Group" },
+            { "field": "count", "type": "quantitative", "format": ",", "title": "Species Count" },
+            { "field": "depth", "type": "quantitative", "format": ",", "title": "Max Depth (m)" }
+          ]
+        }
+      }
+    }
+  ]
+}

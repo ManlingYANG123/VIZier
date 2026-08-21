@@ -1,0 +1,8 @@
+code,definition,color
+provide action item,the most common; a text description on how to fix the issue.,teal
+provide examples,,orange
+provide reference link,,green
+provide annotation,uses screenshot/markup/annotation to explain,blue
+provide visual reference,"points to visual example, image, or chart reference",red
+provide guiding question,frames suggestion as a question to consider,purple
+provide implementation step by step,gives step-by-step or technical implementation details,yellow

@@ -1,0 +1,24 @@
+{
+  "name": "vizier-re-api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "LLM/API-driven critique engine for VIZier v2 (detect -> generate -> compute -> apply -> re-evaluate), served over SSE.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.ts",
+    "dev": "node --watch src/server.ts",
+    "test": "node --test tests/*.test.ts",
+    "sim": "node scripts/simulate-guidance.ts",
+    "benchmark": "node scripts/benchmark.ts",
+    "report": "node scripts/report.ts"
+  },
+  "dependencies": {
+    "vega-lite": "^6.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1"
+  }
+}

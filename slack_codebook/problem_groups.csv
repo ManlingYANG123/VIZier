@@ -1,0 +1,22 @@
+category,code,definition
+sloppiness,unpolished | poorly done,needs improvement
+sloppiness,misaligned or disorganized,not neat enough
+sloppiness,cluttered | crowded,too many elements or concepts
+incoherence,inconsistent | mismatched,breaks patterns
+incoherence,conflicting,two or more elements contradict each other
+incoherence,breaks established principles,"accessibility, gestalt, usability, ..."
+irrelevance,not purposeful,unclear rationale for choices
+irrelevance,not significant | irrelevant,focus on unimportant facets
+irrelevance,distracting,elements take attention away from what matters
+unavailability,missing | absent | unsupported,should be present but is not
+unavailability,incomplete,something is missing
+unavailability,obscured | not discoverable,"available, but hard to find"
+miscommunication,unclear | ambiguous,message present but vague or confusing
+miscommunication,misleading,sends a different message than intended
+miscommunication,incorrect | invalid,message or execution is wrong
+friction,overly complex | difficult,cognitively challenging to understand or navigate
+friction,"slow, time-consuming","doable, but takes time and effort"
+friction,unfamiliar,hard to relate to
+miscalibration,too granular,too much detail
+miscalibration,not granular enough,not detailed enough
+miscalibration,limited affordance,poor coverage of capabilities
