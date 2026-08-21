@@ -312,7 +312,11 @@ test("an interaction critique is replayable from its focused Run interaction tes
   const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
 
   assert.match(source, /id="focusDemoButton"[^>]*>Run interaction test on the canvas</);
-  assert.match(source, /getElementById\("focusDemoButton"\)\?\.addEventListener\("click", \(\) => playInteractionRuntime\(critique\)\)/);
+  const demoClick = source.match(
+    /getElementById\("focusDemoButton"\)\?\.addEventListener\("click", \(\) => \{[\s\S]*?\n  \}\);/,
+  )?.[0] || "";
+  assert.match(demoClick, /playInteractionRuntime\(critique\)/);
+  assert.match(demoClick, /recordStudyAction\("interaction_replayed"/);
 });
 
 test("single-critique apply still flows through the focused action, and batch is inline (not the removed modal)", async () => {

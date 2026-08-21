@@ -370,6 +370,9 @@ const state = {
     fieldStatus: { goal: "missing", audience: "missing", constraints: "missing" },
     snapshotId: null,
   },
+  // Last AI-written context draft, kept so context_saved can compare generated
+  // vs submitted text. Null when the author wrote context without inference.
+  studyContextGenerated: null,
   contextWorkflow: createContextWorkflow(),
   // Hard design constraints parsed from an uploaded design document (brand /
   // design-guidelines PDF). Kept OUTSIDE context so it never perturbs the
@@ -2585,7 +2588,9 @@ async function runPreferenceAgent() {
       result.suggestions || [],
       state.preferenceAgent.resolved,
       state.context,
-    );
+    ).map((item) => (
+      item.generatedText != null ? item : { ...item, generatedText: item.text }
+    ));
     state.preferenceAgent.suggestions = applyPreferenceSuggestionDrafts(mergedSuggestions, drafts);
     state.preferenceAgent.lastAnalyzedEventCount = result.analyzedEventCount ?? events.length;
     state.preferenceAgent.status = state.preferenceAgent.suggestions.length ? "ready" : "idle";
@@ -2800,11 +2805,18 @@ function renderPreferenceMemory() {
         });
       }
       resolvePreferenceSuggestion(suggestion, "accepted", text);
+      const generatedText = String(suggestion.generatedText ?? "").trim();
       appendInteractionEvent({
         kind: "inferred_context_accepted",
         summary: `Added inferred ${suggestion.field} context`,
         detail: text,
-        data: { suggestionId: suggestion.id, evidenceEventIds: suggestion.evidenceEventIds },
+        data: {
+          suggestionId: suggestion.id,
+          evidenceEventIds: suggestion.evidenceEventIds,
+          generatedText: generatedText || null,
+          submittedText: text,
+          edited: Boolean(generatedText) && generatedText !== text,
+        },
       }, { synthesize: false });
       renderFixedContextPanel();
       renderContextToolState();
@@ -2987,6 +2999,42 @@ function inferredContextDescription(context = {}) {
   if (!genre) return base;
   const genreSentence = `VIZier read this as ${genre}.`;
   return base ? `${base} ${genreSentence}` : genreSentence;
+}
+
+function rememberGeneratedStudyContext(input = {}) {
+  const goal = String(input.goal ?? "").trim();
+  const audience = String(input.audience ?? "").trim();
+  const constraints = String(input.constraints ?? "").trim();
+  const text = String(input.text ?? serializeContextBox({ goal, audience, constraints })).trim();
+  state.studyContextGenerated = {
+    source: input.source || "ai",
+    text,
+    goal: goal || null,
+    audience: audience || null,
+    constraints: constraints || null,
+  };
+}
+
+function contextSavedStudyData(extra = {}) {
+  const submittedText = String(extra.submittedText ?? state.context.goal ?? "").trim();
+  const generatedText = String(state.studyContextGenerated?.text ?? "").trim();
+  const edited = Boolean(generatedText) && generatedText !== submittedText;
+  let origin = "none";
+  if (submittedText && generatedText) origin = edited ? "ai-edited" : "ai-unchanged";
+  else if (submittedText) origin = "user-written";
+  else if (generatedText) origin = "ai-cleared";
+  const data = {
+    scope: [...(state.context.scope || [])],
+    hasContext: Boolean(submittedText),
+    generatedText: generatedText || null,
+    submittedText: submittedText || null,
+    edited,
+    origin,
+    generatedSource: state.studyContextGenerated?.source || null,
+  };
+  if (extra.generatedFields) data.generatedFields = extra.generatedFields;
+  if (extra.submittedFields) data.submittedFields = extra.submittedFields;
+  return data;
 }
 
 // Task 6: light up the context field's edge while VIZier is generating. The
@@ -3589,6 +3637,12 @@ function attachContextPanelEventListeners() {
     try {
       const result = await requestScaffold("", "dashboard-draft");
       const description = inferredContextDescription(result?.context || {});
+      rememberGeneratedStudyContext({
+        source: "workspace-regenerate",
+        text: description,
+        goal: result?.context?.goal,
+        audience: result?.context?.audience,
+      });
       const box = document.getElementById("briefContextBox");
       if (box) box.value = description;
       readBriefIntoState({ confirmEditedFields: false });
@@ -3689,15 +3743,22 @@ function bindContextConfirmationButton() {
     };
     state.context.snapshotId = null;
     setContextWorkflow(CONTEXT_WORKFLOW_STATUS.CONFIRMED);
+    const saveData = contextSavedStudyData();
     appendInteractionEvent({
       kind: "context_saved",
-      summary: "Confirmed dashboard context",
-      detail: state.context.goal
-        ? `Context: ${state.context.goal}`
+      summary: saveData.origin === "ai-edited"
+        ? "Confirmed dashboard context after editing the AI draft"
+        : saveData.origin === "ai-unchanged"
+          ? "Confirmed the AI-generated dashboard context unchanged"
+          : saveData.hasContext
+            ? "Confirmed dashboard context"
+            : "Confirmed an artifact-only review without additional context",
+      detail: saveData.submittedText
+        ? `Context: ${saveData.submittedText}`
         : "Confirmed an artifact-only review without additional context",
-      // hasContext lets analysis split "proceeded without context" from a
-      // context-first review without parsing the free-text detail.
-      data: { scope: [...(state.context.scope || [])], hasContext: Boolean(state.context.goal) },
+      // generatedText vs submittedText is the comparison the study needs:
+      // what VIZier drafted, and what the author actually confirmed.
+      data: saveData,
     });
     renderFixedContextPanel();
     renderContextToolState();
@@ -6955,6 +7016,7 @@ async function resetDemo() {
     fieldStatus: { goal: "missing", audience: "missing", constraints: "missing" },
     snapshotId: null,
   };
+  state.studyContextGenerated = null;
   state.contextWorkflow = createContextWorkflow(CONTEXT_WORKFLOW_STATUS.IDLE, {
     requestSerial: state.contextWorkflow.requestSerial,
   });
@@ -6992,9 +7054,9 @@ els.aiAssistButton.addEventListener("click", runAIAssist);
 document.getElementById("resetButton").addEventListener("click", resetDemo);
 
 // --- User-study data collection (telemetry) -------------------------------
-// A facilitator starts a session (participant id + condition); every product
-// interaction is mirrored into an uncapped, refresh-surviving log (see the hook
-// in appendInteractionEvent). The bundle — events plus a snapshot of the
+// A study session starts with a participant id; every product interaction is
+// mirrored into an uncapped, refresh-surviving log (see the hook in
+// appendInteractionEvent). The bundle — events plus a snapshot of the
 // before/after dashboards, critiques, decisions, rationales, and context — is
 // written only on explicit Save now or End & save.
 function escapeStudy(value) {
@@ -7121,7 +7183,6 @@ function mountStudyUI() {
       body.innerHTML = `
         <p class="study-line"><span>Participant</span><strong>${escapeStudy(info.participantId)}</strong></p>
         <p class="study-line"><span>Session</span><code>${escapeStudy(info.sessionId)}</code></p>
-        <p class="study-line"><span>Condition</span><strong>${escapeStudy(info.condition || "—")}</strong></p>
         <p class="study-line"><span>Events</span><strong id="studyEventCount">${info.eventCount}</strong></p>
         <p class="study-status" id="studyStatus" aria-live="polite"></p>
         <div class="study-actions">
@@ -7168,8 +7229,6 @@ function mountStudyUI() {
     } else {
       body.innerHTML = `
         <label class="study-field"><span>Participant ID</span><input type="text" id="studyParticipant" placeholder="P01" autocomplete="off"></label>
-        <label class="study-field"><span>Condition / group</span><input type="text" id="studyCondition" placeholder="vizier / baseline" autocomplete="off"></label>
-        <label class="study-field"><span>Facilitator</span><input type="text" id="studyFacilitator" autocomplete="off"></label>
         <label class="study-field"><span>Notes</span><textarea id="studyNotes" rows="2"></textarea></label>
         <div class="study-actions">
           <button type="button" class="button primary" id="studyStart">Start session</button>
@@ -7182,8 +7241,6 @@ function mountStudyUI() {
         }
         startStudySession({
           participantId,
-          condition: body.querySelector("#studyCondition").value,
-          facilitator: body.querySelector("#studyFacilitator").value,
           notes: body.querySelector("#studyNotes").value,
         });
         refreshButton();
@@ -8129,6 +8186,12 @@ function fillDraftBrief(values, sourceLabel = "AI draft · review") {
 
 function applyScaffoldResult(result) {
   const context = result?.context || result;
+  rememberGeneratedStudyContext({
+    source: "onboarding",
+    goal: context.goal,
+    audience: context.audience,
+    constraints: context.constraints,
+  });
   fillDraftBrief(context, result?.source === "llm" ? "generated by LLM · review" : "offline fallback · review");
   obFieldStatus = result?.fieldStatus || {
     goal: context.goal ? "inferred" : "missing",
@@ -8165,6 +8228,12 @@ function applyScaffoldToWorkspace(result) {
   // collapse into a single paragraph stored in `goal`; audience/constraints stay
   // empty (kept only so the engine contract keeps its field shape).
   const description = inferredContextDescription(result?.context || {});
+  rememberGeneratedStudyContext({
+    source: "upload",
+    text: description,
+    goal: result?.context?.goal,
+    audience: result?.context?.audience,
+  });
   state.context = {
     ...state.context,
     goal: description,
@@ -8783,6 +8852,7 @@ async function loadJsonDashboard(data, fileName = "dashboard.json") {
     fieldStatus: { goal: "missing", audience: "missing", constraints: "missing" },
     snapshotId: null,
   };
+  state.studyContextGenerated = null;
   state.contextWorkflow = createContextWorkflow(CONTEXT_WORKFLOW_STATUS.IDLE, {
     requestSerial: state.contextWorkflow.requestSerial,
   });
@@ -8904,6 +8974,7 @@ async function obHandleFile(fileObj) {
     fieldStatus: { goal: "missing", audience: "missing", constraints: "missing" },
     snapshotId: null,
   };
+  state.studyContextGenerated = null;
   setContextWorkflow(CONTEXT_WORKFLOW_STATUS.NEEDS_REVIEW, {
     detail: "This image does not expose structured dashboard evidence for automatic context inference. Add what you know, or explicitly continue without context.",
   });
@@ -8971,6 +9042,26 @@ function enterWorkspace() {
   };
   state.context.snapshotId = null;
   setContextWorkflow(CONTEXT_WORKFLOW_STATUS.CONFIRMED);
+  const submittedFields = {
+    goal: String(ob.goal.value || "").trim(),
+    audience: String(ob.audience.value || "").trim(),
+    constraints: String(ob.constraints.value || "").trim(),
+  };
+  const generated = state.studyContextGenerated;
+  appendInteractionEvent({
+    kind: "context_saved",
+    summary: "Confirmed onboarding dashboard context",
+    detail: description
+      ? `Context: ${description}`
+      : "Confirmed an artifact-only review without additional context",
+    data: contextSavedStudyData({
+      submittedText: description,
+      submittedFields,
+      generatedFields: generated
+        ? { goal: generated.goal, audience: generated.audience, constraints: generated.constraints }
+        : null,
+    }),
+  });
   renderFixedContextPanel();
   renderContextToolState();
   ob.root.classList.add("leaving");

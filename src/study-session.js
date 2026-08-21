@@ -96,7 +96,6 @@ export function startStudySession(info = {}) {
     active: true,
     participantId: String(info.participantId || "").trim() || `anon-${uuid().slice(0, 8)}`,
     condition: String(info.condition || "").trim(),
-    facilitator: String(info.facilitator || "").trim(),
     notes: String(info.notes || "").trim(),
     sessionId: uuid(),
     startedAt: nowIso(),
@@ -113,7 +112,6 @@ export function startStudySession(info = {}) {
   persistNow();
   recordStudyAction("session_started", `Study session started for ${session.participantId}`, {
     condition: session.condition,
-    facilitator: session.facilitator,
   });
   return studySessionInfo();
 }
@@ -159,7 +157,6 @@ export function buildStudyBundle(snapshot = null, reason = "manual") {
     participantId: session ? session.participantId : null,
     sessionId: session ? session.sessionId : null,
     condition: session ? session.condition : null,
-    facilitator: session ? session.facilitator : null,
     notes: session ? session.notes : null,
     startedAt: session ? session.startedAt : null,
     endedAt: session ? session.endedAt : null,

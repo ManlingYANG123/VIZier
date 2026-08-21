@@ -52,9 +52,9 @@ the product and are mirrored into the study log automatically (the hook in
 
 | kind | trigger | key fields | new |
 |---|---|---|---|
-| `session_started` | facilitator starts a session | condition, facilitator | |
+| `session_started` | session starts | | |
 | `context_generation_requested` | "Describe this dashboard's context" (AI) | source | ✅ |
-| `context_saved` | Confirm / Continue-Without-Context | scope, **hasContext** | ✅ (field) |
+| `context_saved` | Confirm / Continue-Without-Context | scope, hasContext, **generatedText, submittedText, edited, origin** | ✅ (fields) |
 | `inferred_context_accepted` | "Add as Context" on a learned-context card | field, detail | |
 | `inferred_context_dismissed` | "Dismiss" on a learned-context card | field, detail | |
 | `critique_requested` | Generate / Regenerate / focused Ask | **scope, requestText, trigger, hadPriorCritiques, activeScopes** | ✅ |
@@ -85,13 +85,14 @@ already carries an explicit `via`.
 - A1 open / close the panel — **[SKIP — not supported]** (panel is always-on; only a
   resize drag exists, which is passive).
 - A2 add / modify / delete a context item — **[CAPTURE]** the confirmed result via
-  `context_saved` (the box is one free-text field; per-keystroke edits are not a
-  discrete decision).
+  `context_saved`. The event stores **generatedText** (last AI draft) and
+  **submittedText** (what the author confirmed), plus `edited` / `origin`
+  (`ai-unchanged` | `ai-edited` | `user-written` | `none`). Per-keystroke edits
+  are not logged.
 - A3 generate / regenerate context (AI) — **[CAPTURE]** `context_generation_requested`.
 - A4 accept / modify-before-accept / reject an inferred suggestion —
-  **[CAPTURE]** `inferred_context_accepted` / `inferred_context_dismissed`.
-  (Whether the text was edited before accepting is a possible future field; it needs
-  the original suggestion captured at render time — deferred, low priority.)
+  **[CAPTURE]** `inferred_context_accepted` / `inferred_context_dismissed`, with
+  `generatedText` vs `submittedText` on accept (the card is editable before Add).
 - A5 distinct goal / audience / constraints fields — **[CAPTURE]** in the
   `context_saved` snapshot (onboarding splits these; the workspace box merges them).
 - A6 add a contextual constraint (design doc / steering note / rule toggles) —
