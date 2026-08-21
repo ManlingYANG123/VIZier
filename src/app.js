@@ -36,7 +36,11 @@ import {
   upsertCritiqueRationale,
 } from "./interaction-journal.js";
 import {
+  RESEARCHER_ANNOTATION_KINDS,
+  STUDY_APP_VERSION,
+  STUDY_PHASES,
   STUDY_STORAGE_KEY,
+  bindStudyContext,
   buildStudyBundle,
   buildStudyDashboardArtifacts,
   discardStudySession,
@@ -44,13 +48,19 @@ import {
   exportStudyBundleLocal,
   exportStudyDashboardsZip,
   isStudyActive,
+  bumpStudyContextVersion,
+  newStudyId,
+  recordResearcherAnnotation,
   recordStudyAction,
   recordStudyEvent,
   restoreStudySession,
   saveStudySessionToServer,
+  setStudyPhase,
   startStudySession,
   stripVersionMedia,
+  studyEventLog,
   studySessionInfo,
+  takeStudyRequestLink,
 } from "./study-session.js";
 import {
   CATEGORY_COLORS as COLORS,
@@ -410,6 +420,7 @@ const state = {
   localReviewDraft: null,
   nextLocalReviewId: 1,
   nextAskId: 1,
+  studyContextVersion: 0,
   localReviewSubmitting: false,
   versions: [{
     id: 1,
@@ -420,6 +431,7 @@ const state = {
   selectedVersionId: 1,
   checkpointComparison: { before: 1, after: 1 },
   workingDraft: createWorkingDraft(1),
+  critiqueInspect: { critiqueId: null, openedAtMs: 0 },
   rationales: [],
   nextRationaleId: 1,
   rationaleEditId: null,
@@ -478,6 +490,11 @@ const state = {
 let preferenceAgentTimer = null;
 let contextHintTimer = null;
 let contextHintIndex = 0;
+
+bindStudyContext(() => ({
+  dashboardId: state.artifact?.id || null,
+  dashboardVersion: state.version,
+}));
 
 document.querySelector("#app").innerHTML = `
   <div class="app-shell">
@@ -598,10 +615,12 @@ document.querySelector("#app").innerHTML = `
               <span class="revision-dock-count" id="revisionDockCount">1</span>
               <svg class="revision-dock-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 6 3.5 3.5L11.5 6"/></svg>
             </button>
-            <button class="save-checkpoint-button" id="saveCheckpointButton" type="button" disabled>
-              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5h8l2 2v9H3z"/><path d="M5 2.5v4h5v-4M5.5 10.5h5"/></svg>
-              <span>Save Checkpoint</span>
-            </button>
+            <div class="revision-dock-actions">
+              <button class="save-checkpoint-button" id="saveCheckpointButton" type="button" disabled>
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5h8l2 2v9H3z"/><path d="M5 2.5v4h5v-4M5.5 10.5h5"/></svg>
+                <span>Save Checkpoint</span>
+              </button>
+            </div>
           </div>
           <div class="revision-dock-body" id="revisionDockBody" hidden>
             <div class="version-list" id="versionList" role="group" aria-label="Revision List"></div>
@@ -780,6 +799,11 @@ const els = Object.fromEntries([
   "localReviewPopover", "localReviewRequest", "localReviewDimension",
   "localReviewError", "submitLocalReview", "leftPanelResizer", "rightPanelResizer",
 ].map((id) => [id, document.getElementById(id)]));
+
+bindStudyContext(() => ({
+  dashboardId: state.artifact?.id || state.artifact?.libraryId || null,
+  dashboardVersion: Number(state.version) || 1,
+}));
 
 function clone(value) { return structuredClone(value); }
 function tileById(id) { return state.tiles.find((tile) => tile.id === id); }
@@ -2041,31 +2065,18 @@ function renderDashboardChrome({ renderContext = true } = {}) {
   if (renderContext) renderFixedContextPanel();
 }
 
-let dashboardSnapshotStyles = null;
-
-function snapshotStyleText() {
-  if (dashboardSnapshotStyles !== null) return dashboardSnapshotStyles;
-  dashboardSnapshotStyles = [...document.styleSheets].map((sheet) => {
-    try {
-      return [...sheet.cssRules].map((rule) => rule.cssText).join("\n");
-    } catch {
-      return "";
-    }
-  }).join("\n");
-  return dashboardSnapshotStyles;
-}
-
 function copyComputedLayout(source, target) {
   if (!source || !target || source.nodeType !== 1 || target.nodeType !== 1) return;
   const computed = getComputedStyle(source);
   const props = [
     "position", "display", "flex-direction", "flex-wrap", "align-items", "justify-content",
-    "gap", "row-gap", "column-gap", "grid-template-columns", "grid-template-rows",
-    "top", "left", "right", "bottom", "width", "height", "margin", "padding",
+    "align-content", "gap", "row-gap", "column-gap", "grid-template-columns", "grid-template-rows",
+    "top", "left", "right", "bottom", "width", "height", "min-width", "min-height",
+    "max-width", "max-height", "margin", "padding", "box-sizing",
     "font", "font-family", "font-size", "font-weight", "letter-spacing", "line-height",
     "color", "background", "background-color", "border", "border-radius", "border-bottom",
-    "box-shadow", "overflow", "text-transform", "white-space", "opacity", "z-index",
-    "text-align", "align-self", "justify-self",
+    "box-shadow", "overflow", "text-transform", "white-space", "visibility", "opacity",
+    "z-index", "text-align", "align-self", "justify-self", "transform", "transform-origin",
   ];
   for (const prop of props) {
     const value = computed.getPropertyValue(prop);
@@ -2077,7 +2088,7 @@ function copyComputedLayout(source, target) {
   for (let i = 0; i < n; i += 1) copyComputedLayout(srcKids[i], dstKids[i]);
 }
 
-async function rasterizeDashboardArtboard({ emptyVegaHosts = false } = {}) {
+async function rasterizeDashboardArtboard({ emptyVegaHosts = false, vegaImages = null } = {}) {
   const source = els.dashboardArtboard;
   if (!source) return null;
   await new Promise((resolve) => requestAnimationFrame(resolve));
@@ -2089,7 +2100,22 @@ async function rasterizeDashboardArtboard({ emptyVegaHosts = false } = {}) {
     node.classList.remove("selected", "canvas-preview-affected");
   });
   snapshot.classList.remove("canvas-proposed");
-  if (emptyVegaHosts) {
+  if (vegaImages instanceof Map) {
+    snapshot.querySelectorAll(".vega-host").forEach((host) => {
+      const tileId = String(host.id || "").replace(/^vega-/, "");
+      const src = vegaImages.get(tileId);
+      if (!src) {
+        host.replaceChildren();
+        return;
+      }
+      const image = document.createElement("img");
+      image.src = src;
+      image.alt = "";
+      image.setAttribute("aria-hidden", "true");
+      image.style.cssText = "display:block;width:100%;height:100%;object-fit:fill";
+      host.replaceChildren(image);
+    });
+  } else if (emptyVegaHosts) {
     snapshot.querySelectorAll(".vega-host").forEach((host) => host.replaceChildren());
   }
   snapshot.style.position = "relative";
@@ -2101,10 +2127,14 @@ async function rasterizeDashboardArtboard({ emptyVegaHosts = false } = {}) {
   snapshot.style.transform = "none";
   snapshot.style.margin = "0";
   snapshot.style.boxShadow = "none";
+  snapshot.style.overflow = "hidden";
 
   const serialized = new XMLSerializer().serializeToString(snapshot);
-  const css = snapshotStyleText().replaceAll("]]>", "]]]]><![CDATA[>");
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${snapshotWidth}" height="${snapshotHeight}" viewBox="0 0 ${snapshotWidth} ${snapshotHeight}"><foreignObject width="${snapshotWidth}" height="${snapshotHeight}"><div xmlns="http://www.w3.org/1999/xhtml"><style><![CDATA[${css}]]></style>${serialized}</div></foreignObject></svg>`;
+  // Do not dump the full page stylesheet into this SVG. Rules like
+  // `html, body { overflow: hidden; height: 100% }` clip absolutely
+  // positioned heading/KPI chrome when the clone is rasterized as an image.
+  const css = "*{box-sizing:border-box;}img,canvas,svg{max-width:100%;max-height:100%;}";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${snapshotWidth}" height="${snapshotHeight}" viewBox="0 0 ${snapshotWidth} ${snapshotHeight}"><foreignObject x="0" y="0" width="${snapshotWidth}" height="${snapshotHeight}"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${snapshotWidth}px;height:${snapshotHeight}px;margin:0;padding:0;"><style>${css}</style>${serialized}</div></foreignObject></svg>`;
   const svgBlob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
   const objectURL = URL.createObjectURL(svgBlob);
   return { svg, objectURL, snapshotWidth, snapshotHeight };
@@ -2179,17 +2209,107 @@ function vegaViewForExport(view) {
   return null;
 }
 
-function hostBoxOnArtboard(host, artboard) {
-  if (!host || !artboard) return null;
-  const scale = Number(state.view?.scale) || 1;
+function layoutBoxOnArtboard(el, artboard) {
+  if (!el || !artboard || (el !== artboard && !artboard.contains(el))) return null;
   const root = artboard.getBoundingClientRect();
-  const box = host.getBoundingClientRect();
+  const box = el.getBoundingClientRect();
+  const sx = root.width / Math.max(1, artboard.offsetWidth || Number(state.canvasSize?.width) || 1);
+  const sy = root.height / Math.max(1, artboard.offsetHeight || Number(state.canvasSize?.height) || 1);
+  const w = box.width / sx;
+  const h = box.height / sy;
+  if (w < 1 || h < 1) return null;
   return {
-    x: (box.left - root.left) / scale,
-    y: (box.top - root.top) / scale,
-    w: box.width / scale,
-    h: box.height / scale,
+    x: (box.left - root.left) / sx,
+    y: (box.top - root.top) / sy,
+    w,
+    h,
   };
+}
+
+function hostBoxOnArtboard(host, artboard) {
+  return layoutBoxOnArtboard(host, artboard);
+}
+
+function cssColorVisible(color) {
+  if (!color || color === "transparent") return false;
+  const match = color.match(/rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)/i);
+  if (match && Number(match[4] ?? 1) <= 0.01) return false;
+  return color !== "rgba(0, 0, 0, 0)";
+}
+
+function paintElementChrome(ctx, el, artboard, scale) {
+  const box = layoutBoxOnArtboard(el, artboard);
+  if (!box) return;
+  const style = getComputedStyle(el);
+  const x = box.x * scale;
+  const y = box.y * scale;
+  const w = box.w * scale;
+  const h = box.h * scale;
+  const radius = Math.min(parseFloat(style.borderTopLeftRadius) || 0, box.w / 2, box.h / 2) * scale;
+  ctx.save();
+  try {
+    if (cssColorVisible(style.backgroundColor)) {
+      ctx.fillStyle = style.backgroundColor;
+      if (radius > 0.5 && typeof ctx.roundRect === "function") {
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, radius);
+        ctx.fill();
+      } else {
+        ctx.fillRect(x, y, w, h);
+      }
+    }
+    const borderW = parseFloat(style.borderTopWidth) || 0;
+    if (borderW > 0 && style.borderTopStyle !== "none" && cssColorVisible(style.borderTopColor)) {
+      ctx.strokeStyle = style.borderTopColor;
+      ctx.lineWidth = Math.max(1, borderW * scale);
+      ctx.strokeRect(x, y, w, h);
+    }
+    const text = [...el.childNodes]
+      .filter((node) => node.nodeType === 3)
+      .map((node) => node.textContent)
+      .join("")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (text && style.visibility !== "hidden" && Number(style.opacity) > 0.05) {
+      ctx.fillStyle = style.color || "#1d1d1f";
+      ctx.font = style.font || "16px sans-serif";
+      ctx.textBaseline = "top";
+      const align = style.textAlign;
+      ctx.textAlign = align === "center" || align === "right" || align === "end" ? align : "left";
+      const padX = (parseFloat(style.paddingLeft) || 0) * scale;
+      const padY = (parseFloat(style.paddingTop) || 0) * scale;
+      let tx = x + padX;
+      if (ctx.textAlign === "center") tx = x + w / 2;
+      if (ctx.textAlign === "right" || ctx.textAlign === "end") tx = x + w - padX;
+      ctx.fillText(text, tx, y + padY, Math.max(8, w - padX * 2));
+    }
+  } catch (error) {
+    console.warn("[revision-screenshot] chrome paint skipped", error);
+  }
+  ctx.restore();
+}
+
+function paintDomTreeChrome(ctx, el, artboard, scale) {
+  if (!el || el.nodeType !== 1) return;
+  if (el.hidden || el.id === "markersLayer" || el.classList?.contains("vega-host")) return;
+  try {
+    const style = getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden") return;
+  } catch {
+    return;
+  }
+  paintElementChrome(ctx, el, artboard, scale);
+  for (const child of el.children) paintDomTreeChrome(ctx, child, artboard, scale);
+}
+
+function paintLiveArtboardChrome(ctx, artboard, scale) {
+  if (!ctx || !artboard) return;
+  for (const tile of artboard.querySelectorAll(".tile")) {
+    paintDomTreeChrome(ctx, tile, artboard, scale);
+  }
+  paintDomTreeChrome(ctx, artboard.querySelector(".dashboard-heading"), artboard, scale);
+  paintDomTreeChrome(ctx, artboard.querySelector("#dashboardFilterBar"), artboard, scale);
+  paintDomTreeChrome(ctx, artboard.querySelector("#kpiRow"), artboard, scale);
 }
 
 async function vegaTileCanvas(tileId, scale = 2) {
@@ -2212,6 +2332,19 @@ async function vegaTileCanvas(tileId, scale = 2) {
     console.warn(`[revision-screenshot] Vega PNG failed for tile ${tileId}`, error);
   }
   return null;
+}
+
+async function captureDashboardDisplaySvg() {
+  const vegaImages = new Map();
+  await Promise.all((state.tiles || []).map(async (tile) => {
+    const canvas = await vegaTileCanvas(tile.id, 2);
+    const png = canvas ? canvasPngDataUrl(canvas) : null;
+    if (png) vegaImages.set(String(tile.id), png);
+  }));
+  const raster = await rasterizeDashboardArtboard({ vegaImages });
+  if (!raster) return null;
+  URL.revokeObjectURL(raster.objectURL);
+  return raster.svg;
 }
 
 async function rasterizeArtboardChrome(width, height, scale) {
@@ -2238,8 +2371,9 @@ async function rasterizeArtboardChrome(width, height, scale) {
 }
 
 // Screenshot the live artboard: HTML chrome (title, filters, KPIs, tile frames)
-// plus each chart from Vega's own toCanvas. Reconstructing those with fillText
-// is what made the study PNG look unlike the dashboard on screen.
+// painted from computed layout, plus each chart from Vega's own toCanvas.
+// Drawing an SVG foreignObject onto this canvas taints it in Chromium, which
+// made getImageData / toDataURL throw and the checkpoint thumbnail disappear.
 async function captureLiveArtboardPng() {
   const source = els.dashboardArtboard;
   if (!source) return null;
@@ -2249,14 +2383,12 @@ async function captureLiveArtboardPng() {
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(width * scale);
   canvas.height = Math.round(height * scale);
-  const context = canvas.getContext("2d");
+  const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) return null;
   const background = getComputedStyle(source).backgroundColor;
   context.fillStyle = background && background !== "rgba(0, 0, 0, 0)" ? background : "#ffffff";
   context.fillRect(0, 0, canvas.width, canvas.height);
-
-  const chrome = await rasterizeArtboardChrome(width, height, scale);
-  if (chrome) context.drawImage(chrome, 0, 0, canvas.width, canvas.height);
+  paintLiveArtboardChrome(context, source, scale);
 
   for (const tile of state.tiles || []) {
     const host = document.getElementById(`vega-${tile.id}`);
@@ -2295,17 +2427,38 @@ async function captureDashboardPngFromViews() {
 async function captureDashboardExport() {
   const width = Math.max(1, Number(state.canvasSize?.width) || 1100);
   const height = Math.max(1, Number(state.canvasSize?.height) || 720);
+  let svg = null;
   try {
-    const png = await captureLiveArtboardPng() || await captureDashboardPngFromViews();
-    if (!png) return { screenshot: null, png: null, svg: null };
+    // This is the visual source used by checkpoint previews. It keeps the live
+    // DOM layout and embeds lossless Vega renders, so the saved view matches the
+    // dashboard instead of depending on the approximate canvas chrome painter.
+    svg = await captureDashboardDisplaySvg();
+  } catch (error) {
+    console.warn("[revision-screenshot] Faithful SVG capture failed.", error);
+  }
+  let png = null;
+  try {
+    png = await captureLiveArtboardPng();
+  } catch (error) {
+    console.warn("[revision-screenshot] Live artboard capture failed.", error);
+  }
+  if (!png) {
+    try {
+      png = await captureDashboardPngFromViews();
+    } catch (error) {
+      console.warn("[revision-screenshot] Vega-only capture failed.", error);
+    }
+  }
+  if (!png) return { screenshot: null, png: null, svg };
+  try {
     const image = await loadExportImage(png);
     const hi = document.createElement("canvas");
     fillCanvas(hi, image, image.naturalWidth || width * 2, image.naturalHeight || height * 2);
     const pair = exportPairFromCanvas(hi, width, height);
-    return { screenshot: pair?.screenshot || png, png: pair?.png || png, svg: null };
+    return { screenshot: pair?.screenshot || png, png: pair?.png || png, svg };
   } catch (error) {
-    console.warn("[revision-screenshot] Live artboard capture failed.", error);
-    return { screenshot: null, png: null, svg: null };
+    console.warn("[revision-screenshot] PNG encode failed.", error);
+    return { screenshot: png, png, svg };
   }
 }
 
@@ -2319,8 +2472,8 @@ async function rememberDashboardExport(target) {
   try {
     const captured = await captureDashboardExport();
     target.afterScreenshot = captured.screenshot || target.afterScreenshot || null;
-    target.afterPng = captured.png || null;
-    target.afterSvg = captured.svg || null;
+    target.afterPng = captured.png || target.afterPng || null;
+    target.afterSvg = captured.svg || target.afterSvg || null;
     return captured;
   } catch (error) {
     console.warn("[revision-screenshot] rememberDashboardExport failed", error);
@@ -2345,6 +2498,39 @@ function revisionAppliedTarget(item) {
 
 function closeRevisionLightbox() {
   els.canvasViewport.querySelector(".revision-lightbox")?.remove();
+}
+
+const revisionMediaObjectUrls = new Set();
+
+function releaseRevisionMediaObjectUrls() {
+  revisionMediaObjectUrls.forEach((url) => URL.revokeObjectURL(url));
+  revisionMediaObjectUrls.clear();
+}
+
+function revisionSvgObjectUrl(svg) {
+  if (typeof svg !== "string" || !svg.trim().startsWith("<svg")) return null;
+  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
+  revisionMediaObjectUrls.add(url);
+  return url;
+}
+
+function revisionVersionMedia(version) {
+  if (!version) return { thumbnail: null, full: null, aspectRatio: "1100 / 720" };
+  const thumbnail = version.afterScreenshot || version.screenshot || null;
+  const full = version.afterPng || thumbnail;
+  const faithful = revisionSvgObjectUrl(version.afterSvg);
+  const svgSize = typeof version.afterSvg === "string"
+    ? version.afterSvg.match(/<svg[^>]*\bwidth="([\d.]+)"[^>]*\bheight="([\d.]+)"/i)
+    : null;
+  const width = Math.max(1, Number(svgSize?.[1] || version.afterSnapshot?.board?.canvasWidth) || 1100);
+  const height = Math.max(1, Number(svgSize?.[2] || version.afterSnapshot?.board?.canvasHeight) || 720);
+  return {
+    // Keep a compact image in the checkpoint rail, but render it from the same
+    // faithful source as the enlarged view whenever that source is available.
+    thumbnail: faithful || thumbnail,
+    full: faithful || full,
+    aspectRatio: `${width} / ${height}`,
+  };
 }
 
 // Enlarge a checkpoint screenshot directly over the canvas (clipped to it), with
@@ -2373,7 +2559,7 @@ function openRevisionLightbox(screenshot, label) {
   overlay.querySelector(".revision-lightbox-close")?.focus();
 }
 
-function revisionSnapshotMarkup(screenshot, phase, versionLabel, zoomIndex) {
+function revisionSnapshotMarkup(media, phase, versionLabel, zoomIndex) {
   const phaseLabel = phase === "baseline"
     ? "Baseline"
     : phase === "before"
@@ -2381,9 +2567,9 @@ function revisionSnapshotMarkup(screenshot, phase, versionLabel, zoomIndex) {
       : phase === "selected"
         ? "Selected"
         : "After";
-  const frame = screenshot
-    ? `<button type="button" class="revision-screenshot-frame" data-revision-zoom="${zoomIndex}" aria-label="Enlarge ${phaseLabel} dashboard">
-        <img class="revision-screenshot" src="${screenshot}" alt="${phaseLabel} Dashboard Screenshot" draggable="false" />
+  const frame = media?.thumbnail
+    ? `<button type="button" class="revision-screenshot-frame" data-revision-zoom="${zoomIndex}" aria-label="Enlarge ${phaseLabel} dashboard" style="aspect-ratio:${media.aspectRatio}">
+        <img class="revision-screenshot" src="${media.thumbnail}" alt="${phaseLabel} Dashboard Screenshot" draggable="false" decoding="async" />
         <span class="revision-screenshot-zoom" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M6.5 2h-3a1.5 1.5 0 0 0-1.5 1.5v3M9.5 2h3a1.5 1.5 0 0 1 1.5 1.5v3M6.5 14h-3a1.5 1.5 0 0 1-1.5-1.5v-3M9.5 14h3a1.5 1.5 0 0 0 1.5-1.5v-3"/></svg></span>
       </button>`
     : `<div class="revision-screenshot-frame"><div class="revision-preview-unavailable">Screenshot Unavailable</div></div>`;
@@ -2401,13 +2587,14 @@ function renderRevisionSnapshotComparison(beforeVersion, afterVersion) {
   const host = document.getElementById("revisionVisualComparison");
   if (!host) return;
   closeRevisionLightbox();
+  releaseRevisionMediaObjectUrls();
 
   let panes;
   if (!beforeVersion || !afterVersion || beforeVersion.id === afterVersion.id) {
     const version = afterVersion || beforeVersion;
     host.classList.add("single");
     panes = [{
-      screenshot: version?.afterScreenshot || version?.screenshot || null,
+      media: revisionVersionMedia(version),
       phase: version?.kind === "initial" ? "baseline" : "selected",
       label: version ? `Checkpoint ${version.id}` : "Saved checkpoint",
     }];
@@ -2415,12 +2602,12 @@ function renderRevisionSnapshotComparison(beforeVersion, afterVersion) {
     host.classList.remove("single");
     panes = [
       {
-        screenshot: beforeVersion.afterScreenshot || beforeVersion.screenshot || null,
+        media: revisionVersionMedia(beforeVersion),
         phase: "before",
         label: `Checkpoint ${beforeVersion.id}`,
       },
       {
-        screenshot: afterVersion.afterScreenshot || afterVersion.screenshot || null,
+        media: revisionVersionMedia(afterVersion),
         phase: "after",
         label: `Checkpoint ${afterVersion.id}`,
       },
@@ -2428,13 +2615,13 @@ function renderRevisionSnapshotComparison(beforeVersion, afterVersion) {
   }
 
   host.innerHTML = panes
-    .map((pane, index) => revisionSnapshotMarkup(pane.screenshot, pane.phase, pane.label, index))
+    .map((pane, index) => revisionSnapshotMarkup(pane.media, pane.phase, pane.label, index))
     .join("");
 
   host.querySelectorAll("[data-revision-zoom]").forEach((frame) => {
     const pane = panes[Number(frame.dataset.revisionZoom)];
-    if (!pane?.screenshot) return;
-    frame.addEventListener("click", () => openRevisionLightbox(pane.screenshot, pane.label));
+    if (!pane?.media?.full) return;
+    frame.addEventListener("click", () => openRevisionLightbox(pane.media.full, pane.label));
   });
 }
 
@@ -2525,6 +2712,7 @@ function renderVersions() {
           <p>${comparisonInstruction}</p>
         </div>
         ${validated ? "" : `<span class="revision-validation warning">Review Needed</span>`}
+        ${afterVersion.afterSnapshot ? `<button type="button" class="save-checkpoint-button" id="restoreCheckpointButton">Restore this checkpoint</button>` : ""}
       </div>
       <div class="revision-visual-comparison" id="revisionVisualComparison"></div>
       ${afterVersion.kind === "revision" ? `
@@ -2537,6 +2725,9 @@ function renderVersions() {
             </button>`).join("")}
         </div>` : ""}`;
     renderRevisionSnapshotComparison(beforeVersion, afterVersion);
+    detail.querySelector("#restoreCheckpointButton")?.addEventListener("click", () => {
+      void restoreDashboardCheckpoint(afterVersion);
+    });
   }
 
   els.versionList.querySelectorAll("[data-version-id]").forEach((button) => {
@@ -3292,6 +3483,167 @@ function contextSavedStudyData(extra = {}) {
   return data;
 }
 
+function nextStudyContextVersion() {
+  state.studyContextVersion = (Number(state.studyContextVersion) || 0) + 1;
+  return state.studyContextVersion;
+}
+
+function contextSaveOutcome(saveData) {
+  return saveData?.hasContext ? "confirmed" : "continued_without_context";
+}
+
+function contextSaveSource(saveData) {
+  const origin = saveData?.origin;
+  if (origin === "user-written") return "manual";
+  if (origin === "ai-unchanged" || origin === "ai-edited") return "generated";
+  if (saveData?.generatedSource) return "inferred";
+  return "manual";
+}
+
+function withContextSaveStudyFields(saveData) {
+  return {
+    ...saveData,
+    outcome: contextSaveOutcome(saveData),
+    contextVersion: bumpStudyContextVersion() || nextStudyContextVersion(),
+    source: contextSaveSource(saveData),
+  };
+}
+
+async function withContextGenerationTelemetry(source, work) {
+  const generationId = newStudyId();
+  const startedAt = Date.now();
+  recordStudyAction("context_generation_requested", "Asked VIZier to describe the dashboard context", {
+    source,
+    generationId,
+  });
+  try {
+    const result = await work();
+    recordStudyAction("context_generation_completed", "Dashboard context generation finished", {
+      source,
+      generationId,
+      latencyMs: Date.now() - startedAt,
+    });
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    recordStudyAction("context_generation_failed", "Dashboard context generation failed", {
+      source,
+      generationId,
+      latencyMs: Date.now() - startedAt,
+      reason: message,
+    });
+    throw error;
+  }
+}
+
+function critiqueRequestMode({ focusedRequest, trigger, hadPrior, local } = {}) {
+  if (local) return "local";
+  if (trigger === "stale-dashboard-recovery" || trigger === "stale-context-recovery") {
+    return "stale_recovery";
+  }
+  if (focusedRequest) return "focused_ask";
+  return hadPrior ? "regenerate_all" : "generate";
+}
+
+function critiqueRequestStudyData({
+  requestId,
+  requestMode,
+  scope,
+  askId = null,
+  queryText = null,
+  bounds = null,
+  trigger = null,
+  critiqueId = null,
+  parentRequestId = null,
+} = {}) {
+  const link = takeStudyRequestLink(requestId);
+  return {
+    requestId: link.requestId,
+    requestMode,
+    askId,
+    dashboardId: state.artifact?.id || state.artifact?.libraryId || null,
+    dashboardVersion: Number(state.version) || 1,
+    scope,
+    bounds: bounds || null,
+    queryText: queryText || null,
+    requestText: queryText || null,
+    parentRequestId: parentRequestId || link.parentRequestId,
+    trigger: trigger || null,
+    critiqueId: critiqueId || null,
+    hadPriorCritiques: state.critiques.length > 0,
+    priorCritiqueCount: state.critiques.length,
+    activeScopes: [...(state.context.scope || [])],
+  };
+}
+
+function classifyDashboardOperation(changedTargets = [], critiques = []) {
+  const kinds = new Set((critiques || []).map((critique) => critique?.proposal?.kind).filter(Boolean));
+  const targets = (changedTargets || []).map((target) => String(target).toLowerCase());
+  if ([...kinds].some((kind) => /cross-filter|filter|interaction/.test(kind))
+    || targets.some((target) => /filter|interaction/.test(target))) {
+    return "interaction";
+  }
+  if ([...kinds].some((kind) => /encod/.test(kind)) || targets.some((target) => /encod/.test(target))) {
+    return "encoding";
+  }
+  if (targets.some((target) => /title|subtitle|text|label/.test(target))) return "text";
+  if (targets.some((target) => /style|color|theme|kpi/.test(target))) return "style";
+  if (targets.some((target) => /bound|layout|position/.test(target))) return "layout";
+  if (targets.some((target) => /filter/.test(target))) return "filter";
+  return "other";
+}
+
+function recordDashboardChanged({
+  changeId = null,
+  source,
+  operation,
+  targetIds = [],
+  beforeVersion,
+  afterVersion,
+  relatedCritiqueIds = [],
+  relatedApplyId = null,
+  diffSummary = null,
+} = {}) {
+  const id = changeId || newStudyId();
+  recordStudyAction("dashboard_changed", `Dashboard changed via ${source}`, {
+    changeId: id,
+    source,
+    operation: operation || "other",
+    targetIds,
+    beforeVersion,
+    afterVersion,
+    relatedCritiqueIds,
+    relatedApplyId,
+    diffSummary: diffSummary || {},
+  });
+  return id;
+}
+
+function latestRationaleText(critiqueId) {
+  const items = (state.rationales || []).filter((item) => item.critiqueId === critiqueId);
+  return items.at(-1)?.text || null;
+}
+
+function markCritiqueInspected(critiqueId) {
+  state.critiqueInspect = {
+    critiqueId: critiqueId || null,
+    openedAtMs: Date.now(),
+  };
+}
+
+function critiqueInspectDwellMs(critiqueId = null) {
+  const current = state.critiqueInspect;
+  if (!current?.openedAtMs) return null;
+  if (critiqueId && current.critiqueId !== critiqueId) return null;
+  return Math.max(0, Date.now() - current.openedAtMs);
+}
+
+function protocolRequestScope(requestMode) {
+  if (requestMode === "local") return "region";
+  if (requestMode === "stale_recovery") return "critique";
+  return "dashboard";
+}
+
 // Task 6: light up the context field's edge while VIZier is generating. The
 // manual regenerate runs without a re-render, so the class is toggled directly;
 // the auto-on-upload path re-renders and adds the class from the GENERATING
@@ -3888,18 +4240,14 @@ function attachContextPanelEventListeners() {
   const inferButton = document.getElementById("contextInferBtn");
   const inferError = document.getElementById("contextInferError");
   inferButton?.addEventListener("click", async () => {
-    // Study telemetry: the participant asked VIZier to describe the context for
-    // them (rather than writing it themselves).
-    recordStudyAction("context_generation_requested", "Asked VIZier to describe the dashboard context", {
-      source: "workspace",
-    });
     if (inferError) inferError.hidden = true;
     inferButton.classList.add("running");
     inferButton.disabled = true;
     // Task 6: the field edge lights up while VIZier is generating.
     setContextInferring(true);
     try {
-      const result = await requestScaffold("", "dashboard-draft");
+      const result = await withContextGenerationTelemetry("workspace", () =>
+        requestScaffold("", "dashboard-draft"));
       const description = inferredContextDescription(result?.context || {});
       rememberGeneratedStudyContext({
         source: "workspace-regenerate",
@@ -4026,7 +4374,7 @@ function bindContextConfirmationButton() {
     };
     state.context.snapshotId = null;
     setContextWorkflow(CONTEXT_WORKFLOW_STATUS.CONFIRMED);
-    const saveData = contextSavedStudyData();
+    const saveData = withContextSaveStudyFields(contextSavedStudyData());
     appendInteractionEvent({
       kind: "context_saved",
       summary: saveData.origin === "ai-edited"
@@ -4605,6 +4953,7 @@ function renderCritiqueHistory() {
         dimension: critique.dimension,
         proposalKind: critique.proposal?.kind,
       });
+      markCritiqueInspected(critique.id);
       await renderTiles();
       renderCritiques();
       renderMarkers();
@@ -4902,7 +5251,9 @@ function renderCritiques() {
         critiqueId: critique.id,
         dimension: critique.dimension,
         proposalKind: critique.proposal?.kind,
+        data: { dwellFromMs: Date.now() },
       });
+      markCritiqueInspected(critique.id);
       await renderTiles();
       renderCritiques();
       renderMarkers();
@@ -5216,30 +5567,147 @@ async function playApplySettleDemo(appliedCritiques) {
   }
 }
 
-async function applyRecommendationSelection(selectedIds, conflictChoices = {}) {
+function applyLiveSnapshot(snapshot) {
+  if (!snapshot) return;
+  const specMap = snapshot.specMap || {};
+  const board = snapshot.board || {};
+  for (const tile of state.tiles) {
+    if (specMap[tile.id]) tile.spec = clone(specMap[tile.id]);
+  }
+  if (board && typeof board === "object") {
+    state.dashboardTitle = board.title ?? state.dashboardTitle;
+    state.dashboardSubtitle = board.subtitle ?? state.dashboardSubtitle;
+    if ("hasKpis" in board) state.showKpis = Boolean(board.hasKpis);
+    if (Array.isArray(board.kpis)) state.boardKpis = clone(board.kpis);
+    if (board.kpiStyle) state.boardKpiStyle = board.kpiStyle;
+    state.boardKpiPresentation = {
+      layout: board.kpiLayout || state.boardKpiPresentation.layout,
+      alignment: board.kpiAlignment || state.boardKpiPresentation.alignment,
+      density: board.kpiDensity || state.boardKpiPresentation.density,
+      chrome: board.kpiChrome || state.boardKpiPresentation.chrome,
+      reservedHeight: Number(board.kpiReservedHeight) || state.boardKpiPresentation.reservedHeight,
+      reservedWidth: Number(board.kpiReservedWidth) || state.boardKpiPresentation.reservedWidth,
+    };
+    if (Array.isArray(board.filters)) state.dashboardFilters = clone(board.filters);
+    if (Array.isArray(board.tiles)) {
+      const boundsById = new Map(
+        board.tiles
+          .filter((tile) => tile && tile.bounds)
+          .map((tile) => [tile.id, tile.bounds]),
+      );
+      for (const tile of state.tiles) {
+        const bounds = boundsById.get(tile.id);
+        if (bounds) tile.bounds = { ...bounds };
+      }
+      state.showChartSubtitles = board.tiles.every((tile) => tile.hasSubtitle);
+    }
+  }
+  state.crossFilterEnabled = state.tiles.some((tile) => tile.spec?.usermeta?.crossFilter?.role === "source");
+  state.activeFilterState = state.tiles.some((tile) => tile.spec?.usermeta?.activeFilterState);
+  state.previewCache.clear();
+  state.canvasPreview = null;
+}
+
+async function refreshAfterDashboardMutation() {
+  renderCanvasPreviewControl();
+  renderDashboardChrome();
+  await renderTiles();
+  renderMarkers();
+  renderCritiques();
+  renderVersions();
+  renderWorkingDraftStatus();
+  await renderInspector();
+}
+
+async function restoreDashboardCheckpoint(checkpoint) {
+  if (!checkpoint?.afterSnapshot) return;
+  const beforeVersion = Number(state.version) || 1;
+  if (state.workingDraft.dirty && !window.confirm(
+    "Restore this checkpoint? Unsaved Working Draft changes will be discarded.",
+  )) return;
+  applyLiveSnapshot(checkpoint.afterSnapshot);
+  const afterVersion = beforeVersion + 1;
+  state.version = afterVersion;
+  state.workingDraft = createWorkingDraft(checkpoint.id);
+  recordStudyAction("dashboard_state_restored", `Restored Checkpoint ${checkpoint.id}`, {
+    source: "checkpoint",
+    checkpointId: checkpoint.id,
+    beforeVersion,
+    afterVersion,
+  });
+  await refreshAfterDashboardMutation();
+}
+
+async function applyRecommendationSelection(selectedIds, conflictChoices = {}, { via, applyId: existingApplyId, skipRequest = false } = {}) {
+  const requestedCritiqueIds = [...selectedIds];
+  const applyVia = via || (requestedCritiqueIds.length > 1 ? "batch" : "single");
+  const applyId = existingApplyId || newStudyId();
+  const beforeVersion = Number(state.version) || 1;
+  if (!skipRequest) {
+    recordStudyAction("recommendation_apply_requested", `Requested apply of ${requestedCritiqueIds.length} recommendation${requestedCritiqueIds.length === 1 ? "" : "s"}`, {
+      applyId,
+      via: applyVia,
+      requestedCritiqueIds,
+      dashboardVersion: beforeVersion,
+    });
+  }
+  const failApply = (reason, extra = {}) => {
+    recordStudyAction("recommendation_apply_failed", `Apply failed (${applyVia})`, {
+      applyId,
+      via: applyVia,
+      requestedCritiqueIds,
+      committedCritiqueIds: extra.committedCritiqueIds || [],
+      failedCritiqueIds: extra.failedCritiqueIds || requestedCritiqueIds,
+      failureStage: extra.failureStage || "precondition",
+      failureCode: extra.failureCode || extra.failureStage || "precondition",
+      reason: reason || null,
+      rollback: extra.rollback || false,
+      beforeVersion,
+      afterVersion: Number(state.version) || beforeVersion,
+      critiqueId: requestedCritiqueIds.length === 1 ? requestedCritiqueIds[0] : null,
+    });
+    return { ok: false, plan: extra.plan || null, reason, applyId, ...extra };
+  };
   if (!reviewResultsMatchContext()) {
-    return { ok: false, plan: null, reason: "Regenerate critiques for the confirmed context before applying changes." };
+    return failApply("Regenerate critiques for the confirmed context before applying changes.", {
+      failureStage: "context_mismatch",
+    });
   }
   const plan = buildApplicationPlan(selectedIds, state.critiques, conflictChoices);
-  if (!plan.canApply) return { ok: false, plan, reason: "Resolve recommendation conflicts before applying." };
+  if (!plan.canApply) {
+    return failApply("Resolve recommendation conflicts before applying.", {
+      plan,
+      failureStage: "conflicts",
+    });
+  }
   const staleForDashboard = plan.order
     .map((id) => critiqueById(id))
     .filter((critique) => critique
       && Number.isFinite(Number(critique.lastEvaluatedVersion))
       && Number(critique.lastEvaluatedVersion) !== state.version);
   if (staleForDashboard.length) {
-    return {
-      ok: false,
-      plan,
-      reason: "This recommendation was generated for an earlier dashboard version. Regenerate critiques before applying it.",
-    };
+    return failApply(
+      "This recommendation was generated for an earlier dashboard version. Regenerate critiques before applying it.",
+      {
+        plan,
+        failureStage: "stale_dashboard",
+        failedCritiqueIds: staleForDashboard.map((critique) => critique.id),
+      },
+    );
   }
   const guidanceOnly = plan.order.map((id) => critiqueById(id)).filter((critique) => critique?.proposal?.mode === "guidance_only");
   if (guidanceOnly.length) {
-    return { ok: false, plan, reason: "Guidance-only recommendations must be implemented manually." };
+    return failApply("Guidance-only recommendations must be implemented manually.", {
+      plan,
+      failureStage: "guidance_only",
+      failedCritiqueIds: guidanceOnly.map((critique) => critique.id),
+    });
   }
   if (!state.artifact.hasExecutableSpecs) {
-    return { ok: false, plan, reason: "This artifact has no executable JSON specs." };
+    return failApply("This artifact has no executable JSON specs.", {
+      plan,
+      failureStage: "no_executable_specs",
+    });
   }
   const appliedCritiques = plan.order
     .map((id) => critiqueById(id))
@@ -5269,7 +5737,11 @@ async function applyRecommendationSelection(selectedIds, conflictChoices = {}) {
     tracePanel.done();
   } catch (err) {
     tracePanel.fail(`engine apply failed — ${err.message || err}`);
-    return { ok: false, plan, reason: err.message || String(err) };
+    return failApply(err.message || String(err), {
+      plan,
+      failureStage: result?.rollback?.rolledBack ? "rollback" : "engine",
+      rollback: Boolean(result?.rollback?.rolledBack),
+    });
   }
 
   // Some selected fixes changed the same part of a tile and the engine could not
@@ -5281,6 +5753,7 @@ async function applyRecommendationSelection(selectedIds, conflictChoices = {}) {
       plan,
       needsConflictChoice: true,
       unresolvedConflicts: result.unresolvedConflicts,
+      applyId,
     };
   }
 
@@ -5365,16 +5838,43 @@ async function applyRecommendationSelection(selectedIds, conflictChoices = {}) {
     critiqueId: critique.id,
     dimension: critique.dimension,
     proposalKind: critique.proposal?.kind,
-    data: { target: critique.tileId || "dashboard" },
+    data: {
+      target: critique.tileId || "dashboard",
+      decision: "apply",
+      applyId,
+      critiqueRevisionId: critique.revision || null,
+      dashboardVersion: nextVersion,
+    },
   }));
   const appliedEvent = appendInteractionEvent({
     kind: "changes_applied",
     summary: `Applied ${committedIds.length} ${committedIds.length === 1 ? "change" : "changes"} to the Working Draft`,
     data: {
+      applyId,
+      via: applyVia,
       recommendationIds: [...committedIds],
+      requestedCritiqueIds,
+      committedCritiqueIds: [...committedIds],
+      failedCritiqueIds: requestedCritiqueIds.filter((id) => !committedIds.includes(id)),
       changedTargets: [...(result.changedTargets || [])],
+      beforeVersion,
+      afterVersion: nextVersion,
+      rollback: false,
     },
   }, { synthesize: false });
+  const changeId = recordDashboardChanged({
+    source: "vizier_apply",
+    operation: classifyDashboardOperation(result.changedTargets || [], committedCritiques),
+    targetIds: [...(result.changedTargets || [])],
+    beforeVersion,
+    afterVersion: nextVersion,
+    relatedCritiqueIds: [...committedIds],
+    relatedApplyId: applyId,
+    diffSummary: {
+      changedTargets: [...(result.changedTargets || [])],
+      remainingFindings: result.evaluationReport?.remainingFindings ?? null,
+    },
+  });
   const evaluationEvent = appendInteractionEvent({
     kind: "working_draft_reevaluated",
     summary: `Re-evaluated the Working Draft: ${result.evaluationReport?.remainingFindings ?? 0} findings remain`,
@@ -5426,7 +5926,7 @@ async function applyRecommendationSelection(selectedIds, conflictChoices = {}) {
       state.settleDemoPlaying = false;
     }
   }
-  return { ok: true, plan, delta: result.recommendationDelta };
+  return { ok: true, plan, delta: result.recommendationDelta, applyId };
 }
 
 // Modal: for each same-tile conflict the engine could not auto-merge, let the
@@ -5496,14 +5996,35 @@ function promptConflictChoices(conflicts) {
 // the round-trips so a stubborn conflict can never loop forever.
 async function applySelectionResolvingConflicts(selectedIds) {
   let conflictChoices = {};
+  let applyId = null;
+  const via = selectedIds.length > 1 ? "batch" : "single";
   for (let round = 0; round < 8; round += 1) {
-    const applied = await applyRecommendationSelection(selectedIds, conflictChoices);
+    const applied = await applyRecommendationSelection(selectedIds, conflictChoices, {
+      via,
+      applyId,
+      skipRequest: Boolean(applyId),
+    });
+    applyId = applied.applyId || applyId;
     if (!applied.needsConflictChoice) return applied;
     const choices = await promptConflictChoices(applied.unresolvedConflicts);
-    if (!choices) return { ok: false, plan: applied.plan, reason: "Conflict resolution cancelled — nothing was applied." };
+    if (!choices) {
+      recordStudyAction("recommendation_apply_failed", `Apply failed (${via})`, {
+        applyId,
+        via,
+        requestedCritiqueIds: [...selectedIds],
+        committedCritiqueIds: [],
+        failedCritiqueIds: [...selectedIds],
+        failureStage: "conflict_cancelled",
+        failureCode: "conflict_cancelled",
+        reason: "Conflict resolution cancelled — nothing was applied.",
+        rollback: false,
+        dashboardVersion: Number(state.version) || 1,
+      });
+      return { ok: false, plan: applied.plan, reason: "Conflict resolution cancelled — nothing was applied.", applyId };
+    }
     conflictChoices = { ...conflictChoices, ...choices };
   }
-  return { ok: false, reason: "Could not resolve the conflicting fixes." };
+  return { ok: false, reason: "Could not resolve the conflicting fixes.", applyId };
 }
 
 function showFocusApplyFailure(reason) {
@@ -6759,6 +7280,10 @@ async function renderInspector() {
             : `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7"/></svg>`}
           <span>${canAcceptGuidance ? "Mark as Considered" : "Accept Change"}</span>
         </button>
+        <button class="focus-action defer" id="focusDefer" type="button" ${actionable ? "" : "disabled"}>
+          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.2l2 1.3"/></svg>
+          <span>Defer</span>
+        </button>
         <button class="focus-action reject" id="focusReject" type="button" ${actionable ? "" : "disabled"}>
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7M11.5 4.5l-7 7"/></svg>
           <span>Reject</span>
@@ -6851,16 +7376,8 @@ async function renderInspector() {
   });
   document.getElementById("focusAccept").addEventListener("click", async () => {
     if (canApplyIndividually) {
-      const applied = await applyRecommendationSelection([critique.id]);
+      const applied = await applyRecommendationSelection([critique.id], {}, { via: "single" });
       if (!applied.ok) {
-        // Study telemetry: the engine could not apply the accepted change — a
-        // friction point that success-only logging would hide.
-        recordStudyAction("recommendation_apply_failed", `Apply failed for: ${critique.title}`, {
-          critiqueId: critique.id,
-          dimension: critique.dimension,
-          via: "single",
-          reason: applied.reason || null,
-        });
         showFocusApplyFailure(applied.reason);
       }
       return;
@@ -6879,6 +7396,11 @@ async function renderInspector() {
       data: {
         target: critique.tileId || "dashboard",
         guidanceOnly: true,
+        decision: "considered",
+        applyId: null,
+        critiqueRevisionId: critique.revision || null,
+        dashboardVersion: Number(state.version) || 1,
+        reason: latestRationaleText(critique.id),
       },
     });
     state.canvasPreview = null;
@@ -6887,6 +7409,30 @@ async function renderInspector() {
     renderMarkers();
     await renderInspector();
     document.getElementById("guidanceAcceptedNotice")?.focus();
+  });
+  document.getElementById("focusDefer")?.addEventListener("click", async () => {
+    if (!actionable) return;
+    critique.status = "deferred";
+    critique.lifecycle = "deferred";
+    critique.lastEvaluatedVersion = state.version;
+    appendInteractionEvent({
+      kind: "recommendation_deferred",
+      summary: `Deferred recommendation: ${critique.title}`,
+      detail: critique.suggestion,
+      critiqueId: critique.id,
+      dimension: critique.dimension,
+      proposalKind: critique.proposal?.kind,
+      data: {
+        target: critique.tileId || "dashboard",
+        decision: "defer",
+        critiqueRevisionId: critique.revision || null,
+        dashboardVersion: Number(state.version) || 1,
+        reason: latestRationaleText(critique.id),
+      },
+    });
+    renderCritiques();
+    renderMarkers();
+    await renderInspector();
   });
   document.getElementById("focusReject").addEventListener("click", async () => {
     critique.status = "rejected";
@@ -6899,7 +7445,13 @@ async function renderInspector() {
       critiqueId: critique.id,
       dimension: critique.dimension,
       proposalKind: critique.proposal?.kind,
-      data: { target: critique.tileId || "dashboard" },
+      data: {
+        target: critique.tileId || "dashboard",
+        decision: "reject",
+        critiqueRevisionId: critique.revision || null,
+        dashboardVersion: Number(state.version) || 1,
+        reason: latestRationaleText(critique.id),
+      },
     });
     // Refresh the list and Category Mix underneath (like accept does) so the
     // rejected critique leaves the active view and the bar rebalances at once.
@@ -7015,17 +7567,19 @@ async function regenerateOneCritique(critique) {
   const targetId = critique.id;
   const index = state.critiques.findIndex((item) => item.id === targetId);
   if (index < 0) return "error";
+  const requestId = newStudyId();
+  const requestStartedAt = Date.now();
   recordStudyAction(
     "critique_requested",
     `Regenerated one critique: ${critique.title}`,
-    {
-      scope: "focused",
+    critiqueRequestStudyData({
+      requestId,
+      requestMode: "stale_recovery",
+      scope: "critique",
+      queryText: null,
       trigger: "stale-dashboard-recovery",
       critiqueId: targetId,
-      dimension: critique.dimension,
-      hadPriorCritiques: true,
-      priorCritiqueCount: state.critiques.length,
-    },
+    }),
   );
   try {
     const { critiques: incoming, answer } = await generateCritiquesFromEngine(
@@ -7061,8 +7615,19 @@ async function regenerateOneCritique(critique) {
       recordStudyAction(
         "critique_regenerated",
         `Updated solution for: ${critique.title}`,
-        { critiqueId: targetId, outcome: "updated", dimension: critique.dimension },
+        {
+          requestId,
+          critiqueId: targetId,
+          outcome: "updated",
+          dimension: critique.dimension,
+          latencyMs: Date.now() - requestStartedAt,
+        },
       );
+      recordCritiquesDisplayed("focused", critique.askId || null, {
+        requestId,
+        requestMode: "stale_recovery",
+        latencyMs: Date.now() - requestStartedAt,
+      });
       renderMarkers();
       renderCritiques();
       await renderInspector();
@@ -7089,7 +7654,13 @@ async function regenerateOneCritique(critique) {
     recordStudyAction(
       "critique_regenerated",
       `Critique no longer applies: ${critique.title}`,
-      { critiqueId: targetId, outcome: "retired", dimension: critique.dimension },
+      {
+        requestId,
+        critiqueId: targetId,
+        outcome: "retired",
+        dimension: critique.dimension,
+        latencyMs: Date.now() - requestStartedAt,
+      },
     );
     renderCanvasPreviewControl();
     renderMarkers();
@@ -7100,6 +7671,14 @@ async function regenerateOneCritique(critique) {
     const message = err instanceof Error ? err.message : String(err);
     tracePanel.fail(`Could not refresh this critique — ${message}`);
     showFocusApplyFailure(message);
+    recordStudyAction("critique_request_failed", "Stale-critique recovery failed", {
+      requestId,
+      requestMode: "stale_recovery",
+      scope: "critique",
+      critiqueId: targetId,
+      latencyMs: Date.now() - requestStartedAt,
+      reason: message,
+    });
     return "error";
   }
 }
@@ -7156,7 +7735,13 @@ async function generateCritiquesFromEngine(focusedRequest = "", options = {}) {
       boundsById[c.target?.ref?.tile] ||
       fullBoard,
   }));
-  return { critiques, answer: resp.answer || null, reviewScope: state.reviewScope };
+  return { critiques, answer: resp.answer || null, reviewScope: state.reviewScope, reviewMeta: {
+    model: resp?.model || critiques[0]?.model || null,
+    promptVersion: resp?.promptVersion || critiques[0]?.promptVersion || null,
+    systemVersion: resp?.engineVersion || critiques[0]?.engineVersion || null,
+    registryVersion: resp?.registryVersion || critiques[0]?.registryVersion || null,
+    runId: resp?.runId || null,
+  } };
 }
 
 async function generateLocalCritiques({ bounds, request, dimension }) {
@@ -7209,10 +7794,21 @@ async function generateLocalCritiques({ bounds, request, dimension }) {
     reviewScope: resp.reviewScope || "selected-region",
   }));
   state.strengths = readReviewStrengths(resp, resp?.reviewScope || "selected-region");
-  return { critiques, answer };
+  return {
+    critiques,
+    answer,
+    reviewMeta: {
+      model: resp?.model || critiques[0]?.model || null,
+      promptVersion: resp?.promptVersion || critiques[0]?.promptVersion || null,
+      systemVersion: resp?.engineVersion || critiques[0]?.engineVersion || null,
+      registryVersion: resp?.registryVersion || critiques[0]?.registryVersion || null,
+      runId: resp?.runId || null,
+    },
+  };
 }
 
-function recordCritiquesDisplayed(scope, askId) {
+function recordCritiquesDisplayed(scope, askId, extra = {}) {
+  const critiqueIds = state.critiques.map((critique) => critique.id);
   recordStudyAction(
     "critiques_displayed",
     `Displayed ${state.critiques.length} critique${state.critiques.length === 1 ? "" : "s"} after a ${scope} review`,
@@ -7220,12 +7816,23 @@ function recordCritiquesDisplayed(scope, askId) {
       scope,
       askId,
       count: state.critiques.length,
+      critiqueCount: state.critiques.length,
+      critiqueIds,
+      dashboardVersion: Number(state.version) || 1,
+      promptVersion: extra.promptVersion || null,
+      systemVersion: extra.systemVersion || STUDY_APP_VERSION,
+      reviewTemperature: Number(state.reviewTemperature),
+      model: extra.model || null,
+      latencyMs: extra.latencyMs ?? null,
+      requestId: extra.requestId || null,
+      requestMode: extra.requestMode || null,
       critiques: state.critiques.map((critique) => ({
         id: critique.id,
         title: critique.title,
         dimension: critique.dimension,
         priority: critique.priority,
         status: critique.status,
+        revision: critique.revision || null,
       })),
     },
   );
@@ -7253,25 +7860,30 @@ async function runAIAssist(options = {}) {
   syncReviewReadiness();
 
   let askId = null;
+  const requestId = newStudyId();
+  const requestStartedAt = Date.now();
+  const hadPrior = state.critiques.length > 0;
+  const requestMode = critiqueRequestMode({
+    focusedRequest,
+    trigger: options.trigger,
+    hadPrior,
+  });
   try {
     askId = state.nextAskId++;
-    // Study telemetry: the request itself. This is the primary input the product
-    // never journaled — capture the exact request text (focused/open-ended), the
-    // scope, and whether critiques already existed (a re-run vs a first ask).
     recordStudyAction(
       "critique_requested",
       focusedRequest ? `Requested a focused review: ${focusedRequest}` : "Requested a full review",
-      {
-        scope: attemptedScope,
+      critiqueRequestStudyData({
+        requestId,
+        requestMode,
+        scope: protocolRequestScope(requestMode),
         askId,
-        requestText: focusedRequest || null,
+        queryText: focusedRequest || null,
         trigger: options.trigger || (focusedRequest ? "focused-question" : "full-review"),
-        hadPriorCritiques: state.critiques.length > 0,
-        priorCritiqueCount: state.critiques.length,
-        activeScopes: [...(state.context.scope || [])],
-      },
+        critiqueId: options.keepCritiqueId || null,
+      }),
     );
-    const { critiques: baseCritiques, answer } = await generateCritiquesFromEngine(focusedRequest);
+    const { critiques: baseCritiques, answer, reviewMeta } = await generateCritiquesFromEngine(focusedRequest);
     // Synchronize the active list with the dashboard the engine just reviewed:
     // refresh still-valid cards, add new findings, remove obsolete/duplicate
     // undecided cards, and preserve only explicit decisions as durable history.
@@ -7320,6 +7932,7 @@ async function runAIAssist(options = {}) {
       || null;
     state.selectedCritiqueId = opened?.id || null;
     state.selectedTileId = opened?.tileId || null;
+    if (opened?.id) markCritiqueInspected(opened.id);
     renderRubrics();
     await renderTiles();
     renderMarkers();
@@ -7333,16 +7946,28 @@ async function runAIAssist(options = {}) {
     // Study telemetry: the set the participant was shown after this review. Paired
     // with critique_opened, this yields the reliable "displayed vs inspected" split
     // (which available critiques were never opened) without any gaze/scroll signal.
-    recordCritiquesDisplayed(attemptedScope, askId);
+    recordCritiquesDisplayed(attemptedScope, askId, {
+      requestId,
+      requestMode,
+      latencyMs: Date.now() - requestStartedAt,
+      model: reviewMeta?.model || null,
+      promptVersion: reviewMeta?.promptVersion || null,
+      systemVersion: reviewMeta?.systemVersion || null,
+    });
     return true;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const modeLabel = attemptedScope === "focused" ? "Focused review" : "Full review";
     tracePanel.fail(`${modeLabel} failed — ${message}`);
     recordStudyAction("critique_request_failed", `${modeLabel} failed`, {
-      scope: attemptedScope,
+      scope: protocolRequestScope(requestMode),
       askId,
+      requestId,
+      requestMode,
       requestText: focusedRequest || null,
+      queryText: focusedRequest || null,
+      dashboardVersion: Number(state.version) || 1,
+      latencyMs: Date.now() - requestStartedAt,
       reason: message,
     });
     // A failed ask must not discard critiques accumulated by earlier asks. The
@@ -7411,6 +8036,13 @@ async function resetDemo() {
   document.getElementById("demoCursor")?.remove();
   const initial = state.artifact.initial;
   if (!initial) return;
+  const beforeVersion = Number(state.version) || 1;
+  recordStudyAction("dashboard_state_restored", "Reset dashboard to the original checkpoint", {
+    source: "reset_demo",
+    beforeVersion,
+    afterVersion: 1,
+    relatedCritiqueIds: [],
+  });
   state.tiles = initial.tiles.map((tile) => ({ ...clone(tile), renderer: "vega-lite", v2Label: tile.label || tile.id }));
   state.critiques = [];
   state.critiqueRefreshNotice = null;
@@ -7575,7 +8207,53 @@ async function collectStudyDashboardArtifacts() {
   });
 }
 
+function studyUnresolvedCritiqueIds() {
+  const displayed = new Set();
+  const decided = new Set();
+  for (const event of studyEventLog()) {
+    const kind = event.kind || event.eventName;
+    const data = event.data || {};
+    if (kind === "critiques_displayed") {
+      for (const id of data.critiqueIds || []) displayed.add(id);
+    }
+    if (
+      kind === "recommendation_accepted"
+      || kind === "recommendation_rejected"
+      || kind === "recommendation_deferred"
+    ) {
+      if (event.critiqueId) decided.add(event.critiqueId);
+      if (data.critiqueId) decided.add(data.critiqueId);
+    }
+    if (kind === "changes_applied") {
+      for (const id of data.committedCritiqueIds || data.recommendationIds || []) decided.add(id);
+    }
+  }
+  return [...displayed].filter((id) => !decided.has(id));
+}
+
 async function saveStudyBundle(reason) {
+  if (reason === "end" && isStudyActive()) {
+    const unresolvedCritiqueIds = studyUnresolvedCritiqueIds();
+    recordStudyAction("critiques_unresolved", "Critiques displayed without a later decision", {
+      critiqueIds: unresolvedCritiqueIds,
+      critiqueCount: unresolvedCritiqueIds.length,
+    });
+    recordStudyAction("final_state_captured", "Captured the final dashboard and critique state", {
+      dashboardId: state.artifact?.id || state.artifact?.libraryId || null,
+      dashboardVersion: Number(state.version) || 1,
+      critiqueIds: state.critiques.map((critique) => critique.id),
+      critiqueCount: state.critiques.length,
+      critiqueStatuses: state.critiques.map((critique) => ({
+        id: critique.id,
+        status: critique.status || null,
+        decision: critique.lifecycle || critique.status || null,
+      })),
+      checkpointCount: (state.versions || []).length,
+      contextVersion: Number(studySessionInfo()?.contextVersion) || Number(state.studyContextVersion) || 0,
+      unresolvedCritiqueIds,
+    });
+    endStudySession({ reason: "end" });
+  }
   const artifacts = await collectStudyDashboardArtifacts();
   const bundle = buildStudyBundle(collectStudySnapshot(), reason);
   try {
@@ -7598,7 +8276,7 @@ function injectStudyStyles() {
     .study-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; z-index: 9999; }
     .study-modal-overlay.open { display: flex; }
     .study-modal-overlay[hidden] { display: none !important; }
-    .study-modal { background: #fff; color: #1c1c1e; width: min(420px, calc(100vw - 32px)); border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,.3); overflow: hidden; }
+    .study-modal { background: #fff; color: #1c1c1e; width: min(480px, calc(100vw - 32px)); border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,.3); overflow: hidden; }
     .study-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid #e5e5e7; }
     .study-modal-head strong { font-size: 15px; }
     .study-modal-body { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
@@ -7611,6 +8289,10 @@ function injectStudyStyles() {
     .study-actions .button { font: inherit; cursor: pointer; padding: 8px 12px; border-radius: 8px; border: 1px solid #d1d1d6; background: #f2f2f7; color: #1c1c1e; }
     .study-actions .button.primary { background: #1c1c1e; color: #fff; border-color: #1c1c1e; }
     .study-actions .button.danger { background: #fff; color: #b00020; border-color: #e5b4bb; }
+    .study-annotate { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid #e5e5e7; }
+    .study-annotate-row { display: flex; gap: 8px; align-items: stretch; }
+    .study-annotate-row select, .study-annotate-row input, .study-field select { font: inherit; padding: 8px 10px; border: 1px solid #d1d1d6; border-radius: 8px; color: #1c1c1e; background: #fff; }
+    .study-annotate-row input { flex: 1; min-width: 0; }
     [data-study-session].recording { color: #b00020; }
   `;
 }
@@ -7668,6 +8350,24 @@ function mountStudyUI() {
         <p class="study-line"><span>Participant</span><strong>${escapeStudy(info.participantId)}</strong></p>
         <p class="study-line"><span>Session</span><code>${escapeStudy(info.sessionId)}</code></p>
         <p class="study-line"><span>Events</span><strong id="studyEventCount">${info.eventCount}</strong></p>
+        <label class="study-field"><span>Study phase</span>
+          <select id="studyPhase">
+            <option value="">Select phase…</option>
+            ${STUDY_PHASES.map((phase) =>
+              `<option value="${phase}"${info.studyPhase === phase ? " selected" : ""}>${phase.replaceAll("_", " ")}</option>`).join("")}
+          </select>
+        </label>
+        <div class="study-annotate">
+          <strong>Researcher annotation</strong>
+          <div class="study-annotate-row">
+            <select id="studyAnnotationKind">
+              ${RESEARCHER_ANNOTATION_KINDS.map((kind) =>
+                `<option value="${kind}">${kind.replaceAll("_", " ")}</option>`).join("")}
+            </select>
+            <input type="text" id="studyAnnotationNote" placeholder="Assistance, interruption, technical problem…">
+          </div>
+          <button type="button" class="button" id="studyAnnotate">Record annotation</button>
+        </div>
         <p class="study-status" id="studyStatus" aria-live="polite"></p>
         <div class="study-actions">
           <button type="button" class="button" id="studySaveNow">Save now</button>
@@ -7679,6 +8379,22 @@ function mountStudyUI() {
       const say = (message) => {
         if (status) status.textContent = message;
       };
+      body.querySelector("#studyPhase")?.addEventListener("change", (event) => {
+        const phase = event.currentTarget.value;
+        if (!phase) return;
+        setStudyPhase(phase);
+        say(`Phase: ${phase.replaceAll("_", " ")}.`);
+      });
+      body.querySelector("#studyAnnotate")?.addEventListener("click", () => {
+        const kind = body.querySelector("#studyAnnotationKind")?.value;
+        const note = body.querySelector("#studyAnnotationNote")?.value || "";
+        const recorded = recordResearcherAnnotation(kind, note);
+        if (recorded) {
+          const noteInput = body.querySelector("#studyAnnotationNote");
+          if (noteInput) noteInput.value = "";
+          say(`Recorded ${kind.replaceAll("_", " ")}.`);
+        }
+      });
       body.querySelector("#studySaveNow").addEventListener("click", async () => {
         say("Saving…");
         const out = await saveStudyBundle("manual");
@@ -7706,7 +8422,7 @@ function mountStudyUI() {
         const out = await saveStudyBundle("end");
         exportStudyBundleLocal(out.bundle);
         exportStudyDashboardsZip(out.artifacts, out.bundle);
-        endStudySession();
+        endStudySession({ recordEvent: false });
         refreshButton();
         renderBody();
         say(out?.result
@@ -7762,7 +8478,9 @@ document.getElementById("focusBackButton").addEventListener("click", () => {
   // giving a reliable time-on-critique without any attention/gaze tracking.
   recordStudyAction("critique_closed", "Returned to the critique list", {
     critiqueId: state.selectedCritiqueId || null,
+    dwellMs: critiqueInspectDwellMs(state.selectedCritiqueId),
   });
+  state.critiqueInspect = { critiqueId: null, openedAtMs: 0 };
   closeCritiqueFocus();
 });
 // Both mode triggers hide themselves on activation (the face swap sets the
@@ -7794,12 +8512,6 @@ document.getElementById("batchApplyButton").addEventListener("click", async () =
   if (button) button.disabled = true;
   const applied = await applySelectionResolvingConflicts(selectedIds);
   if (!applied.ok) {
-    // Study telemetry: a batch apply that did not commit (conflict/engine failure).
-    recordStudyAction("recommendation_apply_failed", `Batch apply failed for ${selectedIds.length} selected`, {
-      via: "batch",
-      reason: applied.reason || null,
-      critiqueIds: selectedIds,
-    });
     renderBatchApplyBar();
     const note = document.getElementById("batchApplyNote");
     if (note) {
@@ -7856,9 +8568,24 @@ document.getElementById("localReviewForm").addEventListener("submit", async (eve
   // generation finishes (retired on success, kept for retry on failure).
   els.localReviewPopover.hidden = true;
   let askId = null;
+  const requestId = newStudyId();
+  const requestStartedAt = Date.now();
   try {
     askId = state.nextAskId++;
-    const { critiques: localCritiques, answer } = await generateLocalCritiques({
+    recordStudyAction(
+      "critique_requested",
+      `Requested a local review: ${request}`,
+      critiqueRequestStudyData({
+        requestId,
+        requestMode: "local",
+        scope: "region",
+        askId,
+        queryText: request,
+        bounds,
+        trigger: "local-review",
+      }),
+    );
+    const { critiques: localCritiques, answer, reviewMeta } = await generateLocalCritiques({
       bounds,
       request,
       dimension: els.localReviewDimension.value,
@@ -7900,21 +8627,37 @@ document.getElementById("localReviewForm").addEventListener("submit", async (eve
       detail: request,
       dimension: els.localReviewDimension.value || localCritiques[0]?.dimension || "other",
       bounds,
-      data: { critiqueIds: localCritiques.map((critique) => critique.id) },
+      data: {
+        requestId,
+        requestMode: "local",
+        critiqueIds: localCritiques.map((critique) => critique.id),
+      },
     });
     closeLocalReviewPopover();
     renderCritiques();
     renderMarkers();
     await renderInspector();
     if (state.batchMode) await refreshBatchPreview();
-    recordCritiquesDisplayed("selected-region", askId);
+    recordCritiquesDisplayed("selected-region", askId, {
+      requestId,
+      requestMode: "local",
+      latencyMs: Date.now() - requestStartedAt,
+      model: reviewMeta?.model || null,
+      promptVersion: reviewMeta?.promptVersion || null,
+      systemVersion: reviewMeta?.systemVersion || null,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     tracePanel.fail(`Local review failed — ${message}`);
     recordStudyAction("critique_request_failed", "Local review failed", {
       scope: "selected-region",
       askId,
+      requestId,
+      requestMode: "local",
       requestText: request,
+      queryText: request,
+      dashboardVersion: Number(state.version) || 1,
+      latencyMs: Date.now() - requestStartedAt,
       reason: message,
     });
     // Bring the popover back so the error is visible and the request can be
@@ -8761,7 +9504,8 @@ async function inferContextOnUpload() {
   setContextWorkflow(CONTEXT_WORKFLOW_STATUS.GENERATING, { requestSerial });
   renderFixedContextPanel();
   try {
-    const result = await requestScaffold("", "dashboard-draft", true);
+    const result = await withContextGenerationTelemetry("upload", () =>
+      requestScaffold("", "dashboard-draft", true));
     if (state.contextWorkflow.requestSerial !== requestSerial) return;
     setContextWorkflow(CONTEXT_WORKFLOW_STATUS.NEEDS_REVIEW, {
       requestSerial,
@@ -9561,13 +10305,13 @@ function enterWorkspace() {
     detail: description
       ? `Context: ${description}`
       : "Confirmed an artifact-only review without additional context",
-    data: contextSavedStudyData({
+    data: withContextSaveStudyFields(contextSavedStudyData({
       submittedText: description,
       submittedFields,
       generatedFields: generated
         ? { goal: generated.goal, audience: generated.audience, constraints: generated.constraints }
         : null,
-    }),
+    })),
   });
   renderFixedContextPanel();
   renderContextToolState();
@@ -9631,7 +10375,8 @@ ob.parseBrief.addEventListener("click", async () => {
   ob.parseBrief.classList.add("running");
   let generated = false;
   try {
-    const result = await requestScaffold("", "dashboard-draft");
+    const result = await withContextGenerationTelemetry("onboarding", () =>
+      requestScaffold("", "dashboard-draft"));
     applyScaffoldResult(result);
     generated = true;
   } catch (error) {

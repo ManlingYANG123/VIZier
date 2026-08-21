@@ -779,12 +779,18 @@ test("session end archives high-resolution PNG and reloadable JSON for checkpoin
 
   assert.match(source, /async function captureDashboardExport\(\)/);
   assert.match(source, /async function captureLiveArtboardPng\(\)/);
+  assert.match(source, /async function captureDashboardDisplaySvg\(\)/);
   assert.match(source, /async function vegaTileCanvas\(/);
+  assert.match(source, /function paintLiveArtboardChrome\(/);
+  assert.match(source, /layoutBoxOnArtboard\(/);
   assert.match(source, /emptyVegaHosts: true/);
   assert.match(source, /view\.toCanvas/);
   assert.match(source, /toDataURL\("image\/png"\)/);
   assert.match(source, /toDataURL\("image\/webp", \.84\)/);
   assert.match(source, /target\.afterPng = captured\.png/);
+  assert.match(source, /target\.afterSvg = captured\.svg/);
+  assert.match(source, /const full = version\.afterPng \|\| thumbnail/);
+  assert.match(source, /full: faithful \|\| full/);
   assert.match(source, /async function collectStudyDashboardArtifacts\(\)/);
   assert.match(source, /dashboardDocumentFromSnapshot\(\{/);
   assert.match(source, /exportStudyDashboardsZip\(out\.artifacts, out\.bundle\)/);
@@ -797,7 +803,18 @@ test("study telemetry pairs review requests with displayed or failed, and checkp
   assert.match(source, /state\.reviewInFlight/);
   assert.match(source, /if \(state\.reviewInFlight\) return false;/);
   assert.match(source, /recordCritiquesDisplayed\(/);
-  assert.match(source, /recordCritiquesDisplayed\("selected-region", askId\)/);
+  assert.match(source, /recordCritiquesDisplayed\("selected-region", askId,/);
+  assert.match(source, /requestId/);
+  assert.match(source, /requestMode/);
+  assert.match(source, /recommendation_apply_requested/);
+  assert.match(source, /dashboard_changed/);
+  assert.match(source, /endStudySession\(\{ reason: "end" \}\)/);
+  assert.match(source, /final_state_captured/);
+  assert.match(source, /decision: "apply"/);
+  assert.match(source, /recommendation_deferred/);
+  assert.match(source, /critiques_unresolved/);
+  assert.match(source, /dwellMs/);
+  assert.match(source, /decision: "defer"/);
   assert.match(source, /critique_request_failed/);
   assert.match(source, /const recommendationIds = \[\.\.\.\(state\.workingDraft\.applicationOrder \|\| \[\]\)\];/);
   assert.match(source, /const committedIds = Array\.isArray\(result\.applicationOrder\)/);

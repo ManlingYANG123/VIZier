@@ -33,16 +33,20 @@ never a claim about reading.
 
 ## Base fields (on every event)
 
-Every recorded event carries the four required identifiers plus a relative clock,
-stamped in `recordStudyEvent`:
+Every recorded event carries a schema-v2 envelope, stamped in `recordStudyEvent`:
 
 | field | meaning |
 |---|---|
+| `eventName` | same as `kind` (stable name for analysis) |
+| `schemaVersion` | currently `2` |
 | `participantId` | who |
 | `sessionId` | which session (new UUID per Start) |
 | `timestamp` | ISO wall-clock |
-| `logId` | monotonic per-session sequence number |
 | `tRelMs` | milliseconds since session start (for ordering / durations) |
+| `logId` / `sequenceNumber` | monotonic per-session sequence (same value; use to detect gaps) |
+| `dashboardId` | current artifact id |
+| `dashboardVersion` | working-draft version at event time |
+| `appVersion` | VIZier build id (`0.2.0`) |
 
 ## Captured event catalog
 
@@ -53,32 +57,46 @@ the product and are mirrored into the study log automatically (the hook in
 | kind | trigger | key fields | new |
 |---|---|---|---|
 | `session_started` | session starts | | |
-| `context_generation_requested` | "Describe this dashboard's context" (AI) | source | ✅ |
-| `context_saved` | Confirm / Continue-Without-Context | scope, hasContext, **generatedText, submittedText, edited, origin** | ✅ (fields) |
+| `logging_status_changed` | logging started / degraded / recovered / stopped | status | ✅ |
+| `study_phase_changed` | researcher sets practice / brief_reading / timed_task / post_session | from, to | ✅ |
+| `researcher_annotation` | researcher notes assistance, interruption, technical problem, deviation, bookmark | annotationKind, note | ✅ |
+| `session_ended` | End & save | reason, eventCount | ✅ |
+| `final_state_captured` | End & save, immediately before deactivate | critiqueIds, dashboardVersion | ✅ |
+| `context_generation_requested` | AI describe-context | source, generationId | ✅ |
+| `context_generation_completed` / `_failed` | infer succeeds or fails | generationId, latencyMs, reason | ✅ |
+| `context_saved` | Confirm / Continue-Without-Context | **outcome** (`confirmed` \| `continued_without_context`), contextVersion, source, generatedText, submittedText, edited, origin | ✅ (fields) |
 | `inferred_context_accepted` | "Add as Context" on a learned-context card | field, detail | |
 | `inferred_context_dismissed` | "Dismiss" on a learned-context card | field, detail | |
-| `critique_requested` | Generate / Regenerate / focused Ask | **scope, askId, requestText, trigger, hadPriorCritiques, activeScopes** | ✅ |
-| `local_critique_requested` | region select + submit | detail (exact text), bounds, dimension | |
-| `critiques_displayed` | a review **successfully** returns and renders (full, focused, or selected-region) | count, list of {id,title,dimension,priority,status}, askId | ✅ |
-| `critique_regenerated` | one stale critique refreshed (stale-dashboard recovery) resolves — replaced with a new solution, or retired | critiqueId, **outcome** (`updated` \| `retired`), dimension | ✅ |
-| `critique_request_failed` | a review request does not complete | scope, askId, reason | ✅ |
+| `critique_requested` | Generate / regenerate / focused Ask / local / stale recovery | **requestId, requestMode, parentRequestId, scope, queryText, dashboardVersion** | ✅ |
+| `local_critique_requested` | region select + submit | detail, bounds, requestId | |
+| `critiques_displayed` | a review **successfully** renders | requestId, critiqueIds, critiqueCount, latencyMs, model/prompt/systemVersion | ✅ |
+| `critique_regenerated` | stale-dashboard recovery resolves | requestId, outcome (`updated` \| `retired`) | ✅ |
+| `critique_request_failed` | a review request does not complete | requestId, requestMode, reason, latencyMs | ✅ |
 | `critique_opened` | click a critique card / history item | critiqueId | |
 | `critique_details_expanded` / `_collapsed` | toggle "Why & Evidence" | critiqueId, dimension | ✅ |
 | `evidence_region_revealed` | "recall region" jump on the canvas | critiqueId | ✅ |
 | `interaction_replayed` | "Run interaction test on the canvas" | critiqueId | ✅ |
 | `preview_viewed` | Original/Proposed (before/after) toggle | phase | |
-| `critique_closed` | Back to the critique list | critiqueId | ✅ |
-| `recommendation_accepted` | Accept Change / Mark as Considered | critiqueId, dimension, proposalKind | |
-| `changes_applied` | a successful apply commits | recommendationIds, changedTargets | |
+| `critique_closed` | Back to the critique list | critiqueId, **dwellMs** | ✅ |
+| `recommendation_accepted` | Accept Change **or** Mark as Considered | **decision** (`apply` \| `considered`), applyId, dashboardVersion, reason | ✅ (fields) |
+| `recommendation_deferred` | Defer | decision=`defer` | ✅ |
+| `recommendation_apply_requested` | author starts an apply (denominator) | applyId, via, requestedCritiqueIds | ✅ |
+| `changes_applied` | a successful apply commits | applyId, committedCritiqueIds, before/after version | |
+| `dashboard_changed` | dashboard version actually moved | source (`vizier_apply` \| `system`), operation, relatedCritiqueIds, relatedApplyId | ✅ |
 | `working_draft_reevaluated` | post-apply re-evaluation | remainingFindings | |
-| `recommendation_apply_failed` | apply did not commit (single or batch) | **via, reason, critiqueId(s)** | ✅ |
-| `recommendation_rejected` | Reject | critiqueId, dimension | |
+| `recommendation_apply_failed` | apply did not commit | applyId, via, failureStage, rollback | ✅ |
+| `recommendation_rejected` | Reject | decision=`reject`, reason | |
+| `critiques_unresolved` | End & save: displayed with no later decision | critiqueIds | ✅ |
 | `critique_rationale_added` / `_updated` / `_removed` | rationale modal | critiqueId, dimension | |
-| `checkpoint_saved` | Save Checkpoint | recommendationIds (same length as the summary count — only engine-committed applies) | |
+| `dashboard_state_restored` | Reset demo **or** restore a saved checkpoint | source, checkpointId, before/after version | ✅ |
 
-Batch-vs-single apply is derivable without a separate field:
-`changes_applied.recommendationIds.length > 1` ⇒ batch; `recommendation_apply_failed`
-already carries an explicit `via`.
+`requestMode` is one of: `generate` | `regenerate_all` | `focused_ask` | `stale_recovery` | `local`.
+
+`recommendation_accepted` with `decision:"apply"` is **intent/commit of an engine apply**, not a substitute for `recommendation_apply_requested`. `decision:"considered"` is Mark as Considered (guidance). Ignore/unresolved is derived at session end: ids in `critiques_displayed` with no later decision.
+
+The product has **no** undo/redo. Restoring a saved checkpoint or Reset is `dashboard_state_restored`. Manual dashboard edits also have no editor path, so `dashboard_changed.source=manual` is not produced yet.
+
+Batch-vs-single apply is explicit on `via` and also derivable from `requestedCritiqueIds.length`.
 
 ## Taxonomy triage
 
@@ -91,7 +109,8 @@ already carries an explicit `via`.
   **submittedText** (what the author confirmed), plus `edited` / `origin`
   (`ai-unchanged` | `ai-edited` | `user-written` | `none`). Per-keystroke edits
   are not logged.
-- A3 generate / regenerate context (AI) — **[CAPTURE]** `context_generation_requested`.
+- A3 generate / regenerate context (AI) — **[CAPTURE]** `context_generation_requested`,
+  then `context_generation_completed` or `context_generation_failed` (with latency).
 - A4 accept / modify-before-accept / reject an inferred suggestion —
   **[CAPTURE]** `inferred_context_accepted` / `inferred_context_dismissed`, with
   `generatedText` vs `submittedText` on accept (the card is editable before Add).
@@ -100,12 +119,14 @@ already carries an explicit `via`.
 - A6 add a contextual constraint (design doc / steering note / rule toggles) —
   **[SKIP — deferred]** discrete and loggable, but a secondary setup workflow; add
   only if constraint-use becomes a research question.
-- A7 proceed without context — **[CAPTURE]** via `context_saved` with `hasContext:false`.
+- A7 proceed without context — **[CAPTURE]** via `context_saved` with
+  `outcome:"continued_without_context"` (`hasContext:false`).
 
 ### B. Feedback request
 
-- B8 full critique request — **[CAPTURE]** `critique_requested` (scope `full`). *This
-  was the single biggest gap: the primary action previously emitted nothing.*
+- B8 full critique request — **[CAPTURE]** `critique_requested` with
+  `requestMode` `generate` or `regenerate_all`, plus `requestId` shared with
+  `critiques_displayed` / `critique_request_failed`.
 - B9 focused review request — **[CAPTURE]** `critique_requested` (scope `focused`,
   with exact `requestText`).
 - B10 select a feedback dimension — **[CAPTURE]** as `activeScopes` on
@@ -160,17 +181,23 @@ already carries an explicit `via`.
 
 - D30 preview / exit preview — **[CAPTURE]** `preview_viewed` (the before/after
   Original ↔ Proposed toggle — a high-value, unambiguous signal).
-- D31 accept as-is / partial (batch) — **[CAPTURE]** `recommendation_accepted`; batch
-  is derivable from `changes_applied.recommendationIds.length`.
-- D32 reject / dismiss — **[CAPTURE]** `recommendation_rejected`.
+- D31 accept as-is / partial (batch) — **[CAPTURE]** `recommendation_apply_requested`
+  then, on success, `recommendation_accepted` with `decision:"apply"`,
+  `changes_applied`, and `dashboard_changed`. Mark as Considered is
+  `recommendation_accepted` with `decision:"considered"` — not an apply.
+- D32 reject / dismiss — **[CAPTURE]** `recommendation_rejected` (`decision:"reject"`).
 - D33 request a different recommendation — **[SKIP — not supported]** (only whole-set
   regenerate, captured by B13).
-- D34 refine / edit before applying — **[SKIP — not supported]**.
-- D35 apply success vs failure — **[CAPTURE]** success = `changes_applied`; failure =
-  `recommendation_apply_failed` (new; previously failures were invisible).
-- D36 undo / redo — **[SKIP — not supported]** (checkpoints are compare-only).
-- D37 reverse a prior decision — **[SKIP — not supported]** (decisions are final;
-  history is view-only).
+- D34 refine / edit before applying — **[SKIP — not supported]** (no in-app spec editor,
+  so `dashboard_changed.source=manual` is not emitted).
+- D35 apply success vs failure — **[CAPTURE]** requested = `recommendation_apply_requested`;
+  success = `changes_applied`; failure = `recommendation_apply_failed` (shared `applyId`).
+- D36 undo / redo — **[SKIP — not supported]**. Restoring a saved checkpoint or Reset
+  emits `dashboard_state_restored`.
+- D37 reverse a prior accept/reject decision — **[SKIP — not supported]** (those
+  decisions stay in history).
+- D38 defer — **[CAPTURE]** `recommendation_deferred`. Ignore/unresolved is emitted at
+  End as `critiques_unresolved` (displayed IDs with no later decision).
 
 ## What think-aloud + screen recording covers (not telemetry)
 
@@ -181,8 +208,8 @@ These are the perception/reasoning signals we intentionally leave to the video:
 - Hover / highlight behavior (C22).
 - Scanning the list and skipping critiques without opening them (C27 — partly
   derivable, but the *why* is think-aloud).
-- What the participant would have asked as a follow-up, or wished they could reject /
-  undo (B14, D33, D34, D36, D37 — features that do not exist).
+- What the participant would have asked as a follow-up (B14, D33 — features that do
+  not exist). Manual in-spec edits (D34) also still need think-aloud.
 - The reasoning behind any accept/reject/skip decision.
 
 ## Derived metrics (no extra instrumentation needed)
@@ -196,7 +223,12 @@ These are the perception/reasoning signals we intentionally leave to the video:
 - **Depth of engagement per critique**: presence of `critique_details_expanded`,
   `evidence_region_revealed`, `interaction_replayed`, `preview_viewed` for that
   `critiqueId`.
-- **Friction**: `recommendation_apply_failed` rate and reasons.
+- **Ignored / unresolved critiques**: ids in any `critiques_displayed.critiqueIds`
+  that never appear with a later `decision` of apply / considered / reject.
+- **Apply success rate**: `recommendation_apply_requested` vs `changes_applied` /
+  `recommendation_apply_failed` joined on `applyId`.
+- **Request latency**: `critiques_displayed.latencyMs` or failed counterpart,
+  joined on `requestId`.
 
 ## Where the new hooks live (`src/app.js`)
 
@@ -205,16 +237,14 @@ session is active, and never on the product's 100-capped journal or preference
 synthesis path (study-only, zero product-behavior impact).
 
 - `critique_requested`, `critiques_displayed`, `critique_request_failed` — in
-  `runAIAssist` (full/focused) and the local-review submit handler.
-- `critique_requested` (again, with `trigger:"stale-dashboard-recovery"`) and
-  `critique_regenerated` (`outcome` `updated`/`retired`) — in `regenerateOneCritique`.
-- `critique_details_expanded/_collapsed`, `evidence_region_revealed`,
-  `interaction_replayed`, `recommendation_apply_failed` (single) — in the critique
-  focus view (`renderInspector`).
-- `critique_closed` — `focusBackButton` handler.
-- `recommendation_apply_failed` (batch) — `batchApplyButton` handler.
-- `context_generation_requested` — `contextInferBtn` handler.
-- `hasContext` — added to the existing `context_saved` payload.
+  `runAIAssist` (full/focused), local-review submit, and `regenerateOneCritique`,
+  joined by `requestId`.
+- `recommendation_apply_requested` / `_failed` / `dashboard_changed` — in
+  `applyRecommendationSelection`.
+- `session_ended`, `final_state_captured`, `study_phase_changed`,
+  `researcher_annotation` — study session modal.
+- `context_generation_requested` / `_completed` / `_failed` — workspace infer,
+  upload infer, and onboarding infer.
 
 ## Session-end dashboard files
 

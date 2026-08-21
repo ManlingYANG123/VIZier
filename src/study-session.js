@@ -6,11 +6,13 @@
  * data. This module keeps a SEPARATE, uncapped, refresh-surviving record of the
  * session for the study, independent of the product logic.
  *
- * Every recorded event carries the four required base fields — participantId,
- * sessionId, timestamp, logId — plus the semantic fields the product already
- * produces. The full session bundle (events + a snapshot of the before/after
- * dashboards, critiques, decisions, rationales, and context) is uploaded to the
- * backend (which stores it in S3) and can also be downloaded locally as a backup.
+ * Every recorded event carries a stable envelope — eventName, schemaVersion,
+ * participantId, sessionId, timestamp, tRelMs, logId, sequenceNumber,
+ * dashboardId, dashboardVersion, appVersion — plus the semantic fields the
+ * product already produces. The full session bundle (events + a snapshot of
+ * the before/after dashboards, critiques, decisions, rationales, and context)
+ * is uploaded to the backend (which stores it in S3) and can also be
+ * downloaded locally as a backup.
  *
  * Design rules:
  *  - Telemetry must NEVER break the product: every entry point is guarded so a
@@ -24,11 +26,23 @@ import { dashboardDocumentFromSnapshot } from "./vega-dashboard-adapter.js";
 /** localStorage key. Preserved across the app's startup storage wipe (see the
  * keep-list in app.js) so a mid-session refresh or crash does not lose data. */
 export const STUDY_STORAGE_KEY = "vizierStudySession";
+export const STUDY_SCHEMA_VERSION = 2;
+export const STUDY_APP_VERSION = "0.2.0";
+export const STUDY_PHASES = ["practice", "brief_reading", "timed_task", "post_session"];
+export const RESEARCHER_ANNOTATION_KINDS = [
+  "assistance",
+  "interruption",
+  "technical_problem",
+  "deviation",
+  "bookmark",
+];
 
 let session = null; // active/complete session metadata, or null
 let events = []; // uncapped, ordered event log for the session
 let nextLogId = 1; // monotonic per-session Log ID
 let persistScheduled = false;
+let dashboardContextFn = null;
+let notingLoggingStatus = false;
 
 function nowIso() {
   return new Date().toISOString();
@@ -43,16 +57,72 @@ function uuid() {
   return `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+export function newStudyId() {
+  return uuid();
+}
+
+/** Remember this request so the next one can set parentRequestId. */
+export function takeStudyRequestLink(requestId = null) {
+  const parentRequestId = session?.lastRequestId || null;
+  const id = requestId || uuid();
+  if (session) session.lastRequestId = id;
+  return { requestId: id, parentRequestId };
+}
+
+export function bumpStudyContextVersion() {
+  if (!session) return null;
+  session.contextVersion = (Number(session.contextVersion) || 0) + 1;
+  return session.contextVersion;
+}
+
+/** App.js binds live dashboard id/version so every event can stamp them. */
+export function bindStudyContext(fn) {
+  dashboardContextFn = typeof fn === "function" ? fn : null;
+}
+
+function dashboardContext() {
+  try {
+    const value = dashboardContextFn?.();
+    if (!value || typeof value !== "object") {
+      return { dashboardId: null, dashboardVersion: null };
+    }
+    const version = Number(value.dashboardVersion);
+    return {
+      dashboardId: value.dashboardId ?? null,
+      dashboardVersion: Number.isFinite(version) ? version : null,
+    };
+  } catch {
+    return { dashboardId: null, dashboardVersion: null };
+  }
+}
+
 function persistNow() {
   persistScheduled = false;
   try {
     if (!session) {
       localStorage.removeItem(STUDY_STORAGE_KEY);
-      return;
+      return true;
     }
     localStorage.setItem(STUDY_STORAGE_KEY, JSON.stringify({ session, events, nextLogId }));
+    return true;
   } catch {
-    /* storage full/unavailable — the in-memory log is still authoritative */
+    return false;
+  }
+}
+
+function noteLoggingStatus(status, detail = "") {
+  if (!session || session.loggingStatus === status || notingLoggingStatus) return;
+  notingLoggingStatus = true;
+  try {
+    session.loggingStatus = status;
+    if (isStudyActive()) {
+      recordStudyAction("logging_status_changed", `Study logging ${status}`, {
+        status,
+        detail: detail || null,
+      });
+    }
+  } finally {
+    notingLoggingStatus = false;
   }
 }
 
@@ -60,7 +130,14 @@ function persistNow() {
 function schedulePersist() {
   if (persistScheduled) return;
   persistScheduled = true;
-  const flush = () => persistNow();
+  const flush = () => {
+    const ok = persistNow();
+    if (!session) return;
+    if (!ok) noteLoggingStatus("degraded", "localStorage persist failed");
+    else if (session.loggingStatus === "degraded") {
+      noteLoggingStatus("recovered", "localStorage persist recovered");
+    }
+  };
   if (typeof queueMicrotask === "function") queueMicrotask(flush);
   else Promise.resolve().then(flush);
 }
@@ -72,6 +149,10 @@ export function isStudyActive() {
 export function studySessionInfo() {
   if (!session) return null;
   return { ...session, eventCount: events.length };
+}
+
+export function studyEventLog() {
+  return events.slice();
 }
 
 /** Restore an in-progress (or just-ended) session from localStorage. Called by
@@ -106,11 +187,18 @@ export function startStudySession(info = {}) {
       typeof window !== "undefined"
         ? { width: window.innerWidth, height: window.innerHeight }
         : null,
+    loggingStatus: "started",
+    studyPhase: null,
+    schemaVersion: STUDY_SCHEMA_VERSION,
+    appVersion: STUDY_APP_VERSION,
+    contextVersion: 0,
+    lastRequestId: null,
   };
   events = [];
   nextLogId = 1;
   persistNow();
   recordStudyAction("session_started", `Study session started for ${session.participantId}`);
+  recordStudyAction("logging_status_changed", "Study logging started", { status: "started" });
   return studySessionInfo();
 }
 
@@ -121,15 +209,25 @@ export function startStudySession(info = {}) {
 export function recordStudyEvent(event, extra = null) {
   try {
     if (!isStudyActive() || !event) return null;
+    const logId = nextLogId++;
+    const kind = String(event.kind || extra?.kind || "study_action");
+    const dash = dashboardContext();
     const record = {
+      ...event,
+      ...(extra && typeof extra === "object" ? extra : null),
+      eventName: kind,
+      kind,
+      schemaVersion: STUDY_SCHEMA_VERSION,
       participantId: session.participantId,
       sessionId: session.sessionId,
       timestamp: nowIso(),
-      logId: nextLogId++,
       tRelMs: Date.now() - session.startedAtMs,
-      ...event,
+      logId,
+      sequenceNumber: logId,
+      dashboardId: dash.dashboardId,
+      dashboardVersion: dash.dashboardVersion,
+      appVersion: STUDY_APP_VERSION,
     };
-    if (extra && typeof extra === "object") Object.assign(record, extra);
     events.push(record);
     schedulePersist();
     return record;
@@ -144,6 +242,29 @@ export function recordStudyAction(kind, summary, data = null) {
   const event = { kind: String(kind || "study_action"), summary: String(summary || "") };
   if (data && typeof data === "object" && Object.keys(data).length) event.data = data;
   return recordStudyEvent(event);
+}
+
+export function setStudyPhase(phase) {
+  const next = String(phase || "").trim();
+  if (!STUDY_PHASES.includes(next) || !isStudyActive() || !session) return null;
+  const from = session.studyPhase || null;
+  if (from === next) return null;
+  session.studyPhase = next;
+  return recordStudyAction("study_phase_changed", `Study phase: ${next}`, { from, to: next });
+}
+
+export function recordResearcherAnnotation(kind, note = "", extra = {}) {
+  const annotationKind = String(kind || "").trim();
+  if (!RESEARCHER_ANNOTATION_KINDS.includes(annotationKind)) return null;
+  return recordStudyAction(
+    "researcher_annotation",
+    note ? `${annotationKind}: ${note}` : annotationKind,
+    {
+      annotationKind,
+      note: String(note || "").trim() || null,
+      ...(extra && typeof extra === "object" ? extra : {}),
+    },
+  );
 }
 
 const SVG_DATA_PREFIX = "data:image/svg+xml";
@@ -368,7 +489,11 @@ function safeDownloadName(value) {
 export function buildStudyBundle(snapshot = null, reason = "manual") {
   const savedAt = nowIso();
   return {
-    schema: "vizier-study-session/1",
+    schema: "vizier-study-session/2",
+    schemaVersion: STUDY_SCHEMA_VERSION,
+    appVersion: STUDY_APP_VERSION,
+    studyPhase: session ? session.studyPhase : null,
+    loggingStatus: session ? session.loggingStatus : null,
     bundleId: `${session ? session.sessionId : "no-session"}-${savedAt}`,
     reason,
     participantId: session ? session.participantId : null,
@@ -438,12 +563,20 @@ export function exportStudyDashboardsZip(artifacts = [], bundle = {}) {
   }
 }
 
-export function endStudySession() {
-  if (session) {
-    session.active = false;
-    session.endedAt = nowIso();
-    persistNow();
+export function endStudySession({ reason = "end", recordEvent = true } = {}) {
+  if (!session) return null;
+  if (recordEvent && session.active) {
+    recordStudyAction("session_ended", "Study session ended", {
+      reason,
+      eventCount: events.length + 1,
+    });
+    noteLoggingStatus("stopped", reason);
+  } else if (session) {
+    session.loggingStatus = "stopped";
   }
+  session.active = false;
+  session.endedAt = nowIso();
+  persistNow();
   return studySessionInfo();
 }
 

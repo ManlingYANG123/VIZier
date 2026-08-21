@@ -4,8 +4,11 @@ import {
   buildStudyBundle,
   buildStudyDashboardArtifacts,
   buildUncompressedZip,
+  endStudySession,
+  recordStudyAction,
   startStudySession,
   stripVersionMedia,
+  takeStudyRequestLink,
 } from "../src/study-session.js";
 
 const lineSpec = {
@@ -111,6 +114,33 @@ test("a study bundle keeps the event log and omits screenshot payloads", () => {
   assert.equal(bundle.dashboard.versions[0].afterPng, undefined);
   assert.equal(bundle.dashboard.versions[0].afterSvg, undefined);
   assert.ok(bundle.dashboard.versions[0].afterSnapshot);
+});
+
+test("study events carry schema v2 envelope fields and request parent links", () => {
+  startStudySession({ participantId: "P01" });
+  const first = recordStudyAction("critique_requested", "first", { requestId: "req-a" });
+  assert.equal(first.eventName, "critique_requested");
+  assert.equal(first.schemaVersion, 2);
+  assert.equal(first.participantId, "P01");
+  assert.equal(first.sequenceNumber, first.logId);
+  assert.equal(typeof first.tRelMs, "number");
+  assert.ok("dashboardVersion" in first);
+  assert.equal(first.appVersion, "0.2.0");
+  const linkA = takeStudyRequestLink("req-a");
+  const linkB = takeStudyRequestLink("req-b");
+  assert.equal(linkA.requestId, "req-a");
+  assert.equal(linkB.requestId, "req-b");
+  assert.equal(linkB.parentRequestId, "req-a");
+});
+
+test("ending a session records session_ended then stops logging", () => {
+  startStudySession({ participantId: "P02" });
+  endStudySession({ reason: "end" });
+  const bundle = buildStudyBundle(null, "end");
+  const kinds = bundle.events.map((event) => event.kind);
+  assert.ok(kinds.includes("session_started"));
+  assert.ok(kinds.includes("session_ended"));
+  assert.equal(recordStudyAction("should_not_log", "no"), null);
 });
 
 test("buildUncompressedZip stores named files that start with a ZIP signature", () => {

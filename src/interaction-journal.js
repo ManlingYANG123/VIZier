@@ -5,6 +5,7 @@ const STRONG_EVENT_KINDS = new Set([
   "critique_rationale_added",
   "recommendation_accepted",
   "recommendation_rejected",
+  "recommendation_deferred",
 ]);
 
 function normalized(value) {

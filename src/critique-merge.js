@@ -20,6 +20,7 @@ export const DECIDED_STATUSES = new Set([
   "resolved",
   "rejected",
   "superseded",
+  "deferred",
 ]);
 
 export function isDecidedCritique(critique) {
