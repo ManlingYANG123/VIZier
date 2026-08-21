@@ -1365,10 +1365,12 @@ button { font: inherit; }
   to { --viz-edge-angle: 360deg; }
 }
 .context-box-field.is-generating,
-.doc-uploader[data-state="loading"] { position: relative; }
+.doc-uploader[data-state="loading"],
+.focused-review-input-wrap.is-generating { position: relative; }
 .context-box-field.is-generating::before,
 .doc-uploader[data-state="loading"]::before,
-.draft-marker.is-generating::before {
+.draft-marker.is-generating::before,
+.focused-review-input-wrap.is-generating::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -1396,12 +1398,18 @@ button { font: inherit; }
  * selection box hugs its 2px corners. While generating, the marker drops its
  * dashed outline so only the colorful ring reads. */
 .context-box-field.is-generating::before { border-radius: 8px; }
+.focused-review-input-wrap.is-generating::before { border-radius: 7px; }
 .draft-marker.is-generating::before { border-radius: 2px; }
 .draft-marker.is-generating { border-color: transparent; }
+.focused-review-input-wrap.is-generating textarea {
+  border-color: transparent;
+  box-shadow: none;
+}
 @media (prefers-reduced-motion: reduce) {
   .context-box-field.is-generating::before,
   .doc-uploader[data-state="loading"]::before,
-  .draft-marker.is-generating::before { animation: none; }
+  .draft-marker.is-generating::before,
+  .focused-review-input-wrap.is-generating::before { animation: none; }
 }
 .context-describe-error { margin: 8px 0 0; padding: 7px 9px; border: 1px solid #f1b8b8; border-radius: 6px; background: #fff6f6; color: #9f2929; font-size: 11px; line-height: 1.4; }
 .parse-progress { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 9px 10px; border-radius: 4px; background: #f3f4f5; color: #656a72; font-size: 11px; }
@@ -9420,6 +9428,7 @@ body.panel-resizing * {
   position: absolute;
   right: 8px;
   bottom: 8px;
+  z-index: 3;
   display: inline-grid;
   place-items: center;
   width: 26px;

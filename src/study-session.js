@@ -19,6 +19,7 @@
  *    holds the AWS credentials.
  */
 import { reApiBase, saveStudyData } from "./api-client.js";
+import { dashboardDocumentFromSnapshot } from "./vega-dashboard-adapter.js";
 
 /** localStorage key. Preserved across the app's startup storage wipe (see the
  * keep-list in app.js) so a mid-session refresh or crash does not lose data. */
@@ -95,7 +96,6 @@ export function startStudySession(info = {}) {
   session = {
     active: true,
     participantId: String(info.participantId || "").trim() || `anon-${uuid().slice(0, 8)}`,
-    condition: String(info.condition || "").trim(),
     notes: String(info.notes || "").trim(),
     sessionId: uuid(),
     startedAt: nowIso(),
@@ -110,9 +110,7 @@ export function startStudySession(info = {}) {
   events = [];
   nextLogId = 1;
   persistNow();
-  recordStudyAction("session_started", `Study session started for ${session.participantId}`, {
-    condition: session.condition,
-  });
+  recordStudyAction("session_started", `Study session started for ${session.participantId}`);
   return studySessionInfo();
 }
 
@@ -148,6 +146,225 @@ export function recordStudyAction(kind, summary, data = null) {
   return recordStudyEvent(event);
 }
 
+const SVG_DATA_PREFIX = "data:image/svg+xml";
+
+export function dashboardFileSlug(id, kind = "checkpoint") {
+  if (kind === "final") return "final";
+  const n = Number(id);
+  const padded = Number.isFinite(n) ? String(Math.max(0, Math.trunc(n))).padStart(2, "0") : "00";
+  return `checkpoint-${padded}`;
+}
+
+export function stripVersionMedia(versions = []) {
+  return (Array.isArray(versions) ? versions : []).map((version) => {
+    if (!version || typeof version !== "object") return version;
+    const {
+      beforeScreenshot: _beforeScreenshot,
+      afterScreenshot: _afterScreenshot,
+      afterPng: _afterPng,
+      afterSvg: _afterSvg,
+      screenshot: _screenshot,
+      ...rest
+    } = version;
+    return rest;
+  });
+}
+
+function prepareStudySnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return snapshot;
+  return {
+    ...snapshot,
+    versions: stripVersionMedia(snapshot.versions),
+  };
+}
+
+function pngBase64(dataUrl) {
+  if (typeof dataUrl !== "string") return null;
+  const match = /^data:image\/png(?:;[^,]*)?,/i.exec(dataUrl);
+  if (!match) return null;
+  return dataUrl.slice(match[0].length) || null;
+}
+
+function svgMarkup(value) {
+  if (typeof value !== "string" || !value) return null;
+  if (value.startsWith("<svg")) return value;
+  if (!value.startsWith(SVG_DATA_PREFIX)) return null;
+  const comma = value.indexOf(",");
+  if (comma < 0) return null;
+  const payload = value.slice(comma + 1);
+  if (/;base64/i.test(value.slice(0, comma))) {
+    try {
+      return atob(payload);
+    } catch {
+      return null;
+    }
+  }
+  try {
+    return decodeURIComponent(payload);
+  } catch {
+    return payload;
+  }
+}
+
+function pushBoardImage(artifacts, slug, pngDataUrl, svgFallback) {
+  const png = pngBase64(pngDataUrl);
+  if (png) {
+    artifacts.push({
+      path: `dashboards/${slug}.png`,
+      contentType: "image/png",
+      encoding: "base64",
+      data: png,
+    });
+    return;
+  }
+  const svg = svgMarkup(svgFallback);
+  if (svg && svg.length <= 2_000_000) {
+    artifacts.push({
+      path: `dashboards/${slug}.svg`,
+      contentType: "image/svg+xml",
+      text: svg,
+    });
+  }
+}
+
+export function buildStudyDashboardArtifacts({
+  versions = [],
+  finalDocument = null,
+  finalPng = null,
+  finalSvg = null,
+} = {}) {
+  const artifacts = [];
+  for (const version of Array.isArray(versions) ? versions : []) {
+    const slug = dashboardFileSlug(version?.id, "checkpoint");
+    if (version?.afterSnapshot) {
+      artifacts.push({
+        path: `dashboards/${slug}.json`,
+        contentType: "application/json",
+        text: JSON.stringify(
+          dashboardDocumentFromSnapshot(version.afterSnapshot, slug),
+          null,
+          2,
+        ),
+      });
+    }
+    pushBoardImage(artifacts, slug, version?.afterPng, version?.afterSvg || version?.afterScreenshot);
+  }
+  if (finalDocument) {
+    artifacts.push({
+      path: "dashboards/final.json",
+      contentType: "application/json",
+      text: JSON.stringify(finalDocument, null, 2),
+    });
+  }
+  pushBoardImage(artifacts, "final", finalPng, finalSvg);
+  return artifacts;
+}
+
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i += 1) {
+    let value = i;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    }
+    table[i] = value >>> 0;
+  }
+  return table;
+})();
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < bytes.length; i += 1) {
+    crc = CRC_TABLE[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function concatBytes(parts) {
+  const total = parts.reduce((sum, part) => sum + part.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const part of parts) {
+    out.set(part, offset);
+    offset += part.length;
+  }
+  return out;
+}
+
+function u16(value) {
+  const bytes = new Uint8Array(2);
+  new DataView(bytes.buffer).setUint16(0, value, true);
+  return bytes;
+}
+
+function u32(value) {
+  const bytes = new Uint8Array(4);
+  new DataView(bytes.buffer).setUint32(0, value >>> 0, true);
+  return bytes;
+}
+
+export function buildUncompressedZip(files = []) {
+  const encoder = new TextEncoder();
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+  for (const file of files) {
+    const name = encoder.encode(String(file.name || "file"));
+    const data = file.bytes instanceof Uint8Array ? file.bytes : encoder.encode(String(file.bytes || ""));
+    const crc = crc32(data);
+    const local = concatBytes([
+      new Uint8Array([0x50, 0x4b, 0x03, 0x04]),
+      u16(20), u16(0), u16(0), u16(0), u16(0),
+      u32(crc), u32(data.length), u32(data.length),
+      u16(name.length), u16(0),
+      name, data,
+    ]);
+    const central = concatBytes([
+      new Uint8Array([0x50, 0x4b, 0x01, 0x02]),
+      u16(20), u16(20), u16(0), u16(0), u16(0), u16(0),
+      u32(crc), u32(data.length), u32(data.length),
+      u16(name.length), u16(0), u16(0), u16(0), u16(0),
+      u32(0), u32(offset),
+      name,
+    ]);
+    locals.push(local);
+    centrals.push(central);
+    offset += local.length;
+  }
+  const centralDir = concatBytes(centrals);
+  const eocd = concatBytes([
+    new Uint8Array([0x50, 0x4b, 0x05, 0x06]),
+    u16(0), u16(0), u16(files.length), u16(files.length),
+    u32(centralDir.length), u32(offset), u16(0),
+  ]);
+  return concatBytes([...locals, centralDir, eocd]);
+}
+
+function artifactBytes(artifact) {
+  if (artifact?.encoding === "base64" && typeof artifact.data === "string") {
+    const binary = atob(artifact.data);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+  return new TextEncoder().encode(String(artifact?.text || ""));
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function safeDownloadName(value) {
+  return String(value || "na").replace(/[^A-Za-z0-9._-]+/g, "-");
+}
+
 export function buildStudyBundle(snapshot = null, reason = "manual") {
   const savedAt = nowIso();
   return {
@@ -156,7 +373,6 @@ export function buildStudyBundle(snapshot = null, reason = "manual") {
     reason,
     participantId: session ? session.participantId : null,
     sessionId: session ? session.sessionId : null,
-    condition: session ? session.condition : null,
     notes: session ? session.notes : null,
     startedAt: session ? session.startedAt : null,
     endedAt: session ? session.endedAt : null,
@@ -165,7 +381,7 @@ export function buildStudyBundle(snapshot = null, reason = "manual") {
     viewport: session ? session.viewport : null,
     eventCount: events.length,
     events: events.slice(),
-    dashboard: snapshot,
+    dashboard: prepareStudySnapshot(snapshot),
   };
 }
 
@@ -186,16 +402,36 @@ export function beaconSaveStudySession(bundle) {
 
 export function exportStudyBundleLocal(bundle) {
   try {
-    const safe = (value) => String(value || "na").replace(/[^A-Za-z0-9._-]+/g, "-");
     const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `vizier-study-${safe(bundle.participantId)}-${safe(bundle.sessionId)}-${safe(bundle.savedAt)}.json`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    downloadBlob(
+      blob,
+      `vizier-study-${safeDownloadName(bundle.participantId)}-${safeDownloadName(bundle.sessionId)}-${safeDownloadName(bundle.savedAt)}.json`,
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function exportStudyDashboardsZip(artifacts = [], bundle = {}) {
+  try {
+    const files = [];
+    if (bundle && typeof bundle === "object") {
+      files.push({
+        name: "session.json",
+        bytes: new TextEncoder().encode(JSON.stringify(bundle, null, 2)),
+      });
+    }
+    for (const artifact of artifacts || []) {
+      const name = String(artifact.path || "").replace(/^\/+/, "");
+      if (!name) continue;
+      files.push({ name, bytes: artifactBytes(artifact) });
+    }
+    if (!files.length) return false;
+    downloadBlob(
+      new Blob([buildUncompressedZip(files)], { type: "application/zip" }),
+      `vizier-study-${safeDownloadName(bundle.participantId)}-${safeDownloadName(bundle.sessionId)}-dashboards.zip`,
+    );
     return true;
   } catch {
     return false;

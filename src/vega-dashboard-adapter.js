@@ -251,6 +251,51 @@ export function normalizeDashboardDocument(data, fileName = "Dashboard") {
   };
 }
 
+/** Turn an engine snapshot ({ specMap, board }) into the canonical dashboard
+ * JSON authors can re-open in VIZier. Used to persist study checkpoints. */
+export function dashboardDocumentFromSnapshot(snapshot = {}, fileName = "dashboard") {
+  const board = object(snapshot?.board) ? snapshot.board : {};
+  const specMap = object(snapshot?.specMap) ? snapshot.specMap : {};
+  const boardTiles = Array.isArray(board.tiles) ? board.tiles : [];
+  const ids = boardTiles.length
+    ? boardTiles.map((tile) => tile?.id).filter((id) => typeof id === "string" && id)
+    : Object.keys(specMap);
+  const tiles = ids.flatMap((id) => {
+    const spec = specMap[id];
+    if (!isVegaLiteSpec(spec)) return [];
+    const meta = boardTiles.find((tile) => tile?.id === id) || {};
+    return [{
+      id,
+      label: meta.title || id,
+      ...(object(meta.bounds) ? { bounds: clone(meta.bounds) } : {}),
+      spec: clone(spec),
+    }];
+  });
+  const optional = (key, value) => (value == null || value === "" ? {} : { [key]: value });
+  return {
+    dashboard: {
+      id: board.id || fileName,
+      title: board.title || fileName,
+      subtitle: board.subtitle || "",
+      hasKpis: Boolean(board.hasKpis),
+      hasEmbeddedKpis: Boolean(board.hasEmbeddedKpis),
+      kpis: Array.isArray(board.kpis) ? clone(board.kpis) : [],
+      ...optional("kpiStyle", board.kpiStyle),
+      ...optional("kpiLayout", board.kpiLayout),
+      ...optional("kpiAlignment", board.kpiAlignment),
+      ...optional("kpiDensity", board.kpiDensity),
+      ...optional("kpiChrome", board.kpiChrome),
+      kpiReservedHeight: Math.max(0, Number(board.kpiReservedHeight) || 0),
+      kpiReservedWidth: Math.max(0, Number(board.kpiReservedWidth) || 0),
+      filters: Array.isArray(board.filters) ? clone(board.filters) : [],
+      showChartSubtitles: boardTiles.some((tile) => tile?.hasSubtitle),
+      canvasWidth: Number(board.canvasWidth) || undefined,
+      canvasHeight: Number(board.canvasHeight) || undefined,
+    },
+    tiles,
+  };
+}
+
 function firstDatumForField(spec, field) {
   for (const unit of walkUnitSpecs(spec)) {
     const row = unit.rows.find((candidate) =>

@@ -365,8 +365,9 @@ async function handleStudySession(req: IncomingMessage, res: ServerResponse): Pr
       throw new Error("INVALID_BUNDLE: study session requires participantId and sessionId");
     }
     const result = await saveStudySession(body);
+    const extra = result.files?.length > 1 ? `, ${result.files.length} files` : "";
     console.log(
-      `\n[re_api] POST /study-session  (participant: ${body.participantId}, ${result.bytes} bytes -> ${result.stored}: ${result.location})`,
+      `\n[re_api] POST /study-session  (participant: ${body.participantId}, ${result.bytes} bytes -> ${result.stored}: ${result.location}${extra})`,
     );
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true, ...result }));

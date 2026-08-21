@@ -79,13 +79,14 @@ test("api-client exposes a plain-JSON extractConstraints POST to /intake-constra
 test("the review request carries constraintSet only when active rules exist", async () => {
   const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
   // Both review paths (full/focused and selected-region) send the set through
-  // effectiveConstraintSet(), which returns null when nothing is loaded OR the
+  // designDocumentForEngine(), which no-ops when nothing is loaded OR the
   // author unchecked every rule in the design-rules review popup.
-  const matches = source.match(/\.\.\.\(effectiveConstraintSet\(\) \? \{ constraintSet: effectiveConstraintSet\(\) \} : \{\}\)/g) || [];
-  assert.equal(matches.length, 2, "both streamCritique bodies must guard constraintSet via effectiveConstraintSet");
-  // The effective set narrows the loaded rules to the author's kept selection.
+  const matches = source.match(/\.\.\.designDocumentForEngine\(\)/g) || [];
+  assert.equal(matches.length, 2, "both streamCritique bodies must send the design document via designDocumentForEngine");
+  assert.match(source, /function designDocumentForEngine\(\)/);
   assert.match(source, /function effectiveConstraintSet\(\)/);
   assert.match(source, /if \(state\.constraintSelection === null\) return set;/);
+  assert.match(source, /designDocumentText/);
   assert.match(source, /constraintSet: null/);
   assert.match(source, /constraintSelection: null/);
   assert.match(source, /handleDesignDoc/);

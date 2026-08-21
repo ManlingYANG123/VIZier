@@ -3,9 +3,12 @@ import assert from "node:assert/strict";
 import {
   DECIDED_STATUSES,
   critiqueIdentityKey,
+  critiqueRefreshLooksRetired,
+  critiqueRefreshRequest,
   groupCritiquesByAsk,
   isDecidedCritique,
   mergeAskResults,
+  pickCritiqueRefreshReplacement,
 } from "../src/critique-merge.js";
 
 // Minimal critique factory — only the fields the merge cares about.
@@ -347,4 +350,62 @@ test("groupCritiquesByAsk preserves every item exactly once", () => {
   const groups = groupCritiquesByAsk(critiques);
   const flatIds = groups.flatMap((g) => g.items.map((c) => c.id)).sort();
   assert.deepEqual(flatIds, ["a", "b", "c", "d"]);
+});
+
+test("critiqueRefreshRequest asks the engine to refresh one issue only", () => {
+  const request = critiqueRefreshRequest(critique({
+    title: "Hard-coded KPI row",
+    issue: "KPIs are static",
+    suggestion: "Compute them from the data",
+    tileId: null,
+    dimension: "layout",
+  }));
+  assert.match(request, /ONE previously identified issue/);
+  assert.match(request, /Hard-coded KPI row/);
+  assert.match(request, /Do not start a full new review/);
+});
+
+test("pickCritiqueRefreshReplacement keeps the matching issue and ignores extras", () => {
+  const previous = critique({
+    id: "kpi",
+    title: "KPI row",
+    proposal: { kind: "add-kpi-band", mode: "executable" },
+  });
+  const match = critique({
+    id: "fresh",
+    title: "Computed KPI band",
+    proposal: { kind: "add-kpi-band", mode: "executable" },
+    suggestion: "Use engine KPIs",
+  });
+  const extra = critique({
+    id: "other",
+    object: "color",
+    problem: "inconsistent",
+    recommendation: "palette",
+    dimension: "color",
+    tileId: "chart-b",
+    proposal: { kind: "v2-palette", mode: "executable" },
+  });
+  const picked = pickCritiqueRefreshReplacement(previous, [extra, match]);
+  assert.equal(picked.id, "fresh");
+  assert.equal(picked.suggestion, "Use engine KPIs");
+});
+
+test("pickCritiqueRefreshReplacement retires the card when the issue is gone", () => {
+  assert.equal(
+    pickCritiqueRefreshReplacement(critique(), [], "No material issue remains; the KPI row is now computed."),
+    null,
+  );
+  assert.equal(
+    pickCritiqueRefreshReplacement(
+      critique(),
+      [critique({
+        title: "Guidance for this review request",
+        proposal: { kind: "manual", mode: "guidance_only" },
+        issue: "Keep the current treatment unless testing shows a problem.",
+      })],
+    ),
+    null,
+  );
+  assert.equal(critiqueRefreshLooksRetired(null, "This issue is no longer applicable after the applied change."), true);
 });

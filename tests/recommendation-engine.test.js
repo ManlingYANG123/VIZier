@@ -6,6 +6,7 @@ import {
   buildApplicationPlan,
   enrichRecommendations,
   reevaluateMock,
+  retainRecommendationFreshness,
 } from "../src/recommendation-engine.js";
 
 function recommendation(id, kind, overrides = {}) {
@@ -128,4 +129,50 @@ test("re-evaluation reports kept, updated, removed, and added recommendations", 
   const followUp = result.recommendations.find((item) =>
     item.proposal.kind === "show-filter-state");
   assert.deepEqual(followUp.dependsOn, ["filter"]);
+});
+
+test("accepting one recommendation does not stale independent remaining ones", () => {
+  const recommendations = enrichRecommendations([
+    recommendation("title", "dashboard-title", { lastEvaluatedVersion: 1 }),
+    recommendation("tooltip", "add-tooltip", { tileId: "task-velocity", lastEvaluatedVersion: 1 }),
+    recommendation("color", "v2-palette", { lastEvaluatedVersion: 1 }),
+    recommendation("brand", "preserve-brand-palette", { lastEvaluatedVersion: 1, status: "pending" }),
+  ], 1);
+  recommendations[0].status = "resolved";
+
+  const next = retainRecommendationFreshness(recommendations, {
+    appliedIds: ["title"],
+    changedTargets: ["dashboard.title"],
+    nextVersion: 2,
+  });
+
+  assert.equal(next.find((item) => item.id === "tooltip").lastEvaluatedVersion, 2);
+  assert.equal(next.find((item) => item.id === "color").lastEvaluatedVersion, 2);
+  // Catalog conflict with an applied kind-pair is not in play here (title vs palette).
+  assert.equal(next.find((item) => item.id === "brand").lastEvaluatedVersion, 2);
+  assert.equal(next.find((item) => item.id === "title").lastEvaluatedVersion, 1);
+});
+
+test("recommendations that share a tile or catalog conflict stay stale after apply", () => {
+  const recommendations = enrichRecommendations([
+    recommendation("tooltip-a", "add-tooltip", { tileId: "chart", lastEvaluatedVersion: 1 }),
+    recommendation("tooltip-b", "edit-spec", { tileId: "chart", lastEvaluatedVersion: 1 }),
+    recommendation("multi", "v2-palette", { lastEvaluatedVersion: 1, status: "resolved" }),
+    recommendation("brand", "preserve-brand-palette", { lastEvaluatedVersion: 1 }),
+  ], 1);
+
+  const sameTile = retainRecommendationFreshness(recommendations, {
+    appliedIds: ["tooltip-a"],
+    changedTargets: ["chart"],
+    nextVersion: 2,
+  });
+  assert.equal(sameTile.find((item) => item.id === "tooltip-b").lastEvaluatedVersion, 1);
+
+  const conflicted = retainRecommendationFreshness(recommendations, {
+    appliedIds: ["multi"],
+    changedTargets: ["chart.encodings.color"],
+    nextVersion: 2,
+  });
+  assert.equal(conflicted.find((item) => item.id === "brand").lastEvaluatedVersion, 1);
+  assert.equal(conflicted.find((item) => item.id === "tooltip-b").lastEvaluatedVersion, 2);
 });

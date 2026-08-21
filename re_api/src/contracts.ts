@@ -454,10 +454,12 @@ export interface DashboardContext {
  * A design/brand guidelines document (brand colors, fonts, icons, layout rules)
  * becomes a set of HARD constraints, produced by the dedicated intake module
  * (src/intake/) and used AFTER generation to silently drop conflicting
- * critiques. This is a channel SEPARATE from `DashboardContext.constraints`:
- * the free-text `constraints` string still drives the review prompt and the
- * "author constraint" grounding basis; a ConstraintSet does neither, so it
- * never perturbs the context snapshot hash or grounding. */
+ * critiques. The same confirmed set — plus a clipped copy of the extracted
+ * source text — is also included in the review prompt so the model can avoid
+ * proposing those conflicts instead of only losing them in the filter.
+ * This is a channel SEPARATE from `DashboardContext.constraints`:
+ * the free-text `constraints` string still drives the "author constraint"
+ * grounding basis; a ConstraintSet does not change the context snapshot hash. */
 export type ConstraintCategory =
   | "palette"
   | "typography"
@@ -728,6 +730,10 @@ export interface CritiqueRequest {
    * silently drops critiques that conflict with them AFTER ranking, before the
    * response. Omitted by older clients → no filtering (behavior unchanged). */
   constraintSet?: ConstraintSet;
+  /** Extracted text of the uploaded design document (PDF/txt), already clipped
+   * by the client. Shown to the review model as background for matching the
+   * document; only `constraintSet` entries are locked rules. */
+  designDocumentText?: string;
 }
 
 export interface IterationProposalSummary {

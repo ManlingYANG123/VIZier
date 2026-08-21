@@ -33,7 +33,9 @@ export const CRITERION_REGISTRY_VERSION = "diagnostic-knowledge-v3-2026-08-10";
 // admissible only when they cite the exact inconsistency in THIS artifact, so a
 // second pass spends its slots on board-specific structural transforms instead
 // of the handful of moves that read the same on every dashboard.
-export const REVIEW_PROMPT_VERSION = "diagnostic-review-v21-2026-08-17";
+// v22: confirmed design-document constraints and a clipped PDF/txt extract
+// enter the review user prompt (still filtered after generation).
+export const REVIEW_PROMPT_VERSION = "diagnostic-review-v22-2026-08-21";
 // v3.2: the engine now assembles and returns the grounded `strengths` array
 // alongside critiques/diagnoses (rendered as inline positive cards in the
 // critique list, grouped by dimension).

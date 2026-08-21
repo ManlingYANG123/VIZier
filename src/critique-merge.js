@@ -174,3 +174,67 @@ export function groupCritiquesByAsk(critiques) {
     return a.askId - b.askId;
   });
 }
+
+const NOT_APPLICABLE_PATTERN = /no material issue|no longer (present|applicable|needed|relevant)|not (present|applicable) (any more|anymore|any longer)|issue (is |has been )?(gone|resolved|fixed|addressed)|keep the current treatment/i;
+
+/** Prompt that asks the engine to refresh one stale recommendation, not the whole board. */
+export function critiqueRefreshRequest(critique) {
+  const target = critique?.tileId
+    || critique?.target?.ref?.tile
+    || critique?.target?.ref?.source
+    || "the dashboard";
+  return [
+    "Re-evaluate this ONE previously identified issue against the CURRENT dashboard after other fixes were applied.",
+    "Do not start a full new review and do not invent unrelated new issues.",
+    "If the issue still exists, return an updated executable recommendation for this issue only.",
+    "If the issue is gone or no longer applicable, say so clearly in the answer and do not propose a substitute issue.",
+    `Issue title: ${critique?.title || ""}`,
+    `Target: ${target}`,
+    critique?.issue ? `Problem: ${critique.issue}` : "",
+    critique?.suggestion ? `Previous suggestion: ${critique.suggestion}` : "",
+    critique?.dimension ? `Dimension: ${critique.dimension}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+export function critiqueRefreshLooksRetired(critique, answer = "") {
+  const text = [
+    answer,
+    critique?.answer,
+    critique?.title,
+    critique?.issue,
+    critique?.suggestion,
+    critique?.diagnosisOutcome,
+  ].filter(Boolean).join("\n");
+  if (NOT_APPLICABLE_PATTERN.test(text)) return true;
+  if (
+    critique?.proposal?.kind === "manual"
+    && critique?.proposal?.mode === "guidance_only"
+    && /guidance for this review request/i.test(critique?.title || "")
+  ) return true;
+  return false;
+}
+
+/** Choose the refreshed payload for one card. Extra focused-review critiques are ignored. */
+export function pickCritiqueRefreshReplacement(previous, incoming = [], answer = "") {
+  if (critiqueRefreshLooksRetired(null, answer)) return null;
+  const list = (Array.isArray(incoming) ? incoming : []).filter(Boolean);
+  const applicable = list.filter((item) => !critiqueRefreshLooksRetired(item, answer));
+  if (!applicable.length) return null;
+  const prevKey = previous ? critiqueIdentityKey(previous) : "";
+  const sameIdentity = prevKey
+    ? applicable.find((item) => critiqueIdentityKey(item) === prevKey)
+    : null;
+  if (sameIdentity) return sameIdentity;
+  const sameKind = applicable.find((item) => (
+    item.proposal?.kind && item.proposal.kind === previous?.proposal?.kind
+  ));
+  if (sameKind) return sameKind;
+  const sameTarget = applicable.find((item) => (
+    (item.tileId || null) === (previous?.tileId || null)
+    && item.dimension === previous?.dimension
+  ));
+  if (sameTarget) return sameTarget;
+  const direct = applicable.find((item) => item.requestRelevance === "direct");
+  if (direct) return direct;
+  return applicable[0];
+}

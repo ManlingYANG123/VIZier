@@ -1,4 +1,5 @@
 import type {
+  ConstraintSet,
   DashboardContext,
   Finding,
   FocusedReviewRequest,
@@ -19,6 +20,29 @@ import { RECOMMENDATION_BRANCHES } from "./recommendations.ts";
 import { dashboardTypeGuidance } from "./dashboard-type.ts";
 
 const MAX_SAVED_RATIONALES_IN_PROMPT = 10;
+/** Match intake/sources.ts clip so the review sees the same excerpt intake parsed. */
+export const DESIGN_DOCUMENT_TEXT_LIMIT = 40_000;
+
+function designDocumentPromptBlock(
+  constraintSet?: ConstraintSet,
+  designDocumentText?: string,
+): string | null {
+  const constraints = Array.isArray(constraintSet?.constraints) ? constraintSet.constraints : [];
+  const sourceText = String(designDocumentText || "").replace(/\r\n?/g, "\n").trim()
+    .slice(0, DESIGN_DOCUMENT_TEXT_LIMIT);
+  if (!constraints.length && !sourceText) return null;
+  const provenance = constraintSet?.provenance || "uploaded design document";
+  return [
+    `DESIGN DOCUMENT (${provenance}):`,
+    "This is author-supplied brand/guidelines for THE DASHBOARD under review — not a second artifact to diagnose. Do not critique the document. Do not invent dashboard issues from its examples.",
+    constraints.length
+      ? `HARD CONSTRAINTS (author-confirmed; do not propose fixes that violate them; the engine also drops violators after generation):\n${JSON.stringify(constraints, null, 2)}`
+      : "",
+    sourceText
+      ? `SOURCE TEXT (extracted from the document, may be truncated). Only the HARD CONSTRAINTS list above is locked; this text is background for matching tone, palette, and type:\n${sourceText}`
+      : "",
+  ].filter(Boolean).join("\n\n");
+}
 
 function promptText(value: unknown, limit: number): string {
   return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
@@ -144,6 +168,7 @@ EVIDENCE DISCIPLINE:
 - Cite board facts as board.title, board.subtitle, board.typography (rendered heading sizes and families), board.hasKpis (the separate engine-owned KPI band), board.hasEmbeddedKpis (KPI/metric tiles already in the grid), board.filters (visible dashboard-level controls and whether they are wired), board.tiles, or board.tiles.<tile-id>.<property>. board.typography carries the ACTUAL rendered settings, so heading size and title/subtitle hierarchy questions are answerable from it — evaluate them against it rather than declining for lack of rendered settings.
 - Cite Vega-Lite facts as tile.<tile-id>.<property path>, for example tile.task-velocity.encoding.x.
 - Cite author context only as context.goal, context.audience, context.constraints, context.notes, or context.customTypes.
+- An uploaded DESIGN DOCUMENT (brand/guidelines PDF or notes) may appear in the user packet. It constrains how you change THIS dashboard. Do not critique the document, and do not invent dashboard issues from its examples or case studies. Only the listed HARD CONSTRAINTS are locked; remaining source text is background for matching tone, palette, and type.
 - A contextual value marked inferred is a usable working hypothesis, not a confirmed fact. Use it to generate dashboard-specific preliminary feedback, but phrase dependent judgments conditionally (for example, "If the primary goal is...").
 - Detector observations are evidence helpers, not the main source of critique coverage.
 
@@ -271,6 +296,8 @@ export function dashboardReviewUser(
   focus?: FocusedReviewRequest,
   savedRationales: SavedCritiqueRationale[] = [],
   iterationContext?: IterationContext,
+  constraintSet?: ConstraintSet,
+  designDocumentText?: string,
 ): string {
   // Feedback Scope (context.scope) is the set of review dimensions the author
   // checked in the brief. It already rides in the snapshot JSON but is inert
@@ -322,6 +349,7 @@ export function dashboardReviewUser(
     `REQUEST SCOPE:\n${JSON.stringify(requestScope, null, 2)}`,
     `DASHBOARD GENRE LENS (adjusts how strictly you weigh each dimension; it is NOT grounding evidence — never cite it as a basis and never invent a defect just to match it):\n${dashboardTypeGuidance(snapshot.values.dashboardType)}`,
     `CONTEXT SNAPSHOT ${snapshot.id}:\n${JSON.stringify(snapshot, null, 2)}`,
+    designDocumentPromptBlock(constraintSet, designDocumentText),
     `CANONICAL CONTEXT EVIDENCE ADDRESSES (copy these paths exactly):\n${JSON.stringify(contextEvidenceAddresses, null, 2)}`,
     `AUTHOR-SAVED CRITIQUE RATIONALES:\n${JSON.stringify(savedRationalesForPrompt(savedRationales), null, 2)}
 Only userRationale is author-authored context. The nested critique snapshot explains what the author was responding to; never treat its issue, rationale, suggestion, evidence, or catalog codes as author claims or independent grounding evidence. Each userRationale is also present in context.notes as "Saved design rationale: ..."; cite context.notes when it supports a claim.`,
@@ -344,7 +372,7 @@ This block is design-history metadata, NOT grounding evidence. Do not cite it. N
     `INTERACTION STATE:\n${JSON.stringify(packet.interactionState, null, 2)}`,
     `VEGA-LITE SPECS BY EXACT TILE ID (cite paths as tile.<tile-id>.<property>):\n${JSON.stringify(packet.specMap, null, 2)}`,
     "Diagnose each object the evidence supports, then prescribe a recommendation leaf for the issues worth showing. Inspect every permitted tile, cross-tile relationship, and dashboard-level element. Return only the JSON object.",
-  ].join("\n\n");
+  ].filter(Boolean).join("\n\n");
 }
 
 /** Second-pass coverage directive. A full review's first pass reliably finds the

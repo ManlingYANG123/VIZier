@@ -7,6 +7,10 @@
  * local-fallback path works even when `@aws-sdk/client-s3` is not installed and
  * no upload is ever attempted.
  *
+ * On End & save the client also sends dashboard artifacts (high-resolution PNG
+ * + reloadable JSON for every checkpoint and the final board). Those are stored
+ * as sibling files under `dashboards/`, not embedded in the event-log JSON.
+ *
  * Credentials come only from environment variables (STUDY_S3_BUCKET, AWS_REGION,
  * AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) and are never sent to the browser.
  */
@@ -15,14 +19,25 @@ import { resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** re_api/src/study-store.ts -> repo-root/data/ (same "two up" as dashboards). */
-const LOCAL_DATA_DIR = fileURLToPath(new URL("../../data/", import.meta.url));
+const DEFAULT_LOCAL_DATA_DIR = fileURLToPath(new URL("../../data/", import.meta.url));
+const MAX_ARTIFACTS = 48;
+const MAX_ARTIFACT_BYTES = 12 * 1024 * 1024;
 
 export interface StudySaveResult {
   stored: "s3" | "local";
   location: string;
   bytes: number;
   key: string;
+  files: string[];
 }
+
+type StudyArtifact = {
+  path?: unknown;
+  contentType?: unknown;
+  text?: unknown;
+  encoding?: unknown;
+  data?: unknown;
+};
 
 /** Keep participant/session identifiers safe for use as S3 keys and file paths:
  * no separators, no traversal, bounded length. */
@@ -32,7 +47,13 @@ function safeSegment(value: unknown, fallback: string): string {
   return (cleaned || fallback).slice(0, 120);
 }
 
+function localDataDir(): string {
+  const override = process.env.STUDY_DATA_DIR?.trim();
+  return override ? resolve(override) : DEFAULT_LOCAL_DATA_DIR;
+}
+
 function s3Config(): { bucket: string; region: string } | null {
+  if (process.env.STUDY_FORCE_LOCAL === "1") return null;
   const bucket = process.env.STUDY_S3_BUCKET?.trim();
   const region = process.env.AWS_REGION?.trim();
   if (!bucket || !region) return null;
@@ -46,17 +67,42 @@ export function studyStorageMode(): "s3" | "local" {
   return s3Config() ? "s3" : "local";
 }
 
-export async function saveStudySession(bundle: unknown): Promise<StudySaveResult> {
-  const record = bundle && typeof bundle === "object" ? (bundle as Record<string, unknown>) : {};
-  const participant = safeSegment(record.participantId, "unknown-participant");
-  const session = safeSegment(record.sessionId, "unknown-session");
-  // A unique-per-save object name so repeated Save now clicks within one
-  // session do not overwrite each other — the log is append-only on disk.
-  const stamp = safeSegment(record.savedAt ?? record.endedAt ?? record.bundleId, "snapshot");
-  const key = `studies/${participant}/${session}/${stamp}.json`;
-  const json = JSON.stringify(bundle);
-  const bytes = Buffer.byteLength(json, "utf8");
+function safeArtifactPath(raw: unknown): string {
+  const text = String(raw ?? "").replace(/\\/g, "/").trim();
+  const parts = text.split("/").filter(Boolean);
+  if (parts[0] !== "dashboards" || parts.length < 2 || parts.length > 4) {
+    throw new Error("INVALID_BUNDLE: study artifacts must live under dashboards/");
+  }
+  if (parts.some((part) => part === "." || part === ".." || part.includes(".."))) {
+    throw new Error("INVALID_BUNDLE: study artifact path is not allowed");
+  }
+  const cleaned = parts.map((part) => safeSegment(part, ""));
+  if (cleaned.some((part) => !part)) {
+    throw new Error("INVALID_BUNDLE: study artifact path is not allowed");
+  }
+  return cleaned.join("/");
+}
 
+function artifactBody(artifact: StudyArtifact): { bytes: Buffer; contentType: string } {
+  const contentType = String(artifact.contentType || "application/octet-stream");
+  if (artifact.encoding === "base64" && typeof artifact.data === "string") {
+    const bytes = Buffer.from(artifact.data, "base64");
+    if (!bytes.length && artifact.data.length) {
+      throw new Error("INVALID_BUNDLE: study artifact is not valid base64");
+    }
+    return { bytes, contentType };
+  }
+  return {
+    bytes: Buffer.from(String(artifact.text ?? ""), "utf8"),
+    contentType: contentType.includes("json") ? "application/json" : contentType,
+  };
+}
+
+async function putObject(input: {
+  key: string;
+  body: Buffer | string;
+  contentType: string;
+}): Promise<"s3" | "local"> {
   const cfg = s3Config();
   if (cfg) {
     const { S3Client, PutObjectCommand } = await import("@aws-sdk/client-s3");
@@ -64,21 +110,63 @@ export async function saveStudySession(bundle: unknown): Promise<StudySaveResult
     await client.send(
       new PutObjectCommand({
         Bucket: cfg.bucket,
-        Key: key,
-        Body: json,
-        ContentType: "application/json",
+        Key: input.key,
+        Body: input.body,
+        ContentType: input.contentType,
       }),
     );
-    return { stored: "s3", location: `s3://${cfg.bucket}/${key}`, bytes, key };
+    return "s3";
   }
 
-  const filePath = resolve(LOCAL_DATA_DIR, key);
-  // Defence in depth: even though every segment is sanitized, never write
-  // outside the data directory.
-  if (filePath !== LOCAL_DATA_DIR && !filePath.startsWith(LOCAL_DATA_DIR.replace(/[/\\]?$/, sep))) {
+  const root = localDataDir();
+  const filePath = resolve(root, input.key);
+  const prefix = root.endsWith(sep) ? root : `${root}${sep}`;
+  if (filePath !== root && !filePath.startsWith(prefix)) {
     throw new Error("INVALID_BUNDLE: refusing to write study data outside the data directory");
   }
   await mkdir(resolve(filePath, ".."), { recursive: true });
-  await writeFile(filePath, json, "utf8");
-  return { stored: "local", location: filePath, bytes, key };
+  await writeFile(filePath, input.body);
+  return "local";
+}
+
+export async function saveStudySession(bundle: unknown): Promise<StudySaveResult> {
+  const record = bundle && typeof bundle === "object" ? { ...(bundle as Record<string, unknown>) } : {};
+  const participant = safeSegment(record.participantId, "unknown-participant");
+  const session = safeSegment(record.sessionId, "unknown-session");
+  // A unique-per-save object name so repeated Save now clicks within one
+  // session do not overwrite each other — the log is append-only on disk.
+  const stamp = safeSegment(record.savedAt ?? record.endedAt ?? record.bundleId, "snapshot");
+  const artifacts = Array.isArray(record.artifacts) ? record.artifacts as StudyArtifact[] : [];
+  if (artifacts.length > MAX_ARTIFACTS) {
+    throw new Error("INVALID_BUNDLE: too many study artifacts");
+  }
+  delete record.artifacts;
+  const prepared: { relative: string; bytes: Buffer; contentType: string }[] = [];
+  for (const artifact of artifacts) {
+    const relative = safeArtifactPath(artifact.path);
+    const { bytes, contentType } = artifactBody(artifact);
+    if (bytes.length > MAX_ARTIFACT_BYTES) {
+      console.warn(`[study-store] skipping oversized artifact ${relative} (${bytes.length} bytes)`);
+      continue;
+    }
+    prepared.push({ relative, bytes, contentType });
+  }
+  record.artifactFiles = prepared.map((item) => item.relative);
+
+  const key = `studies/${participant}/${session}/${stamp}.json`;
+  const json = JSON.stringify(record);
+  const bytes = Buffer.byteLength(json, "utf8");
+  const files = [key];
+
+  const stored = await putObject({ key, body: json, contentType: "application/json" });
+  for (const artifact of prepared) {
+    const artifactKey = `studies/${participant}/${session}/${artifact.relative}`;
+    await putObject({ key: artifactKey, body: artifact.bytes, contentType: artifact.contentType });
+    files.push(artifactKey);
+  }
+
+  const location = stored === "s3"
+    ? `s3://${s3Config()?.bucket}/${key}`
+    : resolve(localDataDir(), key);
+  return { stored, location, bytes, key, files };
 }

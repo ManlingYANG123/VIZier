@@ -389,3 +389,7 @@ before/after pair.**
 
 Renderer names (`vega`, `tableau`, …) are *technical* experiments within UI
 version 1; `prototype/v2`, `v3` are reserved for future *UI design* versions.
+
+npm run dev
+
+npm run deploy-heroku

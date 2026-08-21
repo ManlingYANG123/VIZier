@@ -57,9 +57,11 @@ the product and are mirrored into the study log automatically (the hook in
 | `context_saved` | Confirm / Continue-Without-Context | scope, hasContext, **generatedText, submittedText, edited, origin** | ✅ (fields) |
 | `inferred_context_accepted` | "Add as Context" on a learned-context card | field, detail | |
 | `inferred_context_dismissed` | "Dismiss" on a learned-context card | field, detail | |
-| `critique_requested` | Generate / Regenerate / focused Ask | **scope, requestText, trigger, hadPriorCritiques, activeScopes** | ✅ |
+| `critique_requested` | Generate / Regenerate / focused Ask | **scope, askId, requestText, trigger, hadPriorCritiques, activeScopes** | ✅ |
 | `local_critique_requested` | region select + submit | detail (exact text), bounds, dimension | |
-| `critiques_displayed` | a review returns and renders | count, list of {id,title,dimension,priority,status} | ✅ |
+| `critiques_displayed` | a review **successfully** returns and renders (full, focused, or selected-region) | count, list of {id,title,dimension,priority,status}, askId | ✅ |
+| `critique_regenerated` | one stale critique refreshed (stale-dashboard recovery) resolves — replaced with a new solution, or retired | critiqueId, **outcome** (`updated` \| `retired`), dimension | ✅ |
+| `critique_request_failed` | a review request does not complete | scope, askId, reason | ✅ |
 | `critique_opened` | click a critique card / history item | critiqueId | |
 | `critique_details_expanded` / `_collapsed` | toggle "Why & Evidence" | critiqueId, dimension | ✅ |
 | `evidence_region_revealed` | "recall region" jump on the canvas | critiqueId | ✅ |
@@ -72,7 +74,7 @@ the product and are mirrored into the study log automatically (the hook in
 | `recommendation_apply_failed` | apply did not commit (single or batch) | **via, reason, critiqueId(s)** | ✅ |
 | `recommendation_rejected` | Reject | critiqueId, dimension | |
 | `critique_rationale_added` / `_updated` / `_removed` | rationale modal | critiqueId, dimension | |
-| `checkpoint_saved` | Save Checkpoint | recommendationIds | |
+| `checkpoint_saved` | Save Checkpoint | recommendationIds (same length as the summary count — only engine-committed applies) | |
 
 Batch-vs-single apply is derivable without a separate field:
 `changes_applied.recommendationIds.length > 1` ⇒ batch; `recommendation_apply_failed`
@@ -113,7 +115,10 @@ already carries an explicit `via`.
   (with bounds + exact text).
 - B12 cancel an in-flight request — **[SKIP — not supported]** (no abort path).
 - B13 resubmit / regenerate — **[CAPTURE]** as `hadPriorCritiques:true` (+ `trigger`)
-  on `critique_requested`.
+  on `critique_requested`. Regenerating a *single* stale critique (the
+  stale-dashboard recovery path) additionally emits `critique_regenerated` with
+  the `outcome` — `updated` when a fresh solution replaces it, `retired` when the
+  issue no longer applies to the current dashboard.
 - B14 follow-up sub-types (ask-why / clarify / alternative / elaborate) —
   **[SKIP — not supported]** (no follow-up affordance). *What a participant would ask
   next is a think-aloud signal.*
@@ -127,8 +132,10 @@ already carries an explicit `via`.
 
 ### C. Critique exposure / inspection
 
-- C18 critique "displayed" — **[CAPTURE]** `critiques_displayed` (the reliable
-  *system-shown* list, not a gaze signal).
+- C18 critique "displayed" — **[CAPTURE]** `critiques_displayed` when a review
+  **successfully** renders (full, focused, and selected-region). If the request
+  fails, we log `critique_request_failed` instead. Only one review runs at a
+  time, so a second ask cannot swallow the first's displayed event.
 - C19 expand / collapse critique details — **[CAPTURE]** `critique_details_expanded` /
   `_collapsed`.
 - C20 view an explanation — **[SKIP — attention → think-aloud; the discrete open is
@@ -197,7 +204,10 @@ All new signals go through `recordStudyAction(kind, summary, data)` — a no-op 
 session is active, and never on the product's 100-capped journal or preference
 synthesis path (study-only, zero product-behavior impact).
 
-- `critique_requested`, `critiques_displayed` — in `runAIAssist`.
+- `critique_requested`, `critiques_displayed`, `critique_request_failed` — in
+  `runAIAssist` (full/focused) and the local-review submit handler.
+- `critique_requested` (again, with `trigger:"stale-dashboard-recovery"`) and
+  `critique_regenerated` (`outcome` `updated`/`retired`) — in `regenerateOneCritique`.
 - `critique_details_expanded/_collapsed`, `evidence_region_revealed`,
   `interaction_replayed`, `recommendation_apply_failed` (single) — in the critique
   focus view (`renderInspector`).
@@ -205,3 +215,24 @@ synthesis path (study-only, zero product-behavior impact).
 - `recommendation_apply_failed` (batch) — `batchApplyButton` handler.
 - `context_generation_requested` — `contextInferBtn` handler.
 - `hasContext` — added to the existing `context_saved` payload.
+
+## Session-end dashboard files
+
+When **End & save** (and **Save now**) runs, VIZier writes
+high-resolution PNG and reloadable JSON for every checkpoint plus the live
+final dashboard, beside the event log:
+
+```
+studies/{participant}/{session}/
+  {stamp}.json                      ← event log (no embedded images)
+  dashboards/checkpoint-01.json
+  dashboards/checkpoint-01.png
+  dashboards/checkpoint-02.json
+  ...
+  dashboards/final.json
+  dashboards/final.png
+```
+
+PNGs are 2× the canvas CSS size. JSON is `{ dashboard, tiles }` and can be
+re-opened in VIZier. The in-app revision rail still uses 770px WebP thumbnails.
+A local zip of the dashboard files is also downloaded on End.

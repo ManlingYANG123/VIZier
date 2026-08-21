@@ -205,6 +205,41 @@ test("saved rationale prompt input is capped to the ten most recent entries", ()
   assert.match(userPrompt, /"id": "rationale-12"/);
 });
 
+test("design document constraints and source text enter the review prompt", () => {
+  const snapshot = buildContextSnapshot({});
+  const packet = buildEvidencePacket(dashboardSpecMap(), dashboardBoard(), undefined);
+  const userPrompt = dashboardReviewUser(
+    snapshot,
+    packet,
+    determineGroundingAvailability(snapshot),
+    undefined,
+    undefined,
+    [],
+    undefined,
+    {
+      id: "ct-test",
+      sourceKind: "pdf-text",
+      provenance: "brand-guide.pdf · 4 pages",
+      constraints: [{
+        id: "c-palette",
+        category: "palette",
+        rule: "Use only the navy brand palette",
+        sourceText: "Brand colors only: navy and white.",
+        confidence: "high",
+        value: { colors: ["#0f172a"], locked: true },
+      }],
+    },
+    "Brand colors only: navy and white. Do not introduce unapproved chart hues.",
+  );
+  assert.match(userPrompt, /DESIGN DOCUMENT \(brand-guide\.pdf · 4 pages\)/);
+  assert.match(userPrompt, /not a second artifact to diagnose/);
+  assert.match(userPrompt, /HARD CONSTRAINTS/);
+  assert.match(userPrompt, /Use only the navy brand palette/);
+  assert.match(userPrompt, /SOURCE TEXT/);
+  assert.match(userPrompt, /Do not introduce unapproved chart hues/);
+  assert.match(DASHBOARD_REVIEW_SYSTEM, /uploaded DESIGN DOCUMENT/);
+});
+
 test("detectors contribute evidence helpers the diagnosis can cite", () => {
   const packet = buildEvidencePacket(dashboardSpecMap(), dashboardBoard(), undefined);
   assert.ok(packet.detectorEvidence.some((ref) => ref.findingId === "finding-generic-title"));

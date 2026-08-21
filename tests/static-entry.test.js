@@ -49,22 +49,38 @@ test("context extraction shows a breathing icon and rotating text hints instead 
   assert.match(css, /context-extract-dot-pulse/);
 });
 
-test("a Gemini-style running-light ring marks the context box, design-doc uploader, and region box while generating", async () => {
+test("a Gemini-style running-light ring marks the context box, design-doc uploader, region box, and focused review while generating", async () => {
   const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
   const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 
   // The animated ring is driven by an @property angle spun by a keyframe.
   assert.match(css, /@property --viz-edge-angle/);
   assert.match(css, /@keyframes viz-edge-spin/);
-  // It attaches to all three generating surfaces via a masked ::before ring.
+  // It attaches to all generating surfaces via a masked ::before ring.
   assert.match(css, /\.context-box-field\.is-generating::before/);
   assert.match(css, /\.doc-uploader\[data-state="loading"\]::before/);
   assert.match(css, /\.draft-marker\.is-generating::before/);
+  assert.match(css, /\.focused-review-input-wrap\.is-generating::before/);
   // The context field lights up on manual regenerate and on auto-inference.
   assert.match(source, /function setContextInferring\(/);
   assert.match(source, /\.context-box-field/);
   // The region selection box keeps its ring toggled by the submit lifecycle.
   assert.match(source, /\.draft-marker"\)\?\.classList\.toggle\("is-generating"/);
+  assert.match(source, /function setFocusedReviewGenerating\(/);
+});
+
+test("a focused review send lights the input, then clears it and opens the generated critique", async () => {
+  const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
+
+  assert.match(source, /state\.focusedReviewRunning = true/);
+  assert.match(source, /setFocusedReviewGenerating\(true\)/);
+  assert.match(source, /succeeded = await runAIAssist\(\{ focusedRequest: request \}\)/);
+  assert.match(source, /focusedInput\.value = ""/);
+  assert.match(source, /state\.reviewRequest = ""/);
+  // After a focused ask, open the answering critique in the right-hand inspector.
+  assert.match(source, /const opened = \(kept && \["pending", "updated"\]\.includes\(kept\.status\) \? kept : null\)/);
+  assert.match(source, /state\.selectedCritiqueId = opened\?\.id \|\| null/);
+  assert.match(source, /await renderInspector\(\)/);
 });
 
 test("regenerating the context overwrites the box with one description (no field-split merge)", async () => {
@@ -289,8 +305,8 @@ test("applying an interaction fix leaves its demonstrated state visible", async 
   assert.match(source, /settleDemoPlaying: false/);
   // The demo runs only for the interaction proposals whose commit is otherwise
   // invisible, and it is awaited from the apply path.
-  assert.match(source, /const enabledInteraction = appliedCritiques\.some\(\(critique\) =>/);
-  assert.match(source, /await playApplySettleDemo\(appliedCritiques\)/);
+  assert.match(source, /const enabledInteraction = committedCritiques\.some\(\(critique\) =>/);
+  assert.match(source, /await playApplySettleDemo\(committedCritiques\)/);
   // Apply keeps the representative selection visible so the accepted behavior
   // cannot look like a no-op; on-demand replays still clear it afterward.
   const demo = source.match(/async function playApplySettleDemo[\s\S]*?\n}/)?.[0] || "";
@@ -470,6 +486,7 @@ test("a stale-context critique disables Accept and offers an inline regenerate r
   assert.match(source, /id="focusRegenerate" class="focus-notice-action"/);
   assert.match(source, /!recommendationMatchesDashboard \?/);
   assert.match(source, /Regenerate for the current dashboard/);
+  assert.match(source, /overlaps a change you already applied/);
 
   // The genuine-conflict notice is mutually exclusive with both stale notices.
   assert.match(
@@ -485,11 +502,17 @@ test("a stale-context critique disables Accept and offers an inline regenerate r
   assert.match(source, /Cannot safely apply this recommendation/);
   assert.match(source, /!descriptor\.livePreview && resultsMatchContext && recommendationMatchesDashboard/);
 
-  // Clicking Regenerate re-runs the review (full scope: empty focusedRequest) and
-  // re-opens the same critique. The call may also carry a study-telemetry trigger,
-  // so match the essential argument without pinning the closing brace.
+  // Context-stale still regenerates the full set (every card used the old brief)
+  // and re-opens this critique. Overlap-after-apply refreshes only this card.
   assert.match(source, /getElementById\("focusRegenerate"\)\?\.addEventListener/);
-  assert.match(source, /await runAIAssist\(\{ focusedRequest: ""/);
+  assert.match(source, /await runAIAssist\(\{[\s\S]*?focusedRequest: ""/);
+  assert.match(source, /keepCritiqueId: targetId/);
+  assert.match(source, /id="focusRegenerateOne"/);
+  assert.match(source, /Regenerate this critique/);
+  assert.match(source, /async function regenerateOneCritique\(/);
+  assert.match(source, /persistReviewMeta: false/);
+  assert.match(source, /id="focusRefreshDone"/);
+  assert.match(source, /This critique no longer applies/);
   assert.match(source, /state\.selectedCritiqueId = targetId/);
 
   // Distinct styling for the recovery notice and its inline action button.
@@ -749,4 +772,34 @@ test("positive feedback renders as an inline card inside its topic group, not a 
   assert.match(styles, /\.strength-card \{/);
   assert.match(styles, /\.strength-evidence \{/);
   assert.match(styles, /\.strength-medal \{/);
+});
+
+test("session end archives high-resolution PNG and reloadable JSON for checkpoints and the final board", async () => {
+  const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
+
+  assert.match(source, /async function captureDashboardExport\(\)/);
+  assert.match(source, /async function captureLiveArtboardPng\(\)/);
+  assert.match(source, /async function vegaTileCanvas\(/);
+  assert.match(source, /emptyVegaHosts: true/);
+  assert.match(source, /view\.toCanvas/);
+  assert.match(source, /toDataURL\("image\/png"\)/);
+  assert.match(source, /toDataURL\("image\/webp", \.84\)/);
+  assert.match(source, /target\.afterPng = captured\.png/);
+  assert.match(source, /async function collectStudyDashboardArtifacts\(\)/);
+  assert.match(source, /dashboardDocumentFromSnapshot\(\{/);
+  assert.match(source, /exportStudyDashboardsZip\(out\.artifacts, out\.bundle\)/);
+  assert.match(source, /saveStudyBundle\("end"\)/);
+});
+
+test("study telemetry pairs review requests with displayed or failed, and checkpoint counts match applied ids", async () => {
+  const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
+
+  assert.match(source, /state\.reviewInFlight/);
+  assert.match(source, /if \(state\.reviewInFlight\) return false;/);
+  assert.match(source, /recordCritiquesDisplayed\(/);
+  assert.match(source, /recordCritiquesDisplayed\("selected-region", askId\)/);
+  assert.match(source, /critique_request_failed/);
+  assert.match(source, /const recommendationIds = \[\.\.\.\(state\.workingDraft\.applicationOrder \|\| \[\]\)\];/);
+  assert.match(source, /const committedIds = Array\.isArray\(result\.applicationOrder\)/);
+  assert.match(source, /workingDraft\.applicationOrder \|\| \[\]\)\.length/);
 });

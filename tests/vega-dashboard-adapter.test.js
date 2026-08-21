@@ -5,6 +5,7 @@ import {
   applyTargetFilterState,
   applyDashboardFilterState,
   buildInteractionScenario,
+  dashboardDocumentFromSnapshot,
   normalizeDashboardDocument,
   walkUnitSpecs,
 } from "../src/vega-dashboard-adapter.js";
@@ -366,4 +367,45 @@ test("simulation y domain equals the installed slice — line with no x channel"
   const backend = computeCrossFilterSlice(line, "Region", "A");
   assert.deepEqual(backend.spec.encoding.y.scale.domain, [0, 10]);
   assert.deepEqual(frontend.encoding.y.scale.domain, backend.spec.encoding.y.scale.domain);
+});
+
+test("a checkpoint snapshot exports a reloadable {dashboard, tiles} document", () => {
+  const snapshot = {
+    specMap: {
+      trend: {
+        mark: "line",
+        data: { values: [{ week: 1, sales: 10 }] },
+        encoding: { x: { field: "week" }, y: { field: "sales" } },
+      },
+    },
+    board: {
+      title: "Team Delivery Health",
+      subtitle: "Monitor delivery risk.",
+      hasKpis: true,
+      kpis: [{ label: "Done", value: "31" }],
+      kpiLayout: "hero-support",
+      filters: [],
+      canvasWidth: 1100,
+      canvasHeight: 720,
+      tiles: [{
+        id: "trend",
+        title: "Task Velocity",
+        hasSubtitle: true,
+        bounds: { x: 28, y: 96, w: 508, h: 258 },
+      }],
+    },
+  };
+  const document = dashboardDocumentFromSnapshot(snapshot, "checkpoint-02");
+  assert.equal(document.dashboard.id, "checkpoint-02");
+  assert.equal(document.dashboard.title, "Team Delivery Health");
+  assert.equal(document.dashboard.showChartSubtitles, true);
+  assert.equal(document.tiles[0].id, "trend");
+  assert.equal(document.tiles[0].label, "Task Velocity");
+  assert.deepEqual(document.tiles[0].bounds, { x: 28, y: 96, w: 508, h: 258 });
+  assert.equal(document.tiles[0].spec.mark, "line");
+
+  const reloaded = normalizeDashboardDocument(document);
+  assert.equal(reloaded.dashboard.title, "Team Delivery Health");
+  assert.equal(reloaded.tiles[0].id, "trend");
+  assert.equal(reloaded.tiles[0].spec.encoding.y.field, "sales");
 });

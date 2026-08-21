@@ -137,6 +137,42 @@ export function enrichRecommendations(recommendations, version = 1) {
   });
 }
 
+/** True when a still-open recommendation should not be auto-applied on the
+ * dashboard that just changed: it shares a tile, write/invalidate channel, or
+ * catalog conflict with the applied set. Independent recommendations stay fresh. */
+export function recommendationAffectedByApply(recommendation, appliedRecommendations = [], changedTargets = [], appliedIds = new Set()) {
+  if ((recommendation.conflictsWith || []).some((id) => appliedIds.has(id))) return true;
+  if (recommendation.tileId && changedTargets.has(recommendation.tileId)) return true;
+  const channels = [...(recommendation.writes || []), ...(recommendation.invalidates || [])];
+  if (channels.some((channel) => changedTargets.has(channel))) return true;
+  for (const applied of appliedRecommendations) {
+    if (!applied || applied.id === recommendation.id) continue;
+    if (recommendation.tileId && applied.tileId && recommendation.tileId === applied.tileId) return true;
+    const appliedChannels = [...(applied.writes || []), ...(applied.invalidates || [])];
+    if (channels.some((channel) => appliedChannels.includes(channel))) return true;
+  }
+  return false;
+}
+
+/** After an apply, bump lastEvaluatedVersion for pending recommendations that
+ * the applied change did not touch, so they remain Accept-able. Overlapping or
+ * catalog-conflicting items keep their prior version and stay gated. */
+export function retainRecommendationFreshness(recommendations, {
+  appliedIds = [],
+  changedTargets = [],
+  nextVersion,
+} = {}) {
+  const applied = new Set(appliedIds);
+  const changed = new Set(changedTargets);
+  const appliedRecs = recommendations.filter((item) => applied.has(item.id));
+  return recommendations.map((item) => {
+    const status = item.status || "pending";
+    if (!["pending", "updated"].includes(status) || applied.has(item.id)) return item;
+    if (recommendationAffectedByApply(item, appliedRecs, changed, applied)) return item;
+    return { ...item, lastEvaluatedVersion: nextVersion };
+  });
+}
+
 function activeRecommendation(recommendation) {
   return recommendation && ACTIVE_STATUSES.has(recommendation.status);
 }

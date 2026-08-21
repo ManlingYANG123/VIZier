@@ -1855,6 +1855,7 @@ export async function discoverDashboardCritiques(
    * Omitted → no filtering, so every existing caller is unchanged. */
   constraintSet?: ConstraintSet,
   iterationContext?: IterationContext,
+  designDocumentText?: string,
 ): Promise<CriteriaReviewResult> {
   if (!client?.available()) throw new Error("LLM_REQUIRED: the unified review engine requires a configured model");
   if (region && focus) throw new Error("REVIEW_SCOPE_CONFLICT: use either a canvas region or a full-dashboard focused request");
@@ -1877,6 +1878,8 @@ export async function discoverDashboardCritiques(
         normalizedFocus,
         savedRationales,
         iterationContext,
+        constraintSet,
+        designDocumentText,
       ),
       { system: DASHBOARD_REVIEW_SYSTEM, temperature, maxTokens: 16000, onToken },
     );
@@ -1963,7 +1966,7 @@ export async function discoverDashboardCritiques(
     }));
     try {
       const secondResponse = await client.completeJson<JsonObject>(
-        `${dashboardReviewUser(snapshot, packet, grounding, undefined, undefined, savedRationales, iterationContext)}\n\n${secondPassDirective(covered)}`,
+        `${dashboardReviewUser(snapshot, packet, grounding, undefined, undefined, savedRationales, iterationContext, constraintSet, designDocumentText)}\n\n${secondPassDirective(covered)}`,
         { system: DASHBOARD_REVIEW_SYSTEM, temperature, maxTokens: 16000 },
       );
       const secondRawDiagnoses = Array.isArray(secondResponse.diagnoses) ? secondResponse.diagnoses : [];

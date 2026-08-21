@@ -96,6 +96,7 @@ export async function runCritique(
     req.savedRationales,
     req.constraintSet,
     req.iterationContext,
+    req.designDocumentText,
   );
   tracer.emit("evidence_done", `${result.evidencePacket.detectorEvidence.length} deterministic evidence helper(s)`, {
     findings: result.evidencePacket.detectorFindings.map((finding) => ({

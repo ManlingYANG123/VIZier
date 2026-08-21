@@ -4,6 +4,7 @@ import {
   buildApplicationPlan,
   enrichRecommendations,
   relationshipSummary,
+  retainRecommendationFreshness,
 } from "./recommendation-engine.js";
 import {
   extractConstraints,
@@ -37,15 +38,18 @@ import {
 import {
   STUDY_STORAGE_KEY,
   buildStudyBundle,
+  buildStudyDashboardArtifacts,
   discardStudySession,
   endStudySession,
   exportStudyBundleLocal,
+  exportStudyDashboardsZip,
   isStudyActive,
   recordStudyAction,
   recordStudyEvent,
   restoreStudySession,
   saveStudySessionToServer,
   startStudySession,
+  stripVersionMedia,
   studySessionInfo,
 } from "./study-session.js";
 import {
@@ -71,6 +75,7 @@ import {
   applyTargetFilterState,
   applyDashboardFilterState,
   buildInteractionScenario,
+  dashboardDocumentFromSnapshot,
   normalizeDashboardDocument,
 } from "./vega-dashboard-adapter.js";
 import {
@@ -97,10 +102,11 @@ import {
 } from "./context-workflow.js";
 import {
   DECIDED_STATUSES,
-  critiqueIdentityKey,
+  critiqueRefreshRequest,
   groupCritiquesByAsk,
   isDecidedCritique,
   mergeAskResults,
+  pickCritiqueRefreshReplacement,
 } from "./critique-merge.js";
 import {
   CONTEXT_BOX_FIELDS,
@@ -386,11 +392,13 @@ const state = {
   // Transient UI state for the design-doc upload control (shared by the
   // onboarding form and the persistent workspace context panel). `note` is the
   // optional author instruction that steers extraction ("use the palette here").
-  designDoc: { status: "idle", filename: "", error: "", note: "" },
+  designDoc: { status: "idle", filename: "", error: "", note: "", text: "" },
   lastReviewContextFingerprint: null,
   // A review request selects what the next run should answer. It intentionally
   // stays outside context so a one-off question does not become durable memory.
   reviewRequest: "",
+  focusedReviewRunning: false,
+  reviewInFlight: false,
   // The most recent direct answer to a focused/region ask. Surfaced in its own
   // panel so a narrow question always gets a visible response, even when the
   // engine produced no standard (grounded) critique card.
@@ -462,6 +470,9 @@ const state = {
   // shows this number directly and sends it verbatim; the engine clamps it. 0.2
   // is the engine default, so an untouched control changes nothing.
   reviewTemperature: 0.6,
+  // After a single-critique refresh finds the issue gone: keep the focus card
+  // open with a confirmation, then return to the main list on Back to Critiques.
+  critiqueRefreshNotice: null,
 };
 
 let preferenceAgentTimer = null;
@@ -773,6 +784,16 @@ const els = Object.fromEntries([
 function clone(value) { return structuredClone(value); }
 function tileById(id) { return state.tiles.find((tile) => tile.id === id); }
 function critiqueById(id) { return state.critiques.find((item) => item.id === id); }
+function designDocumentForEngine() {
+  const set = effectiveConstraintSet();
+  if (!set) return {};
+  const text = String(state.designDoc?.text || "").trim().slice(0, 40000);
+  return {
+    constraintSet: set,
+    ...(text ? { designDocumentText: text } : {}),
+  };
+}
+
 function reviewContextForEngine() {
   const scope = state.context.scope || [];
   const rationaleNotes = state.rationales.map((rationale) =>
@@ -947,12 +968,24 @@ function syncReviewReadiness() {
   const docProcessing = designDocIsProcessing();
   const ready = contextReadyForReview() && !docProcessing;
   const staleResults = ready && !reviewResultsMatchContext();
-  // "Generating" spans both review paths: the full/focused run (ai-running class
-  // on the generate button) and the selected-region run (localReviewSubmitting).
-  const running = els.aiAssistButton.classList.contains("ai-running") || state.localReviewSubmitting;
+  // One review at a time: full, focused, and selected-region share the engine
+  // and the critique list, so a second ask would race the first (and drop its
+  // critiques_displayed event).
+  const running = Boolean(
+    state.reviewInFlight
+    || state.focusedReviewRunning
+    || state.localReviewSubmitting
+    || els.aiAssistButton.classList.contains("ai-running"),
+  );
   const actionTitle = els.aiAssistButton.querySelector(".ai-action-title");
   const note = document.getElementById("critiqueReadinessNote");
   els.aiAssistButton.disabled = !ready || running;
+  const focusedSend = document.getElementById("runFocusedReviewBtn");
+  const focusedInput = document.getElementById("focusedReviewInput");
+  if (focusedSend && !state.focusedReviewRunning) {
+    const request = (focusedInput?.value || "").replace(/\s+/g, " ").trim();
+    focusedSend.disabled = running || request.length < 3 || !ready;
+  }
   // Lock the exploration slider while a review is generating — the temperature
   // is read at request time, so changing it mid-run would misrepresent what the
   // in-flight critiques were drafted with.
@@ -981,7 +1014,7 @@ function syncReviewReadiness() {
   els.aiAssistButton.setAttribute("aria-label", ready
     ? actionTitle.textContent
     : "Confirm context before generating critiques");
-  els.localReviewButton.disabled = !ready;
+  els.localReviewButton.disabled = !ready || running;
   els.localReviewButton.setAttribute("aria-label", ready
     ? "Select an area for local critique"
     : "Confirm context before starting a local critique");
@@ -1029,7 +1062,7 @@ function wireReviewTemperature() {
 }
 
 function workingDraftChangeCount() {
-  return state.workingDraft.appliedCritiques?.length || 0;
+  return (state.workingDraft.applicationOrder || []).length;
 }
 
 function renderWorkingDraftStatus() {
@@ -2022,17 +2055,43 @@ function snapshotStyleText() {
   return dashboardSnapshotStyles;
 }
 
-async function captureDashboardScreenshot() {
+function copyComputedLayout(source, target) {
+  if (!source || !target || source.nodeType !== 1 || target.nodeType !== 1) return;
+  const computed = getComputedStyle(source);
+  const props = [
+    "position", "display", "flex-direction", "flex-wrap", "align-items", "justify-content",
+    "gap", "row-gap", "column-gap", "grid-template-columns", "grid-template-rows",
+    "top", "left", "right", "bottom", "width", "height", "margin", "padding",
+    "font", "font-family", "font-size", "font-weight", "letter-spacing", "line-height",
+    "color", "background", "background-color", "border", "border-radius", "border-bottom",
+    "box-shadow", "overflow", "text-transform", "white-space", "opacity", "z-index",
+    "text-align", "align-self", "justify-self",
+  ];
+  for (const prop of props) {
+    const value = computed.getPropertyValue(prop);
+    if (value) target.style.setProperty(prop, value);
+  }
+  const srcKids = source.children;
+  const dstKids = target.children;
+  const n = Math.min(srcKids.length, dstKids.length);
+  for (let i = 0; i < n; i += 1) copyComputedLayout(srcKids[i], dstKids[i]);
+}
+
+async function rasterizeDashboardArtboard({ emptyVegaHosts = false } = {}) {
   const source = els.dashboardArtboard;
   if (!source) return null;
   await new Promise((resolve) => requestAnimationFrame(resolve));
 
   const snapshot = source.cloneNode(true);
+  copyComputedLayout(source, snapshot);
   snapshot.querySelector("#markersLayer")?.replaceChildren();
   snapshot.querySelectorAll(".selected, .canvas-preview-affected").forEach((node) => {
     node.classList.remove("selected", "canvas-preview-affected");
   });
   snapshot.classList.remove("canvas-proposed");
+  if (emptyVegaHosts) {
+    snapshot.querySelectorAll(".vega-host").forEach((host) => host.replaceChildren());
+  }
   snapshot.style.position = "relative";
   snapshot.style.inset = "auto";
   const snapshotWidth = state.canvasSize.width;
@@ -2048,28 +2107,224 @@ async function captureDashboardScreenshot() {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${snapshotWidth}" height="${snapshotHeight}" viewBox="0 0 ${snapshotWidth} ${snapshotHeight}"><foreignObject width="${snapshotWidth}" height="${snapshotHeight}"><div xmlns="http://www.w3.org/1999/xhtml"><style><![CDATA[${css}]]></style>${serialized}</div></foreignObject></svg>`;
   const svgBlob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
   const objectURL = URL.createObjectURL(svgBlob);
+  return { svg, objectURL, snapshotWidth, snapshotHeight };
+}
 
-  try {
+function fillCanvas(canvas, image, width, height) {
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#fbfbfd";
+  context.fillRect(0, 0, width, height);
+  context.drawImage(image, 0, 0, width, height);
+  return context;
+}
+
+function loadExportImage(src, timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
     const image = new Image();
+    const timer = setTimeout(() => {
+      image.onload = image.onerror = null;
+      reject(new Error("image load timed out"));
+    }, timeoutMs);
     image.decoding = "async";
-    await new Promise((resolve, reject) => {
-      image.onload = resolve;
-      image.onerror = reject;
-      image.src = objectURL;
-    });
-    const canvas = document.createElement("canvas");
-    canvas.width = 770;
-    canvas.height = Math.max(1, Math.round(canvas.width * snapshotHeight / snapshotWidth));
-    const context = canvas.getContext("2d");
-    context.fillStyle = "#fbfbfd";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/webp", .84);
+    image.onload = () => {
+      clearTimeout(timer);
+      resolve(image);
+    };
+    image.onerror = (error) => {
+      clearTimeout(timer);
+      reject(error);
+    };
+    image.src = src;
+  });
+}
+
+function canvasPngDataUrl(canvas) {
+  try {
+    const png = canvas.toDataURL("image/png");
+    return typeof png === "string" && png.startsWith("data:image/png") ? png : null;
   } catch (error) {
-    console.warn("[revision-screenshot] Raster capture failed; using a static SVG image.", error);
-    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+    console.warn("[revision-screenshot] canvas PNG export failed", error);
+    return null;
+  }
+}
+
+function exportPairFromCanvas(hi, snapshotWidth, snapshotHeight) {
+  const png = canvasPngDataUrl(hi);
+  if (!png) return null;
+  const thumb = document.createElement("canvas");
+  const thumbWidth = 770;
+  fillCanvas(
+    thumb,
+    hi,
+    thumbWidth,
+    Math.max(1, Math.round(thumbWidth * snapshotHeight / snapshotWidth)),
+  );
+  let screenshot = png;
+  try {
+    screenshot = thumb.toDataURL("image/webp", .84) || png;
+  } catch {
+    screenshot = png;
+  }
+  return { screenshot, png };
+}
+
+function vegaViewForExport(view) {
+  if (!view) return null;
+  if (typeof view.toCanvas === "function" || typeof view.toImageURL === "function") return view;
+  if (view.view && (typeof view.view.toCanvas === "function" || typeof view.view.toImageURL === "function")) {
+    return view.view;
+  }
+  return null;
+}
+
+function hostBoxOnArtboard(host, artboard) {
+  if (!host || !artboard) return null;
+  const scale = Number(state.view?.scale) || 1;
+  const root = artboard.getBoundingClientRect();
+  const box = host.getBoundingClientRect();
+  return {
+    x: (box.left - root.left) / scale,
+    y: (box.top - root.top) / scale,
+    w: box.width / scale,
+    h: box.height / scale,
+  };
+}
+
+async function vegaTileCanvas(tileId, scale = 2) {
+  const view = vegaViewForExport(state.views?.[tileId]);
+  if (!view) return null;
+  try {
+    if (typeof view.toCanvas === "function") {
+      const tileCanvas = await view.toCanvas(scale);
+      if (tileCanvas) return tileCanvas;
+    }
+    if (typeof view.toImageURL === "function") {
+      const image = await loadExportImage(await view.toImageURL("png", scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth || 1;
+      canvas.height = image.naturalHeight || 1;
+      canvas.getContext("2d").drawImage(image, 0, 0);
+      return canvas;
+    }
+  } catch (error) {
+    console.warn(`[revision-screenshot] Vega PNG failed for tile ${tileId}`, error);
+  }
+  return null;
+}
+
+async function rasterizeArtboardChrome(width, height, scale) {
+  let raster = null;
+  try {
+    raster = await rasterizeDashboardArtboard({ emptyVegaHosts: true });
+  } catch (error) {
+    console.warn("[revision-screenshot] Artboard chrome serialize failed.", error);
+    return null;
+  }
+  if (!raster) return null;
+  const { objectURL } = raster;
+  try {
+    const image = await loadExportImage(objectURL);
+    const canvas = document.createElement("canvas");
+    fillCanvas(canvas, image, Math.round(width * scale), Math.round(height * scale));
+    return canvas;
+  } catch (error) {
+    console.warn("[revision-screenshot] Artboard chrome raster failed.", error);
+    return null;
   } finally {
     URL.revokeObjectURL(objectURL);
+  }
+}
+
+// Screenshot the live artboard: HTML chrome (title, filters, KPIs, tile frames)
+// plus each chart from Vega's own toCanvas. Reconstructing those with fillText
+// is what made the study PNG look unlike the dashboard on screen.
+async function captureLiveArtboardPng() {
+  const source = els.dashboardArtboard;
+  if (!source) return null;
+  const width = Math.max(1, Number(state.canvasSize?.width) || 1100);
+  const height = Math.max(1, Number(state.canvasSize?.height) || 720);
+  const scale = 2;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(width * scale);
+  canvas.height = Math.round(height * scale);
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+  const background = getComputedStyle(source).backgroundColor;
+  context.fillStyle = background && background !== "rgba(0, 0, 0, 0)" ? background : "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  const chrome = await rasterizeArtboardChrome(width, height, scale);
+  if (chrome) context.drawImage(chrome, 0, 0, canvas.width, canvas.height);
+
+  for (const tile of state.tiles || []) {
+    const host = document.getElementById(`vega-${tile.id}`);
+    const box = hostBoxOnArtboard(host, source);
+    if (!box || box.w < 1 || box.h < 1) continue;
+    const chart = await vegaTileCanvas(tile.id, scale);
+    if (!chart) continue;
+    context.drawImage(chart, box.x * scale, box.y * scale, box.w * scale, box.h * scale);
+  }
+  return canvasPngDataUrl(canvas);
+}
+
+async function captureDashboardPngFromViews() {
+  const source = els.dashboardArtboard;
+  const width = Math.max(1, Number(state.canvasSize?.width) || 1100);
+  const height = Math.max(1, Number(state.canvasSize?.height) || 720);
+  const scale = 2;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(width * scale);
+  canvas.height = Math.round(height * scale);
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  for (const tile of state.tiles || []) {
+    const host = document.getElementById(`vega-${tile.id}`);
+    const box = hostBoxOnArtboard(host, source);
+    if (!box || box.w < 1 || box.h < 1) continue;
+    const chart = await vegaTileCanvas(tile.id, scale);
+    if (!chart) continue;
+    context.drawImage(chart, box.x * scale, box.y * scale, box.w * scale, box.h * scale);
+  }
+  return canvasPngDataUrl(canvas);
+}
+
+async function captureDashboardExport() {
+  const width = Math.max(1, Number(state.canvasSize?.width) || 1100);
+  const height = Math.max(1, Number(state.canvasSize?.height) || 720);
+  try {
+    const png = await captureLiveArtboardPng() || await captureDashboardPngFromViews();
+    if (!png) return { screenshot: null, png: null, svg: null };
+    const image = await loadExportImage(png);
+    const hi = document.createElement("canvas");
+    fillCanvas(hi, image, image.naturalWidth || width * 2, image.naturalHeight || height * 2);
+    const pair = exportPairFromCanvas(hi, width, height);
+    return { screenshot: pair?.screenshot || png, png: pair?.png || png, svg: null };
+  } catch (error) {
+    console.warn("[revision-screenshot] Live artboard capture failed.", error);
+    return { screenshot: null, png: null, svg: null };
+  }
+}
+
+async function captureDashboardScreenshot() {
+  const captured = await captureDashboardExport();
+  return captured.screenshot;
+}
+
+async function rememberDashboardExport(target) {
+  if (!target) return null;
+  try {
+    const captured = await captureDashboardExport();
+    target.afterScreenshot = captured.screenshot || target.afterScreenshot || null;
+    target.afterPng = captured.png || null;
+    target.afterSvg = captured.svg || null;
+    return captured;
+  } catch (error) {
+    console.warn("[revision-screenshot] rememberDashboardExport failed", error);
+    return null;
   }
 }
 
@@ -3047,6 +3302,14 @@ function setContextInferring(active) {
     ?.classList.toggle("is-generating", active);
 }
 
+function setFocusedReviewGenerating(active) {
+  const wrap = document.querySelector(".focused-review-input-wrap");
+  const input = document.getElementById("focusedReviewInput");
+  wrap?.classList.toggle("is-generating", active);
+  if (wrap) wrap.setAttribute("aria-busy", String(active));
+  if (input) input.disabled = active;
+}
+
 // Context is read live into state and reflected by the left-rail status dot.
 function readBriefIntoState({ confirmEditedFields = true } = {}) {
   const box = document.getElementById("briefContextBox");
@@ -3531,14 +3794,15 @@ function renderFixedContextPanel() {
         <span class="optional-label">Optional</span>
         <span class="context-section-status" id="focusedReviewState" hidden></span>
       </div>
-      <div class="focused-review-input-wrap">
+      <div class="focused-review-input-wrap${state.focusedReviewRunning ? " is-generating" : ""}"${state.focusedReviewRunning ? ` aria-busy="true"` : ""}>
         <textarea
           id="focusedReviewInput"
           rows="3"
           maxlength="600"
           placeholder="e.g., Does this chart make department differences easy to compare?"
+          ${state.focusedReviewRunning ? "disabled" : ""}
         >${escapeHTML(state.reviewRequest)}</textarea>
-        <button type="button" class="focused-review-send" id="runFocusedReviewBtn" aria-label="Ask VIZier" title="Ask VIZier" ${state.reviewRequest.trim().length >= 3 ? "" : "disabled"}>
+        <button type="button" class="focused-review-send" id="runFocusedReviewBtn" aria-label="Ask VIZier" title="Ask VIZier" ${state.reviewRequest.trim().length >= 3 && !state.focusedReviewRunning ? "" : "disabled"}>
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M9 4.5 12.5 8 9 11.5"/></svg>
         </button>
       </div>
@@ -3679,6 +3943,7 @@ function attachContextPanelEventListeners() {
   const focusedState = document.getElementById("focusedReviewState");
   const focusedError = document.getElementById("focusedReviewError");
   const syncFocusedReview = () => {
+    if (state.focusedReviewRunning) return;
     const request = focusedInput?.value.replace(/\s+/g, " ").trim() || "";
     state.reviewRequest = request;
     if (focusedButton) focusedButton.disabled = request.length < 3 || !contextReadyForReview();
@@ -3698,11 +3963,15 @@ function attachContextPanelEventListeners() {
     }
   });
   focusedButton?.addEventListener("click", async () => {
-    syncFocusedReview();
-    if (!state.reviewRequest || !contextReadyForReview()) return;
+    const request = focusedInput?.value.replace(/\s+/g, " ").trim() || "";
+    if (request.length < 3 || !contextReadyForReview()) return;
+    if (state.reviewInFlight || state.localReviewSubmitting) return;
+    state.reviewRequest = request;
     readBriefIntoState({ confirmEditedFields: false });
     // The send control is icon-only now, so progress is carried by the running
-    // animation and the state chip rather than a button label.
+    // animation, the rainbow edge, and the state chip rather than a button label.
+    state.focusedReviewRunning = true;
+    setFocusedReviewGenerating(true);
     focusedButton.disabled = true;
     focusedButton.classList.add("running");
     focusedButton.setAttribute("aria-label", "Asking VIZier…");
@@ -3711,10 +3980,24 @@ function attachContextPanelEventListeners() {
       focusedState.hidden = false;
       focusedState.dataset.state = "running";
     }
-    const succeeded = await runAIAssist({ focusedRequest: state.reviewRequest });
-    focusedButton.classList.remove("running");
-    focusedButton.disabled = false;
-    focusedButton.setAttribute("aria-label", succeeded ? "Ask VIZier again" : "Ask VIZier");
+    if (focusedError) focusedError.hidden = true;
+    let succeeded = false;
+    try {
+      succeeded = await runAIAssist({ focusedRequest: request });
+    } finally {
+      state.focusedReviewRunning = false;
+      setFocusedReviewGenerating(false);
+      focusedButton.classList.remove("running");
+    }
+    if (succeeded) {
+      if (focusedInput) focusedInput.value = "";
+      state.reviewRequest = "";
+      focusedButton.disabled = true;
+      focusedButton.setAttribute("aria-label", "Ask VIZier");
+    } else {
+      focusedButton.disabled = false;
+      focusedButton.setAttribute("aria-label", "Ask VIZier");
+    }
     if (focusedState) {
       focusedState.textContent = succeeded ? "Answer Ready" : "Needs Retry";
       focusedState.hidden = false;
@@ -5018,7 +5301,23 @@ async function applyRecommendationSelection(selectedIds, conflictChoices = {}) {
     if (critique && entry.status === "superseded") critique.status = "superseded";
   }
   const additions = (result.addedCritiques || []).filter((critique) => !byId.has(critique.id));
-  state.critiques = scopeRank(enrichRecommendations([...state.critiques, ...additions], state.version + 1));
+  const nextVersion = state.version + 1;
+  const committedIds = Array.isArray(result.applicationOrder)
+    ? result.applicationOrder.filter(Boolean)
+    : appliedCritiques.map((critique) => critique.id);
+  const committedCritiques = appliedCritiques.filter((critique) => committedIds.includes(critique.id));
+  const appliedIds = [
+    ...committedIds,
+    ...committedCritiques.map((critique) => critique.id),
+  ];
+  state.critiques = scopeRank(retainRecommendationFreshness(
+    enrichRecommendations([...state.critiques, ...additions], nextVersion),
+    {
+      appliedIds,
+      changedTargets: result.changedTargets || [],
+      nextVersion,
+    },
+  ));
   for (const tile of state.tiles) {
     if (result.specMap?.[tile.id]) tile.spec = clone(result.specMap[tile.id]);
   }
@@ -5056,11 +5355,10 @@ async function applyRecommendationSelection(selectedIds, conflictChoices = {}) {
   }
   state.crossFilterEnabled = state.tiles.some((tile) => tile.spec?.usermeta?.crossFilter?.role === "source");
   state.activeFilterState = state.tiles.some((tile) => tile.spec?.usermeta?.activeFilterState);
-  const nextVersion = state.version + 1;
   state.version = nextVersion;
   state.previewCache.clear();
   state.canvasPreview = null;
-  const decisionEvents = appliedCritiques.map((critique) => appendInteractionEvent({
+  const decisionEvents = committedCritiques.map((critique) => appendInteractionEvent({
     kind: "recommendation_accepted",
     summary: `Accepted recommendation: ${critique.title}`,
     detail: critique.suggestion,
@@ -5071,9 +5369,9 @@ async function applyRecommendationSelection(selectedIds, conflictChoices = {}) {
   }));
   const appliedEvent = appendInteractionEvent({
     kind: "changes_applied",
-    summary: `Applied ${appliedCritiques.length} ${appliedCritiques.length === 1 ? "change" : "changes"} to the Working Draft`,
+    summary: `Applied ${committedIds.length} ${committedIds.length === 1 ? "change" : "changes"} to the Working Draft`,
     data: {
-      recommendationIds: [...(result.applicationOrder || [])],
+      recommendationIds: [...committedIds],
       changedTargets: [...(result.changedTargets || [])],
     },
   }, { synthesize: false });
@@ -5086,7 +5384,7 @@ async function applyRecommendationSelection(selectedIds, conflictChoices = {}) {
     },
   }, { synthesize: false });
   state.workingDraft = recordWorkingDraftApplication(state.workingDraft, {
-    appliedCritiques,
+    appliedCritiques: committedCritiques,
     result,
     beforeSnapshot: {
       specMap: beforeSpecMap,
@@ -5118,11 +5416,11 @@ async function applyRecommendationSelection(selectedIds, conflictChoices = {}) {
   // When an interaction fix was just enabled, run the demo-then-settle so its
   // effect is visibly real before the canvas returns to rest. Awaited so callers
   // (and tests) observe the settled state; failures never block the apply result.
-  const enabledInteraction = appliedCritiques.some((critique) =>
+  const enabledInteraction = committedCritiques.some((critique) =>
     critique.proposal?.kind === "add-cross-filter" || critique.proposal?.kind === "show-filter-state");
   if (enabledInteraction) {
     try {
-      await playApplySettleDemo(appliedCritiques);
+      await playApplySettleDemo(committedCritiques);
     } catch (error) {
       console.warn("[apply settle demo]", error);
       state.settleDemoPlaying = false;
@@ -5232,12 +5530,13 @@ async function saveWorkingDraftCheckpoint() {
 
   try {
     const checkpointId = Math.max(...state.versions.map((version) => version.id)) + 1;
+    const recommendationIds = [...(state.workingDraft.applicationOrder || [])];
     const checkpointEvent = appendInteractionEvent({
       kind: "checkpoint_saved",
-      summary: `Saved Checkpoint ${checkpointId} with ${workingDraftChangeCount()} changes`,
+      summary: `Saved Checkpoint ${checkpointId} with ${recommendationIds.length} ${recommendationIds.length === 1 ? "change" : "changes"}`,
       data: {
         baseCheckpointId: state.workingDraft.baseCheckpointId,
-        recommendationIds: [...state.workingDraft.applicationOrder],
+        recommendationIds,
       },
     }, { synthesize: false });
     const checkpoint = buildRevisionCheckpoint({
@@ -5257,12 +5556,19 @@ async function saveWorkingDraftCheckpoint() {
       beforeScreenshot: state.workingDraft.beforeScreenshot
         || state.versions.at(-1)?.afterScreenshot
         || null,
-      afterScreenshot: await captureDashboardScreenshot(),
+      afterScreenshot: null,
       createdFromEventIds: [
         ...state.workingDraft.createdFromEventIds,
         checkpointEvent.id,
       ],
     });
+    const captured = await captureDashboardExport().catch((error) => {
+      console.warn("[revision-screenshot] checkpoint PNG capture failed", error);
+      return { screenshot: null, png: null, svg: null };
+    });
+    checkpoint.afterScreenshot = captured.screenshot;
+    checkpoint.afterPng = captured.png;
+    checkpoint.afterSvg = captured.svg || null;
     state.versions.push(checkpoint);
     state.selectedVersionId = checkpointId;
     state.checkpointComparison = {
@@ -6124,6 +6430,7 @@ async function setCanvasPreviewPhase(phase) {
 async function closeCritiqueFocus() {
   state.selectedCritiqueId = null;
   state.selectedTileId = null;
+  state.critiqueRefreshNotice = null;
   state.canvasPreview = null;
   renderCanvasPreviewControl();
   renderDashboardChrome({ renderContext: false });
@@ -6188,6 +6495,8 @@ async function renderInspector() {
     }
   }
 
+  const refreshRetired = state.critiqueRefreshNotice?.critiqueId === critique.id
+    && state.critiqueRefreshNotice?.kind === "retired";
   const actionable = ["pending", "updated"].includes(critique.status);
   const relationships = relationshipSummary(critique, state.critiques);
   const fields = critiqueFieldEntries(critique);
@@ -6414,8 +6723,17 @@ async function renderInspector() {
           <span aria-hidden="true">↻</span>
           <div>
             <strong>Regenerate for the current dashboard</strong>
-            <p>This recommendation was evaluated before the last applied change, so its transformation is no longer safe to reuse.</p>
-            <button type="button" id="focusRegenerate" class="focus-notice-action">Regenerate Critiques</button>
+            <p>This recommendation overlaps a change you already applied, so its transformation may no longer be safe to reuse.</p>
+            <button type="button" id="focusRegenerateOne" class="focus-notice-action">Regenerate this critique</button>
+          </div>
+        </section>` : ""}
+      ${refreshRetired ? `
+        <section class="focus-decision-notice needs-regenerate" role="status">
+          <span aria-hidden="true">i</span>
+          <div>
+            <strong>This critique no longer applies</strong>
+            <p>${escapeHTML(state.critiqueRefreshNotice.message || "This issue is no longer present on the current dashboard.")}</p>
+            <button type="button" id="focusRefreshDone" class="focus-notice-action">Back to Critiques</button>
           </div>
         </section>` : ""}
       ${actionable && descriptor.executable && resultsMatchContext && recommendationMatchesDashboard && !canApplyIndividually ? `
@@ -6477,16 +6795,17 @@ async function renderInspector() {
       { critiqueId: critique.id, dimension: critique.dimension },
     );
   });
-  // The stale-context notice's inline recovery: regenerate the critiques for the
-  // now-confirmed context (same action as the top-bar Regenerate button), then
-  // re-open this same critique so it is immediately applyable. Self-disable to
-  // block a double-trigger during the engine round-trip (runAIAssist only
-  // disables the top-bar button).
+  // Stale-context recovery still regenerates the full set (every card was built
+  // for the previous brief). Overlap-after-apply regenerates only this card.
   document.getElementById("focusRegenerate")?.addEventListener("click", async (event) => {
     const button = event.currentTarget;
     button.disabled = true;
     const targetId = critique.id;
-    const regenerated = await runAIAssist({ focusedRequest: "", trigger: "stale-context-recovery" });
+    const regenerated = await runAIAssist({
+      focusedRequest: "",
+      trigger: "stale-context-recovery",
+      keepCritiqueId: targetId,
+    });
     if (!regenerated) {
       button.disabled = false;
       return;
@@ -6495,10 +6814,32 @@ async function renderInspector() {
     if (refreshed && ["pending", "updated"].includes(refreshed.status)) {
       state.selectedCritiqueId = targetId;
       await renderInspector();
-    } else {
-      state.selectedCritiqueId = null;
-      await renderInspector();
+      return;
     }
+    state.critiqueRefreshNotice = {
+      critiqueId: targetId,
+      kind: "retired",
+      message: "This issue no longer appears in the regenerated review.",
+    };
+    if (refreshed) {
+      state.selectedCritiqueId = targetId;
+      await renderInspector();
+    } else {
+      await closeCritiqueFocus();
+    }
+  });
+  document.getElementById("focusRegenerateOne")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.textContent = "Regenerating…";
+    const outcome = await regenerateOneCritique(critique);
+    if (outcome === "error") {
+      button.disabled = false;
+      button.textContent = "Regenerate this critique";
+    }
+  });
+  document.getElementById("focusRefreshDone")?.addEventListener("click", () => {
+    closeCritiqueFocus();
   });
   document.getElementById("focusDemoButton")?.addEventListener("click", () => {
     // Study telemetry: ran the before/after interaction replay on the canvas.
@@ -6669,16 +7010,111 @@ function readReviewStrengths(resp, reviewScope) {
   }));
 }
 
+async function regenerateOneCritique(critique) {
+  if (!critique) return "error";
+  const targetId = critique.id;
+  const index = state.critiques.findIndex((item) => item.id === targetId);
+  if (index < 0) return "error";
+  recordStudyAction(
+    "critique_requested",
+    `Regenerated one critique: ${critique.title}`,
+    {
+      scope: "focused",
+      trigger: "stale-dashboard-recovery",
+      critiqueId: targetId,
+      dimension: critique.dimension,
+      hadPriorCritiques: true,
+      priorCritiqueCount: state.critiques.length,
+    },
+  );
+  try {
+    const { critiques: incoming, answer } = await generateCritiquesFromEngine(
+      critiqueRefreshRequest(critique),
+      {
+        persistReviewMeta: false,
+        traceTitle: "Refreshing this critique for the current dashboard",
+      },
+    );
+    const replacement = pickCritiqueRefreshReplacement(critique, incoming, answer);
+    if (replacement) {
+      const refreshed = {
+        ...replacement,
+        id: targetId,
+        status: "pending",
+        askId: critique.askId,
+        askScope: critique.askScope || "full",
+        requestRelevance: critique.requestRelevance,
+        reviewRequest: critique.reviewRequest,
+        origin: critique.origin,
+        localReview: critique.localReview,
+        introducedInVersion: critique.introducedInVersion || state.version,
+        lastEvaluatedVersion: state.version,
+        revision: (Number(critique.revision) || 1) + 1,
+      };
+      const next = [...state.critiques];
+      next[index] = refreshed;
+      state.critiques = scopeRank(enrichRecommendations(next, state.version));
+      state.previewCache.delete(targetId);
+      state.interactionObservations.delete(targetId);
+      state.critiqueRefreshNotice = null;
+      state.selectedCritiqueId = targetId;
+      recordStudyAction(
+        "critique_regenerated",
+        `Updated solution for: ${critique.title}`,
+        { critiqueId: targetId, outcome: "updated", dimension: critique.dimension },
+      );
+      renderMarkers();
+      renderCritiques();
+      await renderInspector();
+      return "updated";
+    }
+    const retired = {
+      ...state.critiques[index],
+      status: "superseded",
+      lifecycle: "superseded",
+      lastEvaluatedVersion: state.version,
+    };
+    const next = [...state.critiques];
+    next[index] = retired;
+    state.critiques = next;
+    state.previewCache.delete(targetId);
+    state.interactionObservations.delete(targetId);
+    state.canvasPreview = null;
+    state.selectedCritiqueId = targetId;
+    state.critiqueRefreshNotice = {
+      critiqueId: targetId,
+      kind: "retired",
+      message: answer || "This issue is no longer present on the current dashboard.",
+    };
+    recordStudyAction(
+      "critique_regenerated",
+      `Critique no longer applies: ${critique.title}`,
+      { critiqueId: targetId, outcome: "retired", dimension: critique.dimension },
+    );
+    renderCanvasPreviewControl();
+    renderMarkers();
+    renderCritiques();
+    await renderInspector();
+    return "retired";
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    tracePanel.fail(`Could not refresh this critique — ${message}`);
+    showFocusApplyFailure(message);
+    return "error";
+  }
+}
+
 // Every request uses the same criteria-aware engine. Context changes criterion
 // applicability and wording; it never selects a different generation route.
-async function generateCritiquesFromEngine(focusedRequest = "") {
+async function generateCritiquesFromEngine(focusedRequest = "", options = {}) {
   const specMap = buildEngineSpecMap();
   const board = buildEngineBoardMeta();
   const normalizedRequest = focusedRequest.replace(/\s+/g, " ").trim();
   const reviewScope = normalizedRequest ? "focused" : "full";
-  tracePanel.start(normalizedRequest
-    ? "Focused Review — answering your request"
-    : "AI Assist — criteria-aware full review");
+  tracePanel.start(options.traceTitle
+    || (normalizedRequest
+      ? "Focused Review — answering your request"
+      : "AI Assist — criteria-aware full review"));
   const resp = await streamCritique(
     {
       version: state.version,
@@ -6690,7 +7126,7 @@ async function generateCritiquesFromEngine(focusedRequest = "") {
       requireLLM: true,
       reviewTemperature: state.reviewTemperature,
       savedRationales: savedRationalesForEngine(),
-      ...(effectiveConstraintSet() ? { constraintSet: effectiveConstraintSet() } : {}),
+      ...designDocumentForEngine(),
       ...(normalizedRequest
         ? { focus: { request: normalizedRequest } }
         : {}),
@@ -6699,9 +7135,11 @@ async function generateCritiquesFromEngine(focusedRequest = "") {
   );
   tracePanel.done();
   if (!resp) throw new Error("The review engine returned no result.");
-  state.reviewScope = resp.reviewScope || reviewScope;
-  state.criterionEvaluations = resp.criterionEvaluations || [];
-  state.strengths = readReviewStrengths(resp, state.reviewScope);
+  if (options.persistReviewMeta !== false) {
+    state.reviewScope = resp.reviewScope || reviewScope;
+    state.criterionEvaluations = resp.criterionEvaluations || [];
+    state.strengths = readReviewStrengths(resp, state.reviewScope);
+  }
   // Store each critique's box in RENDERED canvas-space (same transform the tiles
   // use) so any consumer reading critique.bounds stays aligned; the dashboard
   // fallback is the live artboard, not a hardcoded demo rectangle.
@@ -6737,7 +7175,7 @@ async function generateLocalCritiques({ bounds, request, dimension }) {
       requireLLM: true,
       reviewTemperature: state.reviewTemperature,
       savedRationales: savedRationalesForEngine(),
-      ...(effectiveConstraintSet() ? { constraintSet: effectiveConstraintSet() } : {}),
+      ...designDocumentForEngine(),
       region: {
         bounds,
         request,
@@ -6774,26 +7212,49 @@ async function generateLocalCritiques({ bounds, request, dimension }) {
   return { critiques, answer };
 }
 
+function recordCritiquesDisplayed(scope, askId) {
+  recordStudyAction(
+    "critiques_displayed",
+    `Displayed ${state.critiques.length} critique${state.critiques.length === 1 ? "" : "s"} after a ${scope} review`,
+    {
+      scope,
+      askId,
+      count: state.critiques.length,
+      critiques: state.critiques.map((critique) => ({
+        id: critique.id,
+        title: critique.title,
+        dimension: critique.dimension,
+        priority: critique.priority,
+        status: critique.status,
+      })),
+    },
+  );
+}
+
 async function runAIAssist(options = {}) {
   if (!contextReadyForReview()) {
     updateContextWorkflowControls();
     document.getElementById("saveContextBtn")?.focus();
     return false;
   }
+  if (state.reviewInFlight) return false;
   const focusedRequest = typeof options.focusedRequest === "string"
     ? options.focusedRequest.replace(/\s+/g, " ").trim()
     : state.reviewRequest.replace(/\s+/g, " ").trim();
   const attemptedScope = focusedRequest ? "focused" : "full";
   const actionTitle = els.aiAssistButton.querySelector(".ai-action-title");
   const actionDetail = els.aiAssistButton.querySelector(".ai-action-detail");
+  state.reviewInFlight = true;
   els.aiAssistButton.disabled = true;
   els.aiAssistButton.classList.add("ai-running");
   actionTitle.textContent = "Generating Critiques…";
   if (actionDetail) actionDetail.textContent = "Building recommendations";
   els.aiAssistButton.setAttribute("aria-label", "Analyzing dashboard");
+  syncReviewReadiness();
 
+  let askId = null;
   try {
-    const askId = state.nextAskId++;
+    askId = state.nextAskId++;
     // Study telemetry: the request itself. This is the primary input the product
     // never journaled — capture the exact request text (focused/open-ended), the
     // scope, and whether critiques already existed (a re-run vs a first ask).
@@ -6802,6 +7263,7 @@ async function runAIAssist(options = {}) {
       focusedRequest ? `Requested a focused review: ${focusedRequest}` : "Requested a full review",
       {
         scope: attemptedScope,
+        askId,
         requestText: focusedRequest || null,
         trigger: options.trigger || (focusedRequest ? "focused-question" : "full-review"),
         hadPriorCritiques: state.critiques.length > 0,
@@ -6848,8 +7310,16 @@ async function runAIAssist(options = {}) {
     } else {
       state.askAnswer = null;
     }
-    state.selectedCritiqueId = directAnswer?.id || null;
-    state.selectedTileId = directAnswer?.tileId || null;
+    const keepId = typeof options.keepCritiqueId === "string" ? options.keepCritiqueId : null;
+    const kept = keepId ? critiqueById(keepId) : null;
+    const opened = (kept && ["pending", "updated"].includes(kept.status) ? kept : null)
+      || directAnswer
+      || (focusedRequest
+        ? state.critiques.find((critique) => critique.askId === askId && !isDecidedCritique(critique))
+        : null)
+      || null;
+    state.selectedCritiqueId = opened?.id || null;
+    state.selectedTileId = opened?.tileId || null;
     renderRubrics();
     await renderTiles();
     renderMarkers();
@@ -6863,27 +7333,18 @@ async function runAIAssist(options = {}) {
     // Study telemetry: the set the participant was shown after this review. Paired
     // with critique_opened, this yields the reliable "displayed vs inspected" split
     // (which available critiques were never opened) without any gaze/scroll signal.
-    recordStudyAction(
-      "critiques_displayed",
-      `Displayed ${state.critiques.length} critique${state.critiques.length === 1 ? "" : "s"} after a ${attemptedScope} review`,
-      {
-        scope: attemptedScope,
-        askId,
-        count: state.critiques.length,
-        critiques: state.critiques.map((critique) => ({
-          id: critique.id,
-          title: critique.title,
-          dimension: critique.dimension,
-          priority: critique.priority,
-          status: critique.status,
-        })),
-      },
-    );
+    recordCritiquesDisplayed(attemptedScope, askId);
     return true;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const modeLabel = attemptedScope === "focused" ? "Focused review" : "Full review";
     tracePanel.fail(`${modeLabel} failed — ${message}`);
+    recordStudyAction("critique_request_failed", `${modeLabel} failed`, {
+      scope: attemptedScope,
+      askId,
+      requestText: focusedRequest || null,
+      reason: message,
+    });
     // A failed ask must not discard critiques accumulated by earlier asks. The
     // merge never ran (the engine threw before assignment), so state.critiques
     // is still intact — keep it and re-render. The review-run-scoped evaluations
@@ -6923,6 +7384,7 @@ async function runAIAssist(options = {}) {
     }
     return false;
   } finally {
+    state.reviewInFlight = false;
     els.aiAssistButton.classList.remove("ai-running");
     const hasCritiques = state.critiques.length > 0;
     actionTitle.textContent = hasCritiques ? "Regenerate Critiques" : "Generate Critiques";
@@ -6951,6 +7413,7 @@ async function resetDemo() {
   if (!initial) return;
   state.tiles = initial.tiles.map((tile) => ({ ...clone(tile), renderer: "vega-lite", v2Label: tile.label || tile.id }));
   state.critiques = [];
+  state.critiqueRefreshNotice = null;
   state.nextAskId = 1;
   state.askAnswer = null;
   state.selectedCritiqueId = null;
@@ -7003,6 +7466,8 @@ async function resetDemo() {
   state.lastReviewContextFingerprint = null;
   state.reviewScope = "full";
   state.reviewRequest = "";
+  state.focusedReviewRunning = false;
+  state.reviewInFlight = false;
   state.crossFilterEnabled = false;
   state.crossFilterSelection = null;
   state.interactionObservations.clear();
@@ -7039,7 +7504,7 @@ async function resetDemo() {
   renderCanvasPreviewControl();
   renderDashboardChrome();
   await renderTiles();
-  state.versions[0].afterScreenshot = await captureDashboardScreenshot();
+  await rememberDashboardExport(state.versions[0]);
   renderMarkers();
   renderCritiques();
   renderInspector();
@@ -7085,21 +7550,40 @@ function collectStudySnapshot() {
     constraintSet: clone(state.constraintSet),
     constraintSelection: clone(state.constraintSelection),
     critiques: clone(state.critiques) || [],
-    versions: clone(state.versions) || [], // includes before/after snapshots + screenshots
+    versions: clone(stripVersionMedia(state.versions) || []),
     rationales: clone(state.rationales) || [],
     criterionEvaluations: clone(state.criterionEvaluations) || [],
     strengths: clone(state.strengths) || [],
   };
 }
 
+async function collectStudyDashboardArtifacts() {
+  let captured = { png: null, svg: null, screenshot: null };
+  try {
+    captured = await captureDashboardExport();
+  } catch (error) {
+    console.warn("[study] dashboard PNG capture failed", error);
+  }
+  return buildStudyDashboardArtifacts({
+    versions: state.versions,
+    finalDocument: dashboardDocumentFromSnapshot({
+      specMap: buildEngineSpecMap(),
+      board: buildEngineBoardMeta(),
+    }, "final"),
+    finalPng: captured.png,
+    finalSvg: captured.svg,
+  });
+}
+
 async function saveStudyBundle(reason) {
+  const artifacts = await collectStudyDashboardArtifacts();
   const bundle = buildStudyBundle(collectStudySnapshot(), reason);
   try {
-    const result = await saveStudySessionToServer(bundle);
-    return { bundle, result };
+    const result = await saveStudySessionToServer({ ...bundle, artifacts });
+    return { bundle, result, artifacts };
   } catch (err) {
     console.warn("[study] server save failed:", err?.message || err);
-    return { bundle, result: null, error: err };
+    return { bundle, result: null, error: err, artifacts };
   }
 }
 
@@ -7198,11 +7682,18 @@ function mountStudyUI() {
       body.querySelector("#studySaveNow").addEventListener("click", async () => {
         say("Saving…");
         const out = await saveStudyBundle("manual");
-        say(out?.result ? `Saved (${out.result.stored}).` : "Saved locally; server upload failed.");
+        const files = out?.result?.files?.length;
+        say(out?.result
+          ? `Saved (${out.result.stored}${files ? `, ${files} files` : ""}).`
+          : "Saved locally; server upload failed.");
       });
-      body.querySelector("#studyDownload").addEventListener("click", () => {
-        exportStudyBundleLocal(buildStudyBundle(collectStudySnapshot(), "manual-download"));
-        say("Backup downloaded.");
+      body.querySelector("#studyDownload").addEventListener("click", async () => {
+        say("Preparing backup…");
+        const artifacts = await collectStudyDashboardArtifacts();
+        const bundle = buildStudyBundle(collectStudySnapshot(), "manual-download");
+        exportStudyBundleLocal(bundle);
+        exportStudyDashboardsZip(artifacts, bundle);
+        say("Backup downloaded (log + dashboards zip).");
       });
       body.querySelector("#studyDiscard").addEventListener("click", () => {
         if (!window.confirm("Discard this session without saving? This cannot be undone.")) return;
@@ -7211,20 +7702,16 @@ function mountStudyUI() {
         renderBody(); // session is gone -> re-renders as the fresh Start form
       });
       body.querySelector("#studyEnd").addEventListener("click", async () => {
-        say("Saving final bundle…");
-        const bundle = buildStudyBundle(collectStudySnapshot(), "end");
-        let ok = false;
-        try {
-          await saveStudySessionToServer(bundle);
-          ok = true;
-        } catch (err) {
-          console.warn("[study] final save failed:", err?.message || err);
-        }
-        exportStudyBundleLocal(bundle);
+        say("Saving dashboards and session…");
+        const out = await saveStudyBundle("end");
+        exportStudyBundleLocal(out.bundle);
+        exportStudyDashboardsZip(out.artifacts, out.bundle);
         endStudySession();
         refreshButton();
         renderBody();
-        say(ok ? "Session ended and saved." : "Session ended; saved locally only.");
+        say(out?.result
+          ? `Session ended and saved (${out.result.stored}).`
+          : "Session ended; saved locally only.");
       });
     } else {
       body.innerHTML = `
@@ -7347,6 +7834,10 @@ document.getElementById("cancelLocalReview").addEventListener("click", closeLoca
 document.getElementById("localReviewForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (state.localReviewSubmitting) return;
+  if (state.reviewInFlight) {
+    showLocalReviewError("A review is already running. Wait for it to finish before selecting an area.");
+    return;
+  }
   const request = els.localReviewRequest.value.trim();
   const bounds = state.localReviewDraft && !("startX" in state.localReviewDraft)
     ? clone(state.localReviewDraft)
@@ -7357,14 +7848,16 @@ document.getElementById("localReviewForm").addEventListener("submit", async (eve
   }
 
   setLocalReviewSubmitting(true);
+  state.reviewInFlight = true;
   els.localReviewError.hidden = true;
   // Decouple the popover from the selection box: dismiss the popover right away
   // so the canvas — with the box and its generating ring — is visible while the
   // critique generates. The box has its own lifecycle and stays put until
   // generation finishes (retired on success, kept for retry on failure).
   els.localReviewPopover.hidden = true;
+  let askId = null;
   try {
-    const askId = state.nextAskId++;
+    askId = state.nextAskId++;
     const { critiques: localCritiques, answer } = await generateLocalCritiques({
       bounds,
       request,
@@ -7414,15 +7907,24 @@ document.getElementById("localReviewForm").addEventListener("submit", async (eve
     renderMarkers();
     await renderInspector();
     if (state.batchMode) await refreshBatchPreview();
+    recordCritiquesDisplayed("selected-region", askId);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     tracePanel.fail(`Local review failed — ${message}`);
+    recordStudyAction("critique_request_failed", "Local review failed", {
+      scope: "selected-region",
+      askId,
+      requestText: request,
+      reason: message,
+    });
     // Bring the popover back so the error is visible and the request can be
     // retried; the selection box and the typed request are still in place.
     els.localReviewPopover.hidden = false;
     showLocalReviewError(message);
   } finally {
+    state.reviewInFlight = false;
     setLocalReviewSubmitting(false);
+    syncReviewReadiness();
   }
 });
 els.searchInput.addEventListener("input", (event) => { state.search = event.target.value; renderCritiques(); renderMarkers(); });
@@ -8409,7 +8911,7 @@ function clearDesignDoc() {
   state.constraintSet = null;
   state.constraintSelection = null;
   closeConstraintReview();
-  state.designDoc = { status: "idle", filename: "", error: "", note: "" };
+  state.designDoc = { status: "idle", filename: "", error: "", note: "", text: "" };
   designDocControls().forEach((root) => {
     const input = root.querySelector(".design-doc-input");
     if (input) input.value = "";
@@ -8462,6 +8964,7 @@ async function loadDesignDocById(docId) {
       status: "error",
       filename: doc.file,
       note: state.designDoc.note || "",
+      text: "",
       error: `Could not load the bundled design document: ${message}`,
     };
     renderDesignDocStatus();
@@ -8526,7 +9029,7 @@ async function handleDesignDoc(file) {
     // Record the note this extraction ran with: Apply stays disabled until the
     // author changes the note (or uploads a new file), so a second identical
     // click can't re-run a no-op.
-    state.designDoc = { status: "loaded", filename: file.name || "", error: "", note, appliedNote: note };
+    state.designDoc = { status: "loaded", filename: file.name || "", error: "", note, appliedNote: note, text: String(extracted.text || "").slice(0, 40000) };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     state.constraintSet = null;
@@ -8535,6 +9038,7 @@ async function handleDesignDoc(file) {
       status: "error",
       filename: file.name || "",
       note,
+      text: "",
       error: message.includes("LLM_REQUIRED")
         ? "A model connection is required to read the design document. Configure the provider and restart the backend."
         : `Could not read the design document: ${message.replace(/^LLM_CALL_FAILED:\s*/, "")}`,
@@ -8862,6 +9366,7 @@ async function loadJsonDashboard(data, fileName = "dashboard.json") {
   // bottom bar, checkboxes, and toggle state don't leak across the load.
   resetBatchState();
   state.critiques = [];
+  state.critiqueRefreshNotice = null;
   state.strengths = [];
   state.nextAskId = 1;
   state.askAnswer = null;
@@ -8901,6 +9406,8 @@ async function loadJsonDashboard(data, fileName = "dashboard.json") {
   state.criterionEvaluations = [];
   state.reviewScope = "full";
   state.reviewRequest = "";
+  state.focusedReviewRunning = false;
+  state.reviewInFlight = false;
   state.search = "";
   state.expandedCritiqueGroups = {};
   state.localReviewDraft = null;
@@ -8915,7 +9422,7 @@ async function loadJsonDashboard(data, fileName = "dashboard.json") {
   renderDashboardChrome();
   await renderTiles();
   // Reveal the standing cross-filter affordance for dashboards that ship with it.
-  state.versions[0].afterScreenshot = await captureDashboardScreenshot();
+  await rememberDashboardExport(state.versions[0]);
   renderMarkers();
   renderCritiques();
   renderInspector();

@@ -133,13 +133,18 @@ export function recordWorkingDraftApplication(draft, {
   const existingCritiques = new Map(
     (next.appliedCritiques || []).map((critique) => [critique.id, critique]),
   );
-  appliedCritiques.forEach((critique) => existingCritiques.set(critique.id, structuredClone(critique)));
 
   next.dirty = true;
+  const committedIds = Array.isArray(result?.applicationOrder)
+    ? unique(result.applicationOrder)
+    : unique(appliedCritiques.map((critique) => critique.id));
+  const committedCritiques = appliedCritiques.filter((critique) => committedIds.includes(critique.id));
+  committedCritiques.forEach((critique) => existingCritiques.set(critique.id, structuredClone(critique)));
+
   next.appliedCritiques = [...existingCritiques.values()];
   next.applicationOrder = unique([
     ...(next.applicationOrder || []),
-    ...(result?.applicationOrder || appliedCritiques.map((critique) => critique.id)),
+    ...committedIds,
   ]);
   next.changedTargets = unique([
     ...(next.changedTargets || []),

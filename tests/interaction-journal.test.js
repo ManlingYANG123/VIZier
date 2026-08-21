@@ -193,6 +193,22 @@ test("working draft accumulates accepted changes without creating checkpoints", 
   assert.equal(second.afterSnapshot.board.hasKpis, true);
 });
 
+test("working draft counts only critiques the engine actually applied", () => {
+  const draft = recordWorkingDraftApplication(createWorkingDraft(1), {
+    appliedCritiques: [
+      { id: "critique-1", title: "Applied" },
+      { id: "critique-2", title: "Selected but not committed" },
+      { id: "critique-3", title: "Also skipped" },
+    ],
+    result: {
+      applicationOrder: ["critique-1"],
+      changedTargets: ["dashboard.title"],
+    },
+  });
+  assert.deepEqual(draft.applicationOrder, ["critique-1"]);
+  assert.deepEqual(draft.appliedCritiques.map((item) => item.id), ["critique-1"]);
+});
+
 test("critique rationale can be edited without losing its source link", () => {
   const rationale = createCritiqueRationale({
     id: "rationale-1",

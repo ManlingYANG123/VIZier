@@ -1,0 +1,71 @@
+VIZier — Test + Telemetry verification log
+Generated: 2026-08-21
+Node: v26.3.0
+
+############################################
+# Root suite (node --test tests/*.test.js) #
+############################################
+
+----- ROOT RUN 1 -----
+ℹ tests 151
+ℹ suites 0
+ℹ pass 151
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 291.132167
+
+----- ROOT RUN 2 -----
+ℹ tests 151
+ℹ suites 0
+ℹ pass 151
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 253.819667
+
+----- ROOT RUN 3 -----
+ℹ tests 151
+ℹ suites 0
+ℹ pass 151
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 237.676458
+
+#################################################
+# re_api suite (node --test tests/*.test.ts)    #
+#################################################
+
+----- RE_API RUN 1 -----
+ℹ tests 289
+ℹ suites 0
+ℹ pass 289
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1117.670375
+
+----- RE_API RUN 2 -----
+ℹ tests 289
+ℹ suites 0
+ℹ pass 289
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1077.091417
+
+----- RE_API RUN 3 -----
+ℹ tests 289
+ℹ suites 0
+ℹ pass 289
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1047.496916
