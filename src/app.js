@@ -41,6 +41,7 @@ import {
   endStudySession,
   exportStudyBundleLocal,
   isStudyActive,
+  recordStudyAction,
   recordStudyEvent,
   restoreStudySession,
   saveStudySessionToServer,
@@ -3575,6 +3576,11 @@ function attachContextPanelEventListeners() {
   const inferButton = document.getElementById("contextInferBtn");
   const inferError = document.getElementById("contextInferError");
   inferButton?.addEventListener("click", async () => {
+    // Study telemetry: the participant asked VIZier to describe the context for
+    // them (rather than writing it themselves).
+    recordStudyAction("context_generation_requested", "Asked VIZier to describe the dashboard context", {
+      source: "workspace",
+    });
     if (inferError) inferError.hidden = true;
     inferButton.classList.add("running");
     inferButton.disabled = true;
@@ -3689,7 +3695,9 @@ function bindContextConfirmationButton() {
       detail: state.context.goal
         ? `Context: ${state.context.goal}`
         : "Confirmed an artifact-only review without additional context",
-      data: { scope: [...(state.context.scope || [])] },
+      // hasContext lets analysis split "proceeded without context" from a
+      // context-first review without parsing the free-text detail.
+      data: { scope: [...(state.context.scope || [])], hasContext: Boolean(state.context.goal) },
     });
     renderFixedContextPanel();
     renderContextToolState();
@@ -6390,6 +6398,23 @@ async function renderInspector() {
   document.querySelector("[data-region-recall]")?.addEventListener("click", () => {
     const bounds = critique.bounds || critique.localReview?.bounds || critique.target?.ref?.selectedBounds;
     revealRegionOnCanvas(bounds);
+    // Study telemetry: a deliberate click to re-locate the critique's evidence on
+    // the canvas.
+    recordStudyAction("evidence_region_revealed", `Jumped to the evidence region for: ${critique.title}`, {
+      critiqueId: critique.id,
+      dimension: critique.dimension,
+    });
+  });
+  // Study telemetry: expanding/collapsing "Why & Evidence" is a reliable, discrete
+  // proxy for "the participant chose to look at the rationale/evidence" — the act
+  // of opening the panel, NOT whether they read it (that stays a think-aloud signal).
+  document.querySelector(".focus-supporting-details")?.addEventListener("toggle", (event) => {
+    const open = event.currentTarget.open;
+    recordStudyAction(
+      open ? "critique_details_expanded" : "critique_details_collapsed",
+      `${open ? "Expanded" : "Collapsed"} Why & Evidence for: ${critique.title}`,
+      { critiqueId: critique.id, dimension: critique.dimension },
+    );
   });
   // The stale-context notice's inline recovery: regenerate the critiques for the
   // now-confirmed context (same action as the top-bar Regenerate button), then
@@ -6400,7 +6425,7 @@ async function renderInspector() {
     const button = event.currentTarget;
     button.disabled = true;
     const targetId = critique.id;
-    const regenerated = await runAIAssist({ focusedRequest: "" });
+    const regenerated = await runAIAssist({ focusedRequest: "", trigger: "stale-context-recovery" });
     if (!regenerated) {
       button.disabled = false;
       return;
@@ -6414,11 +6439,28 @@ async function renderInspector() {
       await renderInspector();
     }
   });
-  document.getElementById("focusDemoButton")?.addEventListener("click", () => playInteractionRuntime(critique));
+  document.getElementById("focusDemoButton")?.addEventListener("click", () => {
+    // Study telemetry: ran the before/after interaction replay on the canvas.
+    recordStudyAction("interaction_replayed", `Ran the interaction test for: ${critique.title}`, {
+      critiqueId: critique.id,
+      dimension: critique.dimension,
+    });
+    playInteractionRuntime(critique);
+  });
   document.getElementById("focusAccept").addEventListener("click", async () => {
     if (canApplyIndividually) {
       const applied = await applyRecommendationSelection([critique.id]);
-      if (!applied.ok) showFocusApplyFailure(applied.reason);
+      if (!applied.ok) {
+        // Study telemetry: the engine could not apply the accepted change — a
+        // friction point that success-only logging would hide.
+        recordStudyAction("recommendation_apply_failed", `Apply failed for: ${critique.title}`, {
+          critiqueId: critique.id,
+          dimension: critique.dimension,
+          via: "single",
+          reason: applied.reason || null,
+        });
+        showFocusApplyFailure(applied.reason);
+      }
       return;
     }
     if (!canAcceptGuidance) return;
@@ -6691,6 +6733,21 @@ async function runAIAssist(options = {}) {
 
   try {
     const askId = state.nextAskId++;
+    // Study telemetry: the request itself. This is the primary input the product
+    // never journaled — capture the exact request text (focused/open-ended), the
+    // scope, and whether critiques already existed (a re-run vs a first ask).
+    recordStudyAction(
+      "critique_requested",
+      focusedRequest ? `Requested a focused review: ${focusedRequest}` : "Requested a full review",
+      {
+        scope: attemptedScope,
+        requestText: focusedRequest || null,
+        trigger: options.trigger || (focusedRequest ? "focused-question" : "full-review"),
+        hadPriorCritiques: state.critiques.length > 0,
+        priorCritiqueCount: state.critiques.length,
+        activeScopes: [...(state.context.scope || [])],
+      },
+    );
     const { critiques: baseCritiques, answer } = await generateCritiquesFromEngine(focusedRequest);
     // Synchronize the active list with the dashboard the engine just reviewed:
     // refresh still-valid cards, add new findings, remove obsolete/duplicate
@@ -6742,6 +6799,25 @@ async function runAIAssist(options = {}) {
     // the (now pruned) selection. Recompute it — or clear it if the selection is
     // empty — so the canvas never shows a stale merged result.
     if (state.batchMode) await refreshBatchPreview();
+    // Study telemetry: the set the participant was shown after this review. Paired
+    // with critique_opened, this yields the reliable "displayed vs inspected" split
+    // (which available critiques were never opened) without any gaze/scroll signal.
+    recordStudyAction(
+      "critiques_displayed",
+      `Displayed ${state.critiques.length} critique${state.critiques.length === 1 ? "" : "s"} after a ${attemptedScope} review`,
+      {
+        scope: attemptedScope,
+        askId,
+        count: state.critiques.length,
+        critiques: state.critiques.map((critique) => ({
+          id: critique.id,
+          title: critique.title,
+          dimension: critique.dimension,
+          priority: critique.priority,
+          status: critique.status,
+        })),
+      },
+    );
     return true;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -7137,7 +7213,14 @@ function mountStudyUI() {
 
 restoreStudySession();
 mountStudyUI();
-document.getElementById("focusBackButton").addEventListener("click", closeCritiqueFocus);
+document.getElementById("focusBackButton").addEventListener("click", () => {
+  // Study telemetry: closing the detail bounds the viewing interval (open -> close),
+  // giving a reliable time-on-critique without any attention/gaze tracking.
+  recordStudyAction("critique_closed", "Returned to the critique list", {
+    critiqueId: state.selectedCritiqueId || null,
+  });
+  closeCritiqueFocus();
+});
 // Both mode triggers hide themselves on activation (the face swap sets the
 // clicked button to display:none), which would drop keyboard/SR focus to
 // <body>. Move focus to the counterpart control that becomes visible.
@@ -7167,6 +7250,12 @@ document.getElementById("batchApplyButton").addEventListener("click", async () =
   if (button) button.disabled = true;
   const applied = await applySelectionResolvingConflicts(selectedIds);
   if (!applied.ok) {
+    // Study telemetry: a batch apply that did not commit (conflict/engine failure).
+    recordStudyAction("recommendation_apply_failed", `Batch apply failed for ${selectedIds.length} selected`, {
+      via: "batch",
+      reason: applied.reason || null,
+      critiqueIds: selectedIds,
+    });
     renderBatchApplyBar();
     const note = document.getElementById("batchApplyNote");
     if (note) {

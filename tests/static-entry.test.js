@@ -481,9 +481,11 @@ test("a stale-context critique disables Accept and offers an inline regenerate r
   assert.match(source, /Cannot safely apply this recommendation/);
   assert.match(source, /!descriptor\.livePreview && resultsMatchContext && recommendationMatchesDashboard/);
 
-  // Clicking Regenerate re-runs the review and re-opens the same critique.
+  // Clicking Regenerate re-runs the review (full scope: empty focusedRequest) and
+  // re-opens the same critique. The call may also carry a study-telemetry trigger,
+  // so match the essential argument without pinning the closing brace.
   assert.match(source, /getElementById\("focusRegenerate"\)\?\.addEventListener/);
-  assert.match(source, /await runAIAssist\(\{ focusedRequest: "" \}\)/);
+  assert.match(source, /await runAIAssist\(\{ focusedRequest: ""/);
   assert.match(source, /state\.selectedCritiqueId = targetId/);
 
   // Distinct styling for the recovery notice and its inline action button.
