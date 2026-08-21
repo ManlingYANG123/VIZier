@@ -25,6 +25,27 @@ export function reApiEnabled() {
   return true;
 }
 
+// Upload one user-study session bundle. The backend stores it in S3 (or a local
+// data/ directory in dev). Best-effort from the caller's perspective: errors are
+// thrown so the UI can note them, but they never block the product.
+export async function saveStudyData(payload) {
+  let res;
+  try {
+    res = await fetch(reApiBase() + "/study-session", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    throw new Error(`cannot reach study store at ${reApiBase()}: ${err.message || err}`);
+  }
+  if (!res.ok) {
+    const info = await res.json().catch(() => ({}));
+    throw new Error(info.error || `study store API ${res.status} ${res.statusText}`);
+  }
+  return res.json();
+}
+
 async function getEngineJson(path, label) {
   let res;
   try {

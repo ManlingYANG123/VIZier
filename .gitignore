@@ -2,3 +2,7 @@ node_modules/
 dist/
 .DS_Store
 *.log
+
+# Local study-data fallback (real study data is uploaded to S3; keep the dir).
+/data/*
+!/data/.gitkeep

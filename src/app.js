@@ -35,6 +35,19 @@ import {
   upsertCritiqueRationale,
 } from "./interaction-journal.js";
 import {
+  STUDY_STORAGE_KEY,
+  buildStudyBundle,
+  discardStudySession,
+  endStudySession,
+  exportStudyBundleLocal,
+  isStudyActive,
+  recordStudyEvent,
+  restoreStudySession,
+  saveStudySessionToServer,
+  startStudySession,
+  studySessionInfo,
+} from "./study-session.js";
+import {
   CATEGORY_COLORS as COLORS,
   CATEGORY_ORDER,
   CATEGORY_PRESENTATIONS,
@@ -103,6 +116,9 @@ try {
   const reApiBase = localStorage.getItem("reApiBase");
   const panelLayout = localStorage.getItem(PANEL_LAYOUT_STORAGE_KEY);
   const revisionDockHeight = localStorage.getItem(REVISION_DOCK_HEIGHT_STORAGE_KEY);
+  // Preserve the in-progress study log across the reset so a refresh/crash mid
+  // session does not lose research data (see study-session.js).
+  const studySession = localStorage.getItem(STUDY_STORAGE_KEY);
   localStorage.clear();
   sessionStorage.clear();
   if (reApiBase) localStorage.setItem("reApiBase", reApiBase);
@@ -110,6 +126,7 @@ try {
   if (revisionDockHeight) {
     localStorage.setItem(REVISION_DOCK_HEIGHT_STORAGE_KEY, revisionDockHeight);
   }
+  if (studySession) localStorage.setItem(STUDY_STORAGE_KEY, studySession);
   console.log("[app] Cleared stale browser storage on load");
 } catch (e) {
   console.warn("[app] Could not clear storage:", e);
@@ -458,6 +475,7 @@ document.querySelector("#app").innerHTML = `
       </div>
       <div class="topbar-spacer"></div>
       <div class="top-actions">
+        <button class="icon-button" id="studySessionButton" data-study-session type="button" aria-label="Study session" title="Study session">◉</button>
         <button class="icon-button" id="resetButton" aria-label="Reset demo" title="Reset demo">↺</button>
         <button class="tool-icon-button top-tool-button" data-sidebar-popover="rubric" data-tooltip="Criterion coverage" type="button" aria-label="Open criterion coverage" aria-expanded="false" aria-controls="sidebarPopoverRubric">
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="m8 9 1.5 1.5L12 8M14 9h2M8 15h8"/></svg>
@@ -2487,6 +2505,9 @@ function appendInteractionEvent(input, { synthesize = true } = {}) {
     id: `event-${state.nextInteractionEventId++}`,
     version: state.version,
   });
+  // Mirror every event into the uncapped, refresh-surviving study log (no-op
+  // unless a study session is active). Must run before the 100-event cap below.
+  recordStudyEvent(event);
   state.interactionJournal.push(event);
   state.interactionJournal = state.interactionJournal.slice(-100);
   if (synthesize && isStrongInteractionEvent(event)) schedulePreferenceSynthesis();
@@ -6893,6 +6914,229 @@ async function resetDemo() {
 
 els.aiAssistButton.addEventListener("click", runAIAssist);
 document.getElementById("resetButton").addEventListener("click", resetDemo);
+
+// --- User-study data collection (telemetry) -------------------------------
+// A facilitator starts a session (participant id + condition); every product
+// interaction is mirrored into an uncapped, refresh-surviving log (see the hook
+// in appendInteractionEvent). The bundle — events plus a snapshot of the
+// before/after dashboards, critiques, decisions, rationales, and context — is
+// written only on explicit Save now or End & save.
+function escapeStudy(value) {
+  return String(value ?? "").replace(
+    /[&<>"]/g,
+    (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch],
+  );
+}
+
+function collectStudySnapshot() {
+  const clone = (value) => {
+    try {
+      return typeof structuredClone === "function"
+        ? structuredClone(value)
+        : JSON.parse(JSON.stringify(value ?? null));
+    } catch {
+      return null;
+    }
+  };
+  return {
+    artifactId: state.artifact?.id ?? null,
+    artifactSource: state.artifact?.source ?? null,
+    dashboardTitle: state.dashboardTitle ?? null,
+    version: state.version,
+    context: clone(state.context),
+    constraintSet: clone(state.constraintSet),
+    constraintSelection: clone(state.constraintSelection),
+    critiques: clone(state.critiques) || [],
+    versions: clone(state.versions) || [], // includes before/after snapshots + screenshots
+    rationales: clone(state.rationales) || [],
+    criterionEvaluations: clone(state.criterionEvaluations) || [],
+    strengths: clone(state.strengths) || [],
+  };
+}
+
+async function saveStudyBundle(reason) {
+  const bundle = buildStudyBundle(collectStudySnapshot(), reason);
+  try {
+    const result = await saveStudySessionToServer(bundle);
+    return { bundle, result };
+  } catch (err) {
+    console.warn("[study] server save failed:", err?.message || err);
+    return { bundle, result: null, error: err };
+  }
+}
+
+function injectStudyStyles() {
+  let style = document.getElementById("studyStyles");
+  if (!style) {
+    style = document.createElement("style");
+    style.id = "studyStyles";
+    document.head.appendChild(style);
+  }
+  style.textContent = `
+    .study-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; z-index: 9999; }
+    .study-modal-overlay.open { display: flex; }
+    .study-modal-overlay[hidden] { display: none !important; }
+    .study-modal { background: #fff; color: #1c1c1e; width: min(420px, calc(100vw - 32px)); border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,.3); overflow: hidden; }
+    .study-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid #e5e5e7; }
+    .study-modal-head strong { font-size: 15px; }
+    .study-modal-body { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+    .study-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #3a3a3c; }
+    .study-field input, .study-field textarea { font: inherit; padding: 8px 10px; border: 1px solid #d1d1d6; border-radius: 8px; color: #1c1c1e; background: #fff; }
+    .study-line { display: flex; justify-content: space-between; gap: 12px; margin: 0; font-size: 13px; color: #3a3a3c; }
+    .study-line code { font-size: 11px; color: #6e6e73; overflow-wrap: anywhere; }
+    .study-status { min-height: 16px; margin: 4px 0 0; font-size: 12px; color: #6e6e73; }
+    .study-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+    .study-actions .button { font: inherit; cursor: pointer; padding: 8px 12px; border-radius: 8px; border: 1px solid #d1d1d6; background: #f2f2f7; color: #1c1c1e; }
+    .study-actions .button.primary { background: #1c1c1e; color: #fff; border-color: #1c1c1e; }
+    .study-actions .button.danger { background: #fff; color: #b00020; border-color: #e5b4bb; }
+    [data-study-session].recording { color: #b00020; }
+  `;
+}
+
+function mountStudyUI() {
+  injectStudyStyles();
+  document.getElementById("studyModalOverlay")?.remove();
+
+  const overlay = document.createElement("div");
+  overlay.id = "studyModalOverlay";
+  overlay.className = "study-modal-overlay";
+  overlay.hidden = true;
+  overlay.innerHTML = `
+    <div class="study-modal" role="dialog" aria-modal="true" aria-labelledby="studyModalTitle">
+      <div class="study-modal-head">
+        <strong id="studyModalTitle">Study session</strong>
+        <button type="button" class="icon-button" id="studyModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="study-modal-body" id="studyModalBody"></div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const body = overlay.querySelector("#studyModalBody");
+  const studyTriggers = () => document.querySelectorAll("[data-study-session]");
+  const close = () => {
+    overlay.classList.remove("open");
+    overlay.hidden = true;
+  };
+  const open = () => {
+    renderBody();
+    overlay.hidden = false;
+    overlay.classList.add("open");
+  };
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) close();
+  });
+  overlay.querySelector("#studyModalClose").addEventListener("click", close);
+
+  function refreshButton() {
+    const active = isStudyActive();
+    const info = studySessionInfo();
+    const title = active
+      ? `Study session active — ${info.participantId} (${info.eventCount} events)`
+      : "Study session";
+    studyTriggers().forEach((button) => {
+      button.classList.toggle("recording", active);
+      button.title = title;
+    });
+  }
+
+  function renderBody() {
+    const info = studySessionInfo();
+    if (isStudyActive() && info) {
+      body.innerHTML = `
+        <p class="study-line"><span>Participant</span><strong>${escapeStudy(info.participantId)}</strong></p>
+        <p class="study-line"><span>Session</span><code>${escapeStudy(info.sessionId)}</code></p>
+        <p class="study-line"><span>Condition</span><strong>${escapeStudy(info.condition || "—")}</strong></p>
+        <p class="study-line"><span>Events</span><strong id="studyEventCount">${info.eventCount}</strong></p>
+        <p class="study-status" id="studyStatus" aria-live="polite"></p>
+        <div class="study-actions">
+          <button type="button" class="button" id="studySaveNow">Save now</button>
+          <button type="button" class="button" id="studyDownload">Download backup</button>
+          <button type="button" class="button" id="studyDiscard">Discard &amp; start over</button>
+          <button type="button" class="button danger" id="studyEnd">End &amp; save</button>
+        </div>`;
+      const status = body.querySelector("#studyStatus");
+      const say = (message) => {
+        if (status) status.textContent = message;
+      };
+      body.querySelector("#studySaveNow").addEventListener("click", async () => {
+        say("Saving…");
+        const out = await saveStudyBundle("manual");
+        say(out?.result ? `Saved (${out.result.stored}).` : "Saved locally; server upload failed.");
+      });
+      body.querySelector("#studyDownload").addEventListener("click", () => {
+        exportStudyBundleLocal(buildStudyBundle(collectStudySnapshot(), "manual-download"));
+        say("Backup downloaded.");
+      });
+      body.querySelector("#studyDiscard").addEventListener("click", () => {
+        if (!window.confirm("Discard this session without saving? This cannot be undone.")) return;
+        discardStudySession();
+        refreshButton();
+        renderBody(); // session is gone -> re-renders as the fresh Start form
+      });
+      body.querySelector("#studyEnd").addEventListener("click", async () => {
+        say("Saving final bundle…");
+        const bundle = buildStudyBundle(collectStudySnapshot(), "end");
+        let ok = false;
+        try {
+          await saveStudySessionToServer(bundle);
+          ok = true;
+        } catch (err) {
+          console.warn("[study] final save failed:", err?.message || err);
+        }
+        exportStudyBundleLocal(bundle);
+        endStudySession();
+        refreshButton();
+        renderBody();
+        say(ok ? "Session ended and saved." : "Session ended; saved locally only.");
+      });
+    } else {
+      body.innerHTML = `
+        <label class="study-field"><span>Participant ID</span><input type="text" id="studyParticipant" placeholder="P01" autocomplete="off"></label>
+        <label class="study-field"><span>Condition / group</span><input type="text" id="studyCondition" placeholder="vizier / baseline" autocomplete="off"></label>
+        <label class="study-field"><span>Facilitator</span><input type="text" id="studyFacilitator" autocomplete="off"></label>
+        <label class="study-field"><span>Notes</span><textarea id="studyNotes" rows="2"></textarea></label>
+        <div class="study-actions">
+          <button type="button" class="button primary" id="studyStart">Start session</button>
+        </div>`;
+      const begin = () => {
+        const participantId = body.querySelector("#studyParticipant").value.trim();
+        if (!participantId) {
+          body.querySelector("#studyParticipant").focus();
+          return;
+        }
+        startStudySession({
+          participantId,
+          condition: body.querySelector("#studyCondition").value,
+          facilitator: body.querySelector("#studyFacilitator").value,
+          notes: body.querySelector("#studyNotes").value,
+        });
+        refreshButton();
+        renderBody();
+      };
+      body.querySelector("#studyStart").addEventListener("click", begin);
+      body.querySelector("#studyParticipant").focus();
+    }
+  }
+
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest("[data-study-session]")) return;
+    open();
+  });
+
+  // Keep the toolbar affordance and (if open) the live event count fresh.
+  setInterval(() => {
+    refreshButton();
+    if (overlay.classList.contains("open") && isStudyActive()) {
+      const counter = document.getElementById("studyEventCount");
+      if (counter) counter.textContent = String(studySessionInfo().eventCount);
+    }
+  }, 2000);
+
+  refreshButton();
+}
+
+restoreStudySession();
+mountStudyUI();
 document.getElementById("focusBackButton").addEventListener("click", closeCritiqueFocus);
 // Both mode triggers hide themselves on activation (the face swap sets the
 // clicked button to display:none), which would drop keyboard/SR focus to
@@ -7323,6 +7567,7 @@ document.querySelector("#app").insertAdjacentHTML("beforeend", `
         <span class="upload-brand-mark" aria-hidden="true">▦</span>
         <strong>VIZier</strong>
       </div>
+      <button class="icon-button" data-study-session type="button" aria-label="Study session" title="Study session">◉</button>
     </header>
 
     <div class="upload-center" id="uploadCenter">

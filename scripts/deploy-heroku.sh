@@ -29,6 +29,7 @@ RUNTIME_PATHS=(
   "src/panel-resize.js"
   "src/recommendation-engine.js"
   "src/revision-preview.js"
+  "src/study-session.js"
   "src/styles.css"
   "src/vega-dashboard-adapter.js"
 )

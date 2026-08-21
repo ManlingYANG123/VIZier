@@ -37,6 +37,7 @@ import {
   listDashboardFiles,
   loadDashboardFile,
 } from "./dashboards.ts";
+import { saveStudySession, studyStorageMode } from "./study-store.ts";
 
 const PORT = Number(process.env.PORT || process.env.RE_API_PORT || 8091);
 const HOST = process.env.RE_API_HOST || (process.env.PORT ? "0.0.0.0" : "127.0.0.1");
@@ -356,6 +357,27 @@ async function handlePreferenceSynthesis(req: IncomingMessage, res: ServerRespon
   }
 }
 
+async function handleStudySession(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  cors(req, res);
+  try {
+    const body = JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>;
+    if (!body || typeof body !== "object" || !body.participantId || !body.sessionId) {
+      throw new Error("INVALID_BUNDLE: study session requires participantId and sessionId");
+    }
+    const result = await saveStudySession(body);
+    console.log(
+      `\n[re_api] POST /study-session  (participant: ${body.participantId}, ${result.bytes} bytes -> ${result.stored}: ${result.location})`,
+    );
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, ...result }));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const invalid = message.startsWith("INVALID_BUNDLE:");
+    res.writeHead(invalid ? 400 : 500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message, code: invalid ? "invalid_request" : "storage_error" }));
+  }
+}
+
 async function handleDashboardLibrary(
   req: IncomingMessage,
   res: ServerResponse,
@@ -438,9 +460,13 @@ const server = createServer((req, res) => {
     void handlePreferenceSynthesis(req, res);
     return;
   }
+  if (req.method === "POST" && pathname === "/study-session") {
+    void handleStudySession(req, res);
+    return;
+  }
   if (
     pathname.startsWith("/api/") ||
-    ["/critique", "/apply", "/scaffold", "/intake-constraints", "/infer-context", "/health"].includes(pathname)
+    ["/critique", "/apply", "/scaffold", "/intake-constraints", "/infer-context", "/study-session", "/health"].includes(pathname)
   ) {
     cors(req, res);
     res.writeHead(404, { "Content-Type": "application/json" });
@@ -455,6 +481,7 @@ const server = createServer((req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`[re_api] critique engine on http://${HOST}:${PORT}`);
+  console.log(`[re_api] study store: ${studyStorageMode()}`);
   console.log(
     `[re_api] model adapter: ${provider()}/${model()} (${hasToken() ? "credentials available" : "no credentials"})`,
   );

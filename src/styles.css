@@ -7418,11 +7418,19 @@ body.panel-resizing * {
   height: 56px;
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: space-between;
   padding: 0 18px;
   border-bottom: 1px solid #d2d2d7;
   background: #fbfbfdf2;
   backdrop-filter: blur(16px) saturate(150%);
+}
+
+.upload-brandbar .icon-button {
+  color: #3a3a3c;
+}
+
+.upload-brandbar .icon-button.recording {
+  color: #b00020;
 }
 
 .upload-brand {
