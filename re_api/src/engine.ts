@@ -45,7 +45,7 @@ export function resolveReviewScope(req: CritiqueRequest): ReviewScope {
 
 /** Moderate exploration by default: enough room for dashboard-specific
  * synthesis while the evidence and apply gates keep proposals responsible. */
-export const DEFAULT_REVIEW_TEMPERATURE = 0.6;
+export const DEFAULT_REVIEW_TEMPERATURE = 0.4;
 /** The review draft runs on the model's standard 0–1 temperature scale. */
 export const MIN_REVIEW_TEMPERATURE = 0;
 export const MAX_REVIEW_TEMPERATURE = 1;

@@ -467,9 +467,9 @@ const state = {
   reviewScope: "full",
   // Author-set model temperature for the next review, on the model's 0–1 scale
   // (0 = focused sanity check, higher = more divergent exploration). The slider
-  // shows this number directly and sends it verbatim; the engine clamps it. 0.2
+  // shows this number directly and sends it verbatim; the engine clamps it. 0.4
   // is the engine default, so an untouched control changes nothing.
-  reviewTemperature: 0.6,
+  reviewTemperature: 0.4,
   // After a single-critique refresh finds the issue gone: keep the focus card
   // open with a confirmation, then return to the main list on Back to Critiques.
   critiqueRefreshNotice: null,
@@ -659,7 +659,7 @@ document.querySelector("#app").innerHTML = `
           <div class="temp-slider" id="reviewTempControl">
             <div class="temp-slider-head">
               <span class="temp-slider-label" id="reviewTemperatureLabel">Exploration</span>
-              <output class="temp-slider-value" id="reviewTemperatureValue" for="reviewTemperature">0.6</output>
+              <output class="temp-slider-value" id="reviewTemperatureValue" for="reviewTemperature">0.4</output>
               <button
                 class="inline-help"
                 type="button"
@@ -674,7 +674,7 @@ document.querySelector("#app").innerHTML = `
               min="0"
               max="1"
               step="0.1"
-              value="0.6"
+              value="0.4"
               aria-label="Exploration (0 = focused, 1 = divergent)"
               aria-describedby="reviewTemperatureLabel"
             />

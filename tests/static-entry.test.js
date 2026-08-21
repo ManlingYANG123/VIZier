@@ -599,7 +599,7 @@ test("the review-temperature slider sits inline with Generate, shows the number,
 
   // A continuous range input on the model's 0–1 scale, defaulting to moderate exploration.
   assert.match(source, /id="reviewTemperature"\s+type="range"/);
-  assert.match(source, /min="0"\s*\n?\s*max="1"\s*\n?\s*step="0.1"\s*\n?\s*value="0.6"/);
+  assert.match(source, /min="0"\s*\n?\s*max="1"\s*\n?\s*step="0.1"\s*\n?\s*value="0.4"/);
 
   // The value is shown to the author (not hidden) via a live readout.
   assert.match(source, /id="reviewTemperatureValue"/);
@@ -620,7 +620,7 @@ test("the review-temperature slider sits inline with Generate, shows the number,
 
   // The state carries the number and BOTH generation requests (full + local)
   // send it verbatim — count the send sites so dropping one is caught.
-  assert.match(source, /reviewTemperature: 0\.6/);
+  assert.match(source, /reviewTemperature: 0\.4/);
   const sendSites = source.match(/reviewTemperature: state\.reviewTemperature/g) ?? [];
   assert.equal(
     sendSites.length,

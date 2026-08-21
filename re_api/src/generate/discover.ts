@@ -1848,7 +1848,7 @@ export async function discoverDashboardCritiques(
   /** Model sampling temperature for the review draft. The engine clamps the
    * author-set request value before passing it here; moderate exploration helps
    * the model synthesize beyond repeated catalog defaults. */
-  temperature: number = 0.6,
+  temperature: number = 0.4,
   savedRationales: SavedCritiqueRationale[] = [],
   /** Hard constraints from an uploaded design document. When present, ranked
    * critiques that conflict with them are silently dropped before the response.

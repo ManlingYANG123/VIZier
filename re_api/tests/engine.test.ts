@@ -195,7 +195,7 @@ test("the request's reviewTemperature (clamped) is the temperature sent to the m
     new Tracer("t-legacy", { logDir: null }),
     { client: legacy },
   );
-  assert.equal(legacy.completeOptions[0]?.temperature, 0.6);
+  assert.equal(legacy.completeOptions[0]?.temperature, 0.4);
 });
 
 test("without author context an empty model response still yields grounded detector fallbacks", async () => {
