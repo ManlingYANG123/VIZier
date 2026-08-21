@@ -7274,11 +7274,16 @@ body.panel-resizing * {
 }
 
 .critique-list-view .critique-generate-button:hover:not(:disabled) {
-  border-color: #000;
-  background: #000;
-  box-shadow:
-    inset 0 1px 0 #ffffff24,
-    0 3px 9px #1d1d1f38;
+  border-color: #424245;
+  background: #424245;
+  color: #fff;
+  box-shadow: none;
+  transform: none;
+}
+
+.critique-list-view .critique-generate-button:hover:not(:disabled) .ai-action-title,
+.critique-list-view .critique-generate-button:hover:not(:disabled) > .ai-action-glyph {
+  color: #fff;
 }
 
 .critique-list-view .critique-generate-button:active:not(:disabled) {
