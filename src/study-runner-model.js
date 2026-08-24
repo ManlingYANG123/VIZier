@@ -62,6 +62,15 @@ export function normalizeStudyPhase(phase) {
   return phase === "timed_task" ? "dashboard_task" : phase;
 }
 
+export function studyPhaseUsesVizier(phase) {
+  const normalizedPhase = normalizeStudyPhase(phase);
+  return normalizedPhase === "training" || normalizedPhase === "dashboard_task";
+}
+
+export function isDashboardTaskPhase(phase) {
+  return normalizeStudyPhase(phase) === "dashboard_task";
+}
+
 export const STUDY_PHASE_INTROS = Object.freeze({
   pre_assessment: Object.freeze({
     description: "Review a dashboard and share what you notice.",

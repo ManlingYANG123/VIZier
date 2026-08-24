@@ -220,6 +220,8 @@ test("group study routes boot the neutral runner before VIZier", async () => {
   assert.match(runner, /scaleResponses: serializeScaleResponses/);
   assert.doesNotMatch(runner, /<textarea name="q/);
   assert.match(runner, /openStudyMaterialForRunner/);
+  assert.match(runner, /studyPhaseUsesVizier\(runnerState\.phase\)/);
+  assert.match(runner, /isDashboardTaskPhase\(runnerState\.phase\)/);
   assert.match(styles, /\.study-assessment-layout/);
   assert.match(styles, /\.study-dashboard-wrap\s*\{[^}]*display:\s*flex/);
   assert.match(styles, /\.study-dashboard-world/);

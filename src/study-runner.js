@@ -31,12 +31,15 @@ import {
   STUDY_RUNNER_PHASES,
   assessmentKeyForPhase,
   createStudyRunnerState,
+  isDashboardTaskPhase,
   isStudyRunnerState,
   makeAnnotation,
   materialForPhase,
   nextStudyPhase,
+  normalizeStudyPhase,
   studyPhaseLabel,
   studyPhaseNumber,
+  studyPhaseUsesVizier,
   studyRunnerStorageKey,
 } from "./study-runner-model.js";
 
@@ -71,7 +74,9 @@ function runnerKey() {
 function loadRunnerState() {
   try {
     const parsed = JSON.parse(localStorage.getItem(runnerKey()) || "null");
-    return isStudyRunnerState(parsed, runnerGroup.id) ? parsed : null;
+    if (!parsed || typeof parsed !== "object") return null;
+    const normalized = { ...parsed, phase: normalizeStudyPhase(parsed.phase) };
+    return isStudyRunnerState(normalized, runnerGroup.id) ? normalized : null;
   } catch {
     return null;
   }
@@ -945,7 +950,7 @@ async function mountVizierPhase() {
   button.textContent = runnerState.phase === "training" ? "Finish practice" : "Finish task";
   document.querySelector(".top-actions")?.prepend(button);
   button.addEventListener("click", async () => {
-    const isTask = runnerState.phase === "timed_task";
+    const isTask = isDashboardTaskPhase(runnerState.phase);
     const confirmed = window.confirm(isTask
       ? "Finish the dashboard task and continue to the final assessment?"
       : "Finish guided practice and continue to the dashboard task?");
@@ -978,7 +983,7 @@ async function renderCurrentPhase() {
     renderPhaseIntro();
     return;
   }
-  if (runnerState.phase === "training" || runnerState.phase === "timed_task") {
+  if (studyPhaseUsesVizier(runnerState.phase)) {
     await mountVizierPhase();
     return;
   }

@@ -4,6 +4,7 @@ import {
   STUDY_GROUPS,
   STUDY_PHASE_INTROS,
   createStudyRunnerState,
+  isDashboardTaskPhase,
   isStudyRunnerState,
   makeAnnotation,
   materialForPhase,
@@ -13,6 +14,7 @@ import {
   serializeScaleResponses,
   studyGroupIdFromPath,
   studyPhaseNumber,
+  studyPhaseUsesVizier,
 } from "../src/study-runner-model.js";
 
 test("only the two fixed group routes start the study runner", () => {
@@ -49,6 +51,17 @@ test("a participant state starts at the neutral pre assessment and advances in o
   assert.equal(normalizeStudyPhase("timed_task"), "dashboard_task");
   assert.equal(nextStudyPhase("post_assessment"), "complete");
   assert.equal(studyPhaseNumber("post_assessment"), 4);
+});
+
+test("only guided practice and the dashboard task use the full VIZier workspace", () => {
+  assert.equal(studyPhaseUsesVizier("pre_assessment"), false);
+  assert.equal(studyPhaseUsesVizier("training"), true);
+  assert.equal(studyPhaseUsesVizier("dashboard_task"), true);
+  assert.equal(studyPhaseUsesVizier("timed_task"), true);
+  assert.equal(studyPhaseUsesVizier("post_assessment"), false);
+  assert.equal(isDashboardTaskPhase("training"), false);
+  assert.equal(isDashboardTaskPhase("dashboard_task"), true);
+  assert.equal(isDashboardTaskPhase("timed_task"), true);
 });
 
 test("every active study phase has one concise transition page", () => {
