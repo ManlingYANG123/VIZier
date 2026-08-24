@@ -45,8 +45,7 @@ import {
   buildStudyDashboardArtifacts,
   discardStudySession,
   endStudySession,
-  exportStudyBundleLocal,
-  exportStudyDashboardsZip,
+  exportStudyBackupZip,
   isStudyActive,
   bumpStudyContextVersion,
   newStudyId,
@@ -125,6 +124,13 @@ import {
   parseContextBox,
   serializeContextBox,
 } from "./context-box.js";
+import {
+  PRACTICE_PRESET_VERSION,
+  buildPracticeApplyResult,
+  practicePresetForMaterial,
+  practiceReviewResponse,
+} from "./practice-presets.js";
+import { createPracticeTutorial } from "./practice-tutorial.js";
 
 const DEFAULT_FEEDBACK_SCOPE = [...CATEGORY_ORDER];
 
@@ -500,6 +506,64 @@ const state = {
 let preferenceAgentTimer = null;
 let contextHintTimer = null;
 let contextHintIndex = 0;
+
+// Guided Practice uses frozen review/apply responses while the tutorial is
+// visible so the lesson stays fast and repeatable. Pausing the tutorial enters
+// free exploration: the same workspace then routes Ask and Apply to the live
+// engine, just like normal use and the Dashboard Task.
+const practiceRuntime = {
+  active: false,
+  tutorialMode: true,
+  materialCode: null,
+  preset: null,
+  tutorial: null,
+  tutorialState: null,
+};
+
+function practiceIsActive() {
+  return Boolean(practiceRuntime.active && practiceRuntime.preset);
+}
+
+function practiceUsesPreset() {
+  return practiceIsActive() && practiceRuntime.tutorialMode;
+}
+
+function practiceStudyFields() {
+  return practiceIsActive()
+    ? {
+        executionMode: practiceUsesPreset() ? "practice-preset" : "live-engine",
+        practiceMode: practiceRuntime.tutorialMode ? "tutorial" : "free-explore",
+        practicePresetVersion: PRACTICE_PRESET_VERSION,
+        practiceMaterialCode: practiceRuntime.materialCode,
+      }
+    : { executionMode: "live-engine" };
+}
+
+function emitPracticeAction(type, data = {}) {
+  if (!practiceIsActive()) return;
+  document.dispatchEvent(new CustomEvent("vizier:practice-action", {
+    detail: { type, ...data },
+  }));
+}
+
+async function practicePause(ms = 140) {
+  if (!practiceUsesPreset()) return;
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function streamApplyForCurrentMode(payload, onEvent) {
+  if (!practiceUsesPreset()) return streamApply(payload, onEvent);
+  onEvent?.({ type: "practice_preset_started", version: PRACTICE_PRESET_VERSION });
+  await practicePause();
+  const result = buildPracticeApplyResult({
+    critiques: payload.critiques,
+    selectedIds: payload.selectedRecommendationIds || [],
+    specMap: payload.specMap,
+    board: payload.board,
+  });
+  onEvent?.({ type: "practice_preset_completed", applied: result.applicationOrder.length });
+  return result;
+}
 
 bindStudyContext(() => ({
   dashboardId: state.artifact?.id || null,
@@ -2590,6 +2654,7 @@ function renderVersions() {
       });
       state.selectedVersionId = id;
       renderVersions();
+      emitPracticeAction("checkpoint:selected", { checkpointId: id });
     });
   });
   detail?.querySelectorAll("[data-revision-critique-id]").forEach((button) => {
@@ -3422,6 +3487,7 @@ function critiqueRequestStudyData({
     hadPriorCritiques: state.critiques.length > 0,
     priorCritiqueCount: state.critiques.length,
     activeScopes: [...(state.context.scope || [])],
+    ...practiceStudyFields(),
   };
 }
 
@@ -4242,6 +4308,7 @@ function bindContextConfirmationButton() {
     });
     renderFixedContextPanel();
     renderContextToolState();
+    emitPracticeAction("context:confirmed", { source: "context-panel" });
   });
 }
 
@@ -5088,6 +5155,11 @@ function renderCritiques() {
         else state.batchSelection.add(critique.id);
         renderCritiques();
         await refreshBatchPreview();
+        emitPracticeAction("batch:selected", {
+          critiqueId: critique.id,
+          selectedIds: [...state.batchSelection],
+          count: state.batchSelection.size,
+        });
         return;
       }
       state.selectedCritiqueId = critique.id;
@@ -5105,6 +5177,7 @@ function renderCritiques() {
       renderCritiques();
       renderMarkers();
       await renderInspector();
+      emitPracticeAction("critique:opened", { critiqueId: critique.id });
     });
   });
   renderBatchApplyBar();
@@ -5169,6 +5242,7 @@ async function setBatchMode(on) {
     syncBatchToggle();
     renderCritiques();
     await refreshBatchPreview();
+    emitPracticeAction("batch:entered");
     return;
   }
   // Leaving batch mode: drop state + the ephemeral combined preview, then return
@@ -5219,7 +5293,7 @@ async function refreshBatchPreview() {
   setBatchPreviewPending(true);
   let result = null;
   try {
-    result = await streamApply({
+    result = await streamApplyForCurrentMode({
       version: state.version,
       context: reviewContextForEngine(),
       specMap: buildEngineSpecMap(),
@@ -5354,7 +5428,7 @@ async function enginePreviewFor(critique) {
   const plan = buildApplicationPlan([critique.id], state.critiques);
   if (!plan.canApply) return null;
   try {
-    const result = await streamApply({
+    const result = await streamApplyForCurrentMode({
       version: state.version,
       context: reviewContextForEngine(),
       specMap: buildEngineSpecMap(),
@@ -5483,6 +5557,10 @@ async function restoreDashboardCheckpoint(checkpoint) {
     afterVersion,
   });
   await refreshAfterDashboardMutation();
+  emitPracticeAction("checkpoint:restored", {
+    checkpointId: checkpoint.id,
+    dashboardVersion: afterVersion,
+  });
 }
 
 async function applyRecommendationSelection(selectedIds, conflictChoices = {}, { via, applyId: existingApplyId, skipRequest = false } = {}) {
@@ -5496,6 +5574,7 @@ async function applyRecommendationSelection(selectedIds, conflictChoices = {}, {
       via: applyVia,
       requestedCritiqueIds,
       dashboardVersion: beforeVersion,
+      ...practiceStudyFields(),
     });
   }
   const failApply = (reason, extra = {}) => {
@@ -5512,6 +5591,7 @@ async function applyRecommendationSelection(selectedIds, conflictChoices = {}, {
       beforeVersion,
       afterVersion: Number(state.version) || beforeVersion,
       critiqueId: requestedCritiqueIds.length === 1 ? requestedCritiqueIds[0] : null,
+      ...practiceStudyFields(),
     });
     return { ok: false, plan: extra.plan || null, reason, applyId, ...extra };
   };
@@ -5567,7 +5647,7 @@ async function applyRecommendationSelection(selectedIds, conflictChoices = {}, {
   let result;
   try {
     tracePanel.start("Apply — engine transaction");
-    result = await streamApply(
+    result = await streamApplyForCurrentMode(
       {
         version: state.version,
         context: reviewContextForEngine(),
@@ -5707,6 +5787,7 @@ async function applyRecommendationSelection(selectedIds, conflictChoices = {}, {
       beforeVersion,
       afterVersion: nextVersion,
       rollback: false,
+      ...practiceStudyFields(),
     },
   }, { synthesize: false });
   const changeId = recordDashboardChanged({
@@ -5773,6 +5854,12 @@ async function applyRecommendationSelection(selectedIds, conflictChoices = {}, {
       state.settleDemoPlaying = false;
     }
   }
+  emitPracticeAction(applyVia === "batch" ? "apply:batch" : "apply:single", {
+    applyId,
+    requestedCritiqueIds,
+    committedCritiqueIds: committedIds,
+    dashboardVersion: state.version,
+  });
   return { ok: true, plan, delta: result.recommendationDelta, applyId };
 }
 
@@ -5949,6 +6036,10 @@ async function saveWorkingDraftCheckpoint() {
     renderVersions();
     renderWorkingDraftStatus();
     applyDrawers();
+    emitPracticeAction("checkpoint:saved", {
+      checkpointId,
+      recommendationIds,
+    });
   } finally {
     if (buttonLabel) buttonLabel.textContent = "Save Checkpoint";
     renderWorkingDraftStatus();
@@ -7569,24 +7660,35 @@ async function generateCritiquesFromEngine(focusedRequest = "", options = {}) {
     || (normalizedRequest
       ? "Focused Review — answering your request"
       : "AI Assist — criteria-aware full review"));
-  const resp = await streamCritique(
-    {
-      version: state.version,
-      context: reviewContextForEngine(),
-      specMap,
-      board,
-      iterationContext: iterationContextForEngine(),
-      reviewScope,
-      requireLLM: true,
-      reviewTemperature: state.reviewTemperature,
-      savedRationales: savedRationalesForEngine(),
-      ...designDocumentForEngine(),
-      ...(normalizedRequest
-        ? { focus: { request: normalizedRequest } }
-        : {}),
-    },
-    (event) => tracePanel.event(event),
-  );
+  const resp = practiceUsesPreset()
+    ? await (async () => {
+        tracePanel.event({
+          type: "practice_preset",
+          materialCode: practiceRuntime.materialCode,
+          scope: reviewScope,
+          version: PRACTICE_PRESET_VERSION,
+        });
+        await practicePause(180);
+        return practiceReviewResponse(practiceRuntime.preset, { scope: reviewScope });
+      })()
+    : await streamCritique(
+        {
+          version: state.version,
+          context: reviewContextForEngine(),
+          specMap,
+          board,
+          iterationContext: iterationContextForEngine(),
+          reviewScope,
+          requireLLM: true,
+          reviewTemperature: state.reviewTemperature,
+          savedRationales: savedRationalesForEngine(),
+          ...designDocumentForEngine(),
+          ...(normalizedRequest
+            ? { focus: { request: normalizedRequest } }
+            : {}),
+        },
+        (event) => tracePanel.event(event),
+      );
   tracePanel.done();
   if (!resp) throw new Error("The review engine returned no result.");
   if (options.persistReviewMeta !== false) {
@@ -7628,26 +7730,37 @@ async function generateLocalCritiques({ bounds, request, dimension }) {
     throw new Error("Confirm the context before starting a local review.");
   }
   tracePanel.start("Local review — selected area");
-  const resp = await streamCritique(
-    {
-      version: state.version,
-      context: reviewContextForEngine(),
-      specMap: buildEngineSpecMap(),
-      board: buildEngineBoardMeta(),
-      iterationContext: iterationContextForEngine(),
-      reviewScope: "selected-region",
-      requireLLM: true,
-      reviewTemperature: state.reviewTemperature,
-      savedRationales: savedRationalesForEngine(),
-      ...designDocumentForEngine(),
-      region: {
-        bounds,
-        request,
-        ...(dimension ? { dimension } : {}),
-      },
-    },
-    (event) => tracePanel.event(event),
-  );
+  const resp = practiceUsesPreset()
+    ? await (async () => {
+        tracePanel.event({
+          type: "practice_preset",
+          materialCode: practiceRuntime.materialCode,
+          scope: "selected-region",
+          version: PRACTICE_PRESET_VERSION,
+        });
+        await practicePause(180);
+        return practiceReviewResponse(practiceRuntime.preset, { scope: "local", bounds });
+      })()
+    : await streamCritique(
+        {
+          version: state.version,
+          context: reviewContextForEngine(),
+          specMap: buildEngineSpecMap(),
+          board: buildEngineBoardMeta(),
+          iterationContext: iterationContextForEngine(),
+          reviewScope: "selected-region",
+          requireLLM: true,
+          reviewTemperature: state.reviewTemperature,
+          savedRationales: savedRationalesForEngine(),
+          ...designDocumentForEngine(),
+          region: {
+            bounds,
+            request,
+            ...(dimension ? { dimension } : {}),
+          },
+        },
+        (event) => tracePanel.event(event),
+      );
   tracePanel.done();
   const answer = resp?.answer || null;
   // A region ask can legitimately return just an answer (e.g. "no material
@@ -7844,6 +7957,10 @@ async function runAIAssist(options = {}) {
       fewShotVersion: reviewMeta?.fewShotVersion || null,
       fewShotIds: reviewMeta?.fewShotIds || [],
       fewShotContentHash: reviewMeta?.fewShotContentHash || null,
+    });
+    emitPracticeAction(focusedRequest ? "review:focused" : "review:full", {
+      askId,
+      critiqueIds: baseCritiques.map((critique) => critique.id),
     });
     return true;
   } catch (err) {
@@ -8298,9 +8415,8 @@ function mountStudyUI() {
         say("Preparing backup…");
         const artifacts = await collectStudyDashboardArtifacts();
         const bundle = buildStudyBundle(collectStudySnapshot(), "manual-download");
-        exportStudyBundleLocal(bundle);
-        exportStudyDashboardsZip(artifacts, bundle);
-        say("Backup downloaded (log + dashboards zip).");
+        exportStudyBackupZip(artifacts, bundle);
+        say("Complete backup downloaded.");
       });
       body.querySelector("#studyDiscard").addEventListener("click", () => {
         if (!window.confirm("Discard this session without saving? This cannot be undone.")) return;
@@ -8311,8 +8427,7 @@ function mountStudyUI() {
       body.querySelector("#studyEnd").addEventListener("click", async () => {
         say("Saving dashboards and session…");
         const out = await saveStudyBundle("end");
-        exportStudyBundleLocal(out.bundle);
-        exportStudyDashboardsZip(out.artifacts, out.bundle);
+        exportStudyBackupZip(out.artifacts, out.bundle);
         endStudySession({ recordEvent: false });
         refreshButton();
         renderBody();
@@ -8389,6 +8504,10 @@ document.getElementById("batchSelectAllButton").addEventListener("click", async 
   state.batchSelection = new Set(filteredCritiques().filter(critiqueBatchEligible).map((c) => c.id));
   renderCritiques();
   await refreshBatchPreview();
+  emitPracticeAction("batch:selected", {
+    selectedIds: [...state.batchSelection],
+    count: state.batchSelection.size,
+  });
 });
 document.getElementById("batchClearButton").addEventListener("click", async () => {
   state.batchSelection = new Set();
@@ -8429,7 +8548,10 @@ document.getElementById("saveCheckpointButton").addEventListener("click", saveWo
 els.localReviewButton.addEventListener("click", () => {
   if (!els.localReviewPopover.hidden) closeLocalReviewPopover();
   if (state.mode === "annotate") cancelLocalReviewSelection();
-  else setMode("annotate");
+  else {
+    setMode("annotate");
+    emitPracticeAction("area:selection-started");
+  }
 });
 document.getElementById("cancelAnnotateButton").addEventListener("click", cancelLocalReviewSelection);
 document.getElementById("closeLocalReview").addEventListener("click", closeLocalReviewPopover);
@@ -8540,6 +8662,10 @@ document.getElementById("localReviewForm").addEventListener("submit", async (eve
       fewShotVersion: reviewMeta?.fewShotVersion || null,
       fewShotIds: reviewMeta?.fewShotIds || [],
       fewShotContentHash: reviewMeta?.fewShotContentHash || null,
+    });
+    emitPracticeAction("review:local", {
+      askId,
+      critiqueIds: localCritiques.map((critique) => critique.id),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -8674,8 +8800,19 @@ function finishLocalReviewSelection(event) {
     draft.pointerId !== event.pointerId
   ) return;
   const bounds = { x: draft.x, y: draft.y, w: draft.w, h: draft.h };
-  if (bounds.w >= 16 && bounds.h >= 16) openLocalReviewPopover(bounds);
-  else cancelLocalReviewSelection();
+  if (bounds.w >= 16 && bounds.h >= 16) {
+    openLocalReviewPopover(bounds);
+    if (practiceUsesPreset()) {
+      // Practice still uses the participant's real drag. Once a valid area is
+      // selected, preload the controlled title question so no simulated cursor
+      // or artificial selection is needed.
+      els.localReviewRequest.value = practiceRuntime.preset.local.request;
+      els.localReviewRequest.dispatchEvent(new Event("input", { bubbles: true }));
+      els.localReviewDimension.value = "text";
+      syncReviewReadiness();
+      emitPracticeAction("area:selection-ready", { bounds });
+    }
+  } else cancelLocalReviewSelection();
 }
 window.addEventListener("pointerup", finishLocalReviewSelection);
 window.addEventListener("pointercancel", finishLocalReviewSelection);
@@ -9088,23 +9225,502 @@ const STUDY_MATERIALS = [
   },
 ];
 
+function disablePracticeRuntime() {
+  practiceRuntime.tutorial?.destroy();
+  practiceRuntime.active = false;
+  practiceRuntime.tutorialMode = true;
+  practiceRuntime.materialCode = null;
+  practiceRuntime.preset = null;
+  practiceRuntime.tutorial = null;
+  practiceRuntime.tutorialState = null;
+  document.body.classList.remove("practice-preset-active");
+}
+
+function clearPracticeTutorialCritiques() {
+  state.reviewScope = "full";
+  state.criterionEvaluations = [];
+  state.strengths = [];
+  state.critiques = [];
+  state.askAnswer = null;
+  state.selectedCritiqueId = null;
+  state.selectedTileId = null;
+  state.previewCache.clear();
+  state.interactionObservations.clear();
+  state.lastReviewContextFingerprint = null;
+  renderRubrics();
+  renderCritiques();
+  renderMarkers();
+}
+
+function configurePracticePreset(material) {
+  const preset = practicePresetForMaterial(material.code);
+  if (!preset) throw new Error(`No guided-practice preset is configured for material ${material.code}.`);
+  practiceRuntime.active = true;
+  practiceRuntime.tutorialMode = true;
+  practiceRuntime.materialCode = material.code;
+  practiceRuntime.preset = preset;
+  practiceRuntime.tutorialState = null;
+  document.body.classList.add("practice-preset-active");
+
+  const rules = preset.document.constraints || [];
+  state.context = {
+    goal: preset.editedContext || preset.context,
+    audience: preset.audience || "The intended audience for this dashboard",
+    constraints: rules.map((constraint) => constraint.rule).join(" "),
+    scope: [...DEFAULT_FEEDBACK_SCOPE],
+    customTypes: [],
+    notes: [],
+    fieldStatus: { goal: "edited", audience: "edited", constraints: "edited" },
+    snapshotId: `practice-${material.code}-${PRACTICE_PRESET_VERSION}`,
+  };
+  setContextWorkflow(CONTEXT_WORKFLOW_STATUS.NEEDS_REVIEW, {
+    detail: "This prepared Context includes a small edit. Review and confirm it before applying the example recommendations.",
+    reason: "edited",
+  });
+  state.designDoc = {
+    status: "loaded",
+    filename: preset.document.filename,
+    error: "",
+    note: "",
+    text: rules.map((constraint) => constraint.rule).join("\n"),
+  };
+  state.constraintSet = {
+    schemaVersion: "1.0",
+    provenance: preset.document.filename,
+    constraints: rules.map((constraint) => ({
+      ...constraint,
+      sourceText: constraint.sourceText || constraint.rule,
+    })),
+  };
+  state.constraintSelection = null;
+  activeDesignDocId = material.docId || "";
+  clearPracticeTutorialCritiques();
+  renderFixedContextPanel();
+  renderContextToolState();
+  refreshDesignDocControls();
+  syncReviewReadiness();
+  recordStudyAction("practice_preset_loaded", `Loaded guided-practice preset ${material.code}`, {
+    materialCode: material.code,
+    dashboardId: material.dashboardId,
+    designDocId: material.docId || null,
+    initialCritiqueCount: 0,
+    ...practiceStudyFields(),
+  });
+}
+
+function practiceTutorialMilestones(preset) {
+  const singleId = preset.singleCritiqueId;
+  const batchIds = new Set(preset.batchCritiqueIds || []);
+  const orientationActions = [{
+    id: "orientation-context-panel",
+    label: "This is the Context panel",
+    instruction: "This is the Context panel. Review and confirm what the dashboard is for before asking VIZier for feedback.",
+    target: "#contextPanelFixed",
+    buttonLabel: "Show the Canvas",
+  }, {
+    id: "orientation-dashboard-panel",
+    label: "This is the Canvas",
+    instruction: "This is the interactive Canvas. You can inspect the dashboard, pan, zoom, use its controls, and select an area for review.",
+    target: "#canvasViewport",
+    buttonLabel: "Show the Critique panel",
+  }, {
+    id: "orientation-recommendations-panel",
+    label: "This is the Critique panel",
+    instruction: "This is the Critique panel. Review VIZier recommendations, inspect focused answers, and apply changes here.",
+    target: "#critiquesPanelFixed",
+    buttonLabel: "Continue to Context confirmation",
+  }, {
+    id: "confirm-practice-context",
+    label: "Confirm the prepared Context",
+    instruction: "Review the prepared dashboard Context in the left panel, then select Confirm. VIZier will use it for every Practice Ask.",
+    target: "#saveContextBtn",
+    expect: "context:confirmed",
+  }];
+  return [
+    {
+      id: "orientation",
+      title: "Meet VIZier",
+      actions: orientationActions,
+    },
+    {
+      id: "generate-review",
+      title: "Generate your first review",
+      actions: [{
+        id: "generate-initial-review",
+        label: "Select Generate Critiques",
+        instruction: "Select Generate Critiques to review the dashboard. In Practice, the prepared recommendations appear immediately.",
+        target: "#aiAssistButton",
+        expect: "review:full",
+      }],
+    },
+    {
+      id: "single-apply",
+      title: "Inspect and apply one recommendation",
+      actions: [
+        {
+          id: "open-single",
+          label: "Open the highlighted recommendation",
+          instruction: "Open this recommendation to compare the original and proposed dashboard states.",
+          target: `[data-critique-id="${singleId}"]`,
+          expect: "critique:opened",
+          matches: ({ critiqueId }) => critiqueId === singleId,
+        },
+        {
+          id: "apply-single",
+          label: "Apply the recommendation",
+          instruction: "Apply the change. In Practice, the prepared result returns immediately; in the Task, VIZier will use the live engine.",
+          target: "#focusAccept",
+          expect: "apply:single",
+        },
+      ],
+    },
+    {
+      id: "checkpoint",
+      title: "Save a checkpoint",
+      actions: [{
+        id: "save-checkpoint",
+        label: "Save this result as a checkpoint",
+        instruction: "Save the current Working Draft as a checkpoint so you can compare it with later revisions.",
+        target: "#saveCheckpointButton",
+        expect: "checkpoint:saved",
+      }],
+    },
+    {
+      id: "focused-review",
+      title: "Ask a focused question",
+      actions: [
+        {
+          id: "run-focused-review",
+          label: `Ask “${preset.focused.request}”`,
+          instruction: "Focused Review answers one explicit question while keeping the confirmed dashboard context.",
+          target: "#runFocusedReviewBtn",
+          prepare: "prepare-focused-review",
+          expect: "review:focused",
+        },
+        {
+          id: "apply-focused",
+          label: "Apply the focused recommendation",
+          instruction: "Apply the layout recommendation returned for your focused question.",
+          target: "#focusAccept",
+          expect: "apply:single",
+        },
+      ],
+    },
+    {
+      id: "selected-area-review",
+      title: "Review a selected area",
+      actions: [
+        {
+          id: "start-area-review",
+          label: "Start area selection",
+          instruction: "Choose Select Area. This Ask limits the review to the region you draw.",
+          target: "#localReviewButton",
+          expect: "area:selection-started",
+        },
+        {
+          id: "select-title-region",
+          label: "Select the dashboard title",
+          instruction: "Drag a bounding box around the dashboard title. VIZier will then prepare the title-clarity question for you.",
+          target: "#dashboardTitle",
+          expect: "area:selection-ready",
+        },
+        {
+          id: "run-local-review",
+          label: `Ask “${preset.local.request}”`,
+          instruction: "Request the critique for the selected title area.",
+          target: "#submitLocalReview",
+          expect: "review:local",
+        },
+        {
+          id: "apply-local",
+          label: "Apply the title recommendation",
+          instruction: "Apply the prepared title revision.",
+          target: "#focusAccept",
+          expect: "apply:single",
+        },
+      ],
+    },
+    {
+      id: "batch-apply",
+      title: "Apply several recommendations together",
+      actions: [
+        {
+          id: "refresh-full-review",
+          label: "Refresh the Full Review",
+          instruction: "Refresh the Full Review for the current dashboard before composing a combined change.",
+          target: "#aiAssistButton",
+          expect: "review:full",
+        },
+        {
+          id: "enter-batch",
+          label: "Enter multi-select mode",
+          instruction: "Select multiple recommendations to preview a combined result.",
+          target: "#batchSelectToggle",
+          expect: "batch:entered",
+        },
+        {
+          id: "select-batch",
+          label: "Select the remaining prepared recommendations",
+          instruction: "Use Select all to add the remaining Practice recommendations to one transaction.",
+          target: "#batchSelectAllButton",
+          expect: "batch:selected",
+          matches: ({ selectedIds = [] }) => [...batchIds].every((id) => selectedIds.includes(id)),
+        },
+        {
+          id: "apply-batch",
+          label: "Apply the combined change",
+          instruction: "Apply the selected recommendations together.",
+          target: "#batchApplyButton",
+          expect: "apply:batch",
+        },
+        {
+          id: "practice-complete",
+          label: "Finish the guided lesson",
+          instruction: "Practice is complete. Continue, then use Finish practice in the top bar when the facilitator is ready.",
+          target: ".study-workspace-finish",
+          buttonLabel: "Finish tutorial",
+        },
+      ],
+    },
+  ];
+}
+
+async function resetPracticeWorkspace() {
+  const original = state.versions[0];
+  if (original?.afterSnapshot) applyLiveSnapshot(original.afterSnapshot);
+  state.version = 1;
+  state.critiques = [];
+  state.strengths = [];
+  state.askAnswer = null;
+  state.selectedCritiqueId = null;
+  state.selectedTileId = null;
+  state.lastReviewContextFingerprint = null;
+  state.versions = original ? [original] : state.versions.slice(0, 1);
+  state.selectedVersionId = 1;
+  state.checkpointComparison = { before: 1, after: 1 };
+  state.workingDraft = createWorkingDraft(1);
+  state.nextAskId = 1;
+  state.nextLocalReviewId = 1;
+  resetBatchState();
+  closeLocalReviewPopover();
+  await refreshAfterDashboardMutation();
+  setContextWorkflow(CONTEXT_WORKFLOW_STATUS.NEEDS_REVIEW, {
+    detail: "This prepared Context includes a small edit. Review and confirm it before applying the example recommendations.",
+    reason: "edited",
+  });
+  state.context.fieldStatus = {
+    goal: state.context.goal ? "edited" : "missing",
+    audience: state.context.audience ? "edited" : "missing",
+    constraints: state.context.constraints ? "edited" : "missing",
+  };
+  clearPracticeTutorialCritiques();
+  renderFixedContextPanel();
+  renderContextToolState();
+  syncReviewReadiness();
+  recordStudyAction("practice_tutorial_restarted", "Restarted guided practice tutorial", {
+    ...practiceStudyFields(),
+  });
+}
+
+function preparePracticeFocusedReview() {
+  const request = practiceRuntime.preset?.focused?.request || "Should I change the layout?";
+  state.reviewRequest = request;
+  const input = document.getElementById("focusedReviewInput");
+  if (input) {
+    input.value = request;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  syncReviewReadiness();
+}
+
+export async function startGuidedPracticeTutorial(materialCode) {
+  if (!practiceIsActive() || practiceRuntime.materialCode !== materialCode) return false;
+  practiceRuntime.tutorial?.destroy();
+  const milestones = practiceTutorialMilestones(practiceRuntime.preset);
+  practiceRuntime.tutorial = createPracticeTutorial({
+    milestones,
+    initialState: practiceRuntime.tutorialState,
+    onActionEnter(action) {
+      if (action.prepare === "prepare-focused-review") preparePracticeFocusedReview();
+    },
+    async onCommand(command) {
+      if (command === "restart-tutorial") await resetPracticeWorkspace();
+    },
+    onProgress(progress) {
+      practiceRuntime.tutorialState = practiceRuntime.tutorial?.getState?.() || practiceRuntime.tutorialState;
+      recordStudyAction("practice_tutorial_progress", `Practice tutorial: ${progress.actionId}`, {
+        ...progress,
+        ...practiceStudyFields(),
+      });
+    },
+    onComplete() {
+      recordStudyAction("practice_tutorial_completed", "Completed guided practice tutorial", {
+        milestoneCount: milestones.length,
+        ...practiceStudyFields(),
+      });
+    },
+    onModeChange({ mode, ...progress }) {
+      practiceRuntime.tutorialMode = mode === "tutorial";
+      practiceRuntime.tutorialState = practiceRuntime.tutorial?.getState?.() || practiceRuntime.tutorialState;
+      recordStudyAction("practice_tutorial_mode_changed", mode === "explore"
+        ? "Paused tutorial for free exploration"
+        : "Resumed guided practice tutorial", {
+        mode,
+        ...progress,
+        ...practiceStudyFields(),
+      });
+    },
+  });
+  practiceRuntime.tutorial.start();
+  practiceRuntime.tutorialState = practiceRuntime.tutorial.getState();
+  recordStudyAction("practice_tutorial_started", "Started guided practice tutorial", {
+    milestoneCount: milestones.length,
+    ...practiceStudyFields(),
+  });
+  return true;
+}
+
+/** A serializable, phase-local workspace snapshot used only by the study runner.
+ * Training and the controlled task keep separate copies, so returning to one
+ * phase can never load the other phase's dashboard, critiques, or checkpoints. */
+export function captureStudyRunnerWorkspaceState() {
+  return clone({
+    schema: "vizier-study-workspace/1",
+    capturedAt: new Date().toISOString(),
+    dashboard: buildDashboardCaptureSnapshot(),
+    workspace: {
+      artifactLibraryId: state.artifact?.libraryId || null,
+      version: state.version,
+      view: state.view,
+      mode: state.mode,
+      drawers: state.drawers,
+      filters: state.filters,
+      search: state.search,
+      expandedCritiqueGroups: state.expandedCritiqueGroups,
+      selectedCritiqueId: state.selectedCritiqueId,
+      selectedTileId: state.selectedTileId,
+      context: state.context,
+      contextWorkflow: state.contextWorkflow,
+      studyContextGenerated: state.studyContextGenerated,
+      studyContextVersion: state.studyContextVersion,
+      constraintSet: state.constraintSet,
+      constraintSelection: state.constraintSelection,
+      designDoc: state.designDoc,
+      activeDesignDocId,
+      critiques: state.critiques,
+      strengths: state.strengths,
+      askAnswer: state.askAnswer,
+      criterionEvaluations: state.criterionEvaluations,
+      rationales: state.rationales,
+      nextRationaleId: state.nextRationaleId,
+      interactionJournal: state.interactionJournal,
+      nextInteractionEventId: state.nextInteractionEventId,
+      lastReviewContextFingerprint: state.lastReviewContextFingerprint,
+      reviewScope: state.reviewScope,
+      reviewRequest: state.reviewRequest,
+      reviewTemperature: state["reviewTemperature"],
+      nextAskId: state.nextAskId,
+      nextLocalReviewId: state.nextLocalReviewId,
+      versions: stripVersionMedia(state.versions),
+      selectedVersionId: state.selectedVersionId,
+      checkpointComparison: state.checkpointComparison,
+      workingDraft: state.workingDraft,
+      batchMode: state.batchMode,
+      batchSelection: [...state.batchSelection],
+      crossFilterEnabled: state.crossFilterEnabled,
+      crossFilterSelection: state.crossFilterSelection,
+      scroll: {
+        context: document.getElementById("contextPanelContent")?.scrollTop || 0,
+        critiques: document.getElementById("critiqueList")?.scrollTop || 0,
+      },
+    },
+    tutorial: practiceRuntime.tutorial?.getState?.() || practiceRuntime.tutorialState,
+  });
+}
+
+export async function restoreStudyRunnerWorkspaceState(snapshot) {
+  if (!snapshot || snapshot.schema !== "vizier-study-workspace/1") return false;
+  const saved = snapshot.workspace || {};
+  applyLiveSnapshot(snapshot.dashboard);
+  const assignClone = (key, fallback = state[key]) => {
+    if (saved[key] !== undefined) state[key] = clone(saved[key]);
+    else state[key] = fallback;
+  };
+  [
+    "view", "drawers", "filters", "expandedCritiqueGroups", "context",
+    "contextWorkflow", "studyContextGenerated", "constraintSet",
+    "constraintSelection", "designDoc", "critiques", "strengths", "askAnswer",
+    "criterionEvaluations", "rationales", "interactionJournal",
+    "lastReviewContextFingerprint", "checkpointComparison", "workingDraft",
+    "crossFilterSelection",
+  ].forEach((key) => assignClone(key));
+  state.version = Number(saved.version) || state.version;
+  state.mode = saved.mode || "review";
+  state.search = String(saved.search || "");
+  state.selectedCritiqueId = saved.selectedCritiqueId || null;
+  state.selectedTileId = saved.selectedTileId || null;
+  state.studyContextVersion = Number(saved.studyContextVersion) || 0;
+  state.nextRationaleId = Number(saved.nextRationaleId) || 1;
+  state.nextInteractionEventId = Number(saved.nextInteractionEventId) || 1;
+  state.reviewScope = saved.reviewScope || "full";
+  state.reviewRequest = String(saved.reviewRequest || "");
+  state.reviewTemperature = Number.isFinite(Number(saved.reviewTemperature))
+    ? Number(saved.reviewTemperature)
+    : state.reviewTemperature;
+  state.nextAskId = Number(saved.nextAskId) || 1;
+  state.nextLocalReviewId = Number(saved.nextLocalReviewId) || 1;
+  state.versions = Array.isArray(saved.versions) && saved.versions.length
+    ? clone(saved.versions)
+    : state.versions;
+  state.selectedVersionId = Number(saved.selectedVersionId) || state.versions.at(-1)?.id || 1;
+  state.batchMode = Boolean(saved.batchMode);
+  state.batchSelection = new Set(Array.isArray(saved.batchSelection) ? saved.batchSelection : []);
+  state.crossFilterEnabled = Boolean(saved.crossFilterEnabled);
+  state.artifact.libraryId = saved.artifactLibraryId || state.artifact.libraryId;
+  activeDesignDocId = saved.activeDesignDocId || "";
+  practiceRuntime.tutorialState = clone(snapshot.tutorial || null);
+  practiceRuntime.tutorialMode = !snapshot.tutorial?.paused;
+  state.previewCache.clear();
+  state.canvasPreview = null;
+  els.searchInput.value = state.search;
+  setMode(state.mode);
+  renderFixedContextPanel();
+  renderContextToolState();
+  refreshDesignDocControls();
+  renderRubrics();
+  syncReviewReadiness();
+  await refreshAfterDashboardMutation();
+  applyDrawers();
+  applyViewTransform();
+  requestAnimationFrame(() => {
+    const context = document.getElementById("contextPanelContent");
+    const critiques = document.getElementById("critiqueList");
+    if (context) context.scrollTop = Number(saved.scroll?.context) || 0;
+    if (critiques) critiques.scrollTop = Number(saved.scroll?.critiques) || 0;
+  });
+  return true;
+}
+
 /** Route-level study runner entry. It uses the frozen public stimulus directly
  * so a participant never sees or depends on the moderator material picker. */
-export async function openStudyMaterialForRunner(code) {
+export async function openStudyMaterialForRunner(code, { practice = false } = {}) {
   const material = STUDY_MATERIALS.find((candidate) => candidate.code === code);
   if (!material) throw new Error(`Unknown study material: ${code}`);
+  disablePracticeRuntime();
   document.getElementById("uploadScreen")?.setAttribute("hidden", "");
   const response = await fetch(material.dashboardUrl);
   if (!response.ok) throw new Error(`Could not load material ${code}: ${response.status} ${response.statusText}`);
   const dashboard = await response.json();
-  await loadJsonDashboard(dashboard, `${code}.json`);
+  await loadJsonDashboard(dashboard, `${code}.json`, { skipContextInference: practice });
   state.artifact.libraryId = material.dashboardId;
-  if (material.docId) void loadDesignDocById(material.docId);
+  if (practice) configurePracticePreset(material);
+  else if (material.docId) void loadDesignDocById(material.docId);
   else clearDesignDoc();
   recordStudyAction("study_material_opened", `Opened study material ${code}`, {
     materialCode: code,
     dashboardId: material.dashboardId,
     designDocId: material.docId || null,
+    ...practiceStudyFields(),
   });
   return { ...material };
 }
@@ -9995,7 +10611,7 @@ function obClearPreview() {
   ob.dropzone.hidden = false;
 }
 
-async function loadJsonDashboard(data, fileName = "dashboard.json") {
+async function loadJsonDashboard(data, fileName = "dashboard.json", { skipContextInference = false } = {}) {
   // True only when a dashboard was already open — i.e. this load is a SWITCH,
   // not the first-run load. Captured before state.artifact is overwritten below.
   // Guards the design-doc clear so a doc attached during onboarding survives the
@@ -10137,7 +10753,7 @@ async function loadJsonDashboard(data, fileName = "dashboard.json") {
   // rules never silently gate the new dashboard's review. Only on a switch: a
   // doc attached during first-run onboarding must survive the initial load.
   if (switchingDashboard) clearDesignDoc();
-  void inferContextOnUpload();
+  if (!skipContextInference) void inferContextOnUpload();
   requestAnimationFrame(fitCanvas);
 }
 

@@ -8,8 +8,8 @@
  * no upload is ever attempted.
  *
  * On End & save the client also sends dashboard artifacts (high-resolution PNG
- * + reloadable JSON for every checkpoint and the final board). Those are stored
- * as sibling files under `dashboards/`, not embedded in the event-log JSON.
+ * + reloadable JSON), protocol questionnaire records, and runner state. Those
+ * are stored as sibling files rather than embedded in the event-log JSON.
  *
  * Credentials come only from environment variables (STUDY_S3_BUCKET, AWS_REGION,
  * AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) and are never sent to the browser.
@@ -79,8 +79,12 @@ export function studyStorageMode(): "s3" | "local" {
 function safeArtifactPath(raw: unknown): string {
   const text = String(raw ?? "").replace(/\\/g, "/").trim();
   const parts = text.split("/").filter(Boolean);
-  if (parts[0] !== "dashboards" || parts.length < 2 || parts.length > 4) {
-    throw new Error("INVALID_BUNDLE: study artifacts must live under dashboards/");
+  const isRunnerState = text === "study-runner-state.json";
+  const isScopedArtifact = ["dashboards", "questionnaires"].includes(parts[0])
+    && parts.length >= 2
+    && parts.length <= 4;
+  if (!isRunnerState && !isScopedArtifact) {
+    throw new Error("INVALID_BUNDLE: study artifacts must be runner state, dashboards, or questionnaires");
   }
   if (parts.some((part) => part === "." || part === ".." || part.includes(".."))) {
     throw new Error("INVALID_BUNDLE: study artifact path is not allowed");

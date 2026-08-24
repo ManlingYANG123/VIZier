@@ -54,10 +54,33 @@ export const STUDY_RUNNER_PHASES = Object.freeze([
   "complete",
 ]);
 
+export const STUDY_RUNNER_SCREENS = Object.freeze([
+  Object.freeze({ id: "training:intro", phase: "training", view: "intro" }),
+  Object.freeze({ id: "training:workspace", phase: "training", view: "workspace" }),
+  Object.freeze({ id: "dashboard_task:intro", phase: "dashboard_task", view: "intro" }),
+  Object.freeze({ id: "dashboard_task:workspace", phase: "dashboard_task", view: "workspace" }),
+  Object.freeze({ id: "post_assessment:intro", phase: "post_assessment", view: "intro" }),
+  Object.freeze({ id: "post_assessment:questionnaire", phase: "post_assessment", view: "questionnaire" }),
+  Object.freeze({ id: "complete", phase: "complete", view: "complete" }),
+]);
+
+const STUDY_RUNNER_SCREEN_BY_ID = new Map(
+  STUDY_RUNNER_SCREENS.map((screen) => [screen.id, screen]),
+);
+
 /** Migrate older four-stage sessions into the current three-stage flow. */
 export function normalizeStudyPhase(phase) {
   if (phase === "pre_assessment") return "training";
   return phase === "timed_task" ? "dashboard_task" : phase;
+}
+
+export function studyPhaseUsesVizier(phase) {
+  const normalizedPhase = normalizeStudyPhase(phase);
+  return normalizedPhase === "training" || normalizedPhase === "dashboard_task";
+}
+
+export function isDashboardTaskPhase(phase) {
+  return normalizeStudyPhase(phase) === "dashboard_task";
 }
 
 export const STUDY_PHASE_INTROS = Object.freeze({
@@ -120,8 +143,7 @@ export const POST_EXPERIENCE_SCALE_ITEMS = freezeScaleItems([
   },
 ]);
 
-/** The final interview follows the same eight themes as the scale. Keeping the
- * prompts on their scale items prevents the two study routes from drifting. */
+/** Study 1 and Study 2 share these eight paired questionnaire/interview themes. */
 export const POST_QUESTIONS = Object.freeze(
   POST_EXPERIENCE_SCALE_ITEMS.map((item) => item.interviewQuestion),
 );
@@ -133,6 +155,19 @@ export function scaleSectionsForAssessment(key) {
     title: "Experience with VIZier",
     items: POST_EXPERIENCE_SCALE_ITEMS,
   }];
+}
+
+export function serializeQuestionResponses(questions, responseMap = {}) {
+  return questions.map((question, index) => {
+    const itemId = `q${index + 1}`;
+    const response = String(responseMap[itemId] ?? "");
+    return {
+      itemId,
+      question,
+      response,
+      answered: response.trim() !== "",
+    };
+  });
 }
 
 export function serializeScaleResponses(sections, responseMap = {}) {
@@ -171,12 +206,48 @@ export function createStudyRunnerState(groupId, participantId) {
     phase: "training",
     assessmentStep: "questionnaire",
     phaseIntros: {},
+    phaseTimers: {},
+    navigation: {
+      currentScreenId: "training:intro",
+      history: ["training:intro"],
+      historyIndex: 0,
+      reopenings: [],
+    },
+    workspaces: {},
+    workspaceSubmissions: {},
     startedAt: now,
     updatedAt: now,
     assessments: {
       post: { annotations: [], answers: {}, scales: {}, submittedAt: null },
     },
   };
+}
+
+export function studyScreenDescriptor(screenId) {
+  return STUDY_RUNNER_SCREEN_BY_ID.get(String(screenId || "")) || null;
+}
+
+export function studyScreenIdForState(state) {
+  const phase = normalizeStudyPhase(state?.phase);
+  if (phase === "complete") return "complete";
+  const explicit = studyScreenDescriptor(state?.navigation?.currentScreenId);
+  if (explicit && explicit.phase === phase) return explicit.id;
+  if (!state?.phaseIntros?.[phase]?.completedAt) return `${phase}:intro`;
+  if (studyPhaseUsesVizier(phase)) return `${phase}:workspace`;
+  if (phase === "post_assessment") return "post_assessment:questionnaire";
+  return `${phase}:intro`;
+}
+
+export function previousStudyScreenId(screenId) {
+  const index = STUDY_RUNNER_SCREENS.findIndex((screen) => screen.id === screenId);
+  return index > 0 ? STUDY_RUNNER_SCREENS[index - 1].id : null;
+}
+
+export function operationStudyScreenId(phase) {
+  const normalized = normalizeStudyPhase(phase);
+  if (studyPhaseUsesVizier(normalized)) return `${normalized}:workspace`;
+  if (normalized === "post_assessment") return "post_assessment:questionnaire";
+  return null;
 }
 
 export function isStudyRunnerState(value, groupId = null) {
@@ -229,6 +300,96 @@ export function nextStudyPhase(phase) {
     timed_task: "post_assessment",
     post_assessment: "complete",
   }[phase] || "complete";
+}
+
+export function studyPhaseTimerElapsedMs(timer, now = Date.now()) {
+  return studyPhaseTimerSegments(timer).reduce((total, segment) => {
+    const startedAt = Date.parse(String(segment?.startedAt || ""));
+    if (!Number.isFinite(startedAt)) return total;
+    const completedAt = segment?.completedAt
+      ? Date.parse(String(segment.completedAt))
+      : Number(now);
+    if (!Number.isFinite(completedAt)) return total;
+    return total + Math.max(0, completedAt - startedAt);
+  }, 0);
+}
+
+export function studyPhaseTimerSegments(timer) {
+  if (Array.isArray(timer?.segments)) {
+    return timer.segments.filter((segment) => segment && typeof segment === "object");
+  }
+  if (!timer?.startedAt) return [];
+  return [{
+    id: "segment-1",
+    reason: "initial",
+    source: "legacy",
+    startedAt: timer.startedAt,
+    completedAt: timer.completedAt || null,
+    durationMs: Number.isFinite(Number(timer.durationMs)) ? Number(timer.durationMs) : null,
+  }];
+}
+
+export function studyPhaseTimerIsRunning(timer) {
+  const segments = studyPhaseTimerSegments(timer);
+  return Boolean(segments.length && !segments[segments.length - 1].completedAt);
+}
+
+export function startStudyPhaseTimerSegment(timer, {
+  startedAt = new Date().toISOString(),
+  reason = "initial",
+  source = "participant",
+} = {}) {
+  const segments = studyPhaseTimerSegments(timer).map((segment) => ({ ...segment }));
+  if (segments.length && !segments[segments.length - 1].completedAt) {
+    return timer;
+  }
+  segments.push({
+    id: `segment-${segments.length + 1}`,
+    reason: segments.length ? "reopened" : reason,
+    source,
+    startedAt,
+    completedAt: null,
+    durationMs: null,
+  });
+  return {
+    schemaVersion: 2,
+    startedAt: segments[0].startedAt,
+    completedAt: null,
+    durationMs: studyPhaseTimerElapsedMs({ segments }, Date.parse(startedAt)),
+    totalDurationMs: studyPhaseTimerElapsedMs({ segments }, Date.parse(startedAt)),
+    segments,
+  };
+}
+
+export function stopStudyPhaseTimerSegment(timer, completedAt = new Date().toISOString()) {
+  const segments = studyPhaseTimerSegments(timer).map((segment) => ({ ...segment }));
+  const active = segments[segments.length - 1];
+  if (!active || active.completedAt) return timer || null;
+  const startedAtMs = Date.parse(String(active.startedAt || ""));
+  const completedAtMs = Date.parse(String(completedAt || ""));
+  active.completedAt = completedAt;
+  active.durationMs = Number.isFinite(startedAtMs) && Number.isFinite(completedAtMs)
+    ? Math.max(0, completedAtMs - startedAtMs)
+    : 0;
+  const totalDurationMs = studyPhaseTimerElapsedMs({ segments }, completedAtMs);
+  return {
+    schemaVersion: 2,
+    startedAt: segments[0]?.startedAt || null,
+    completedAt,
+    durationMs: totalDurationMs,
+    totalDurationMs,
+    segments,
+  };
+}
+
+export function formatStudyPhaseTimer(elapsedMs) {
+  const totalSeconds = Math.max(0, Math.floor(Number(elapsedMs) / 1000) || 0);
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+  const two = (value) => String(value).padStart(2, "0");
+  return hours > 0 ? `${hours}:${two(minutes)}:${two(seconds)}` : `${two(minutes)}:${two(seconds)}`;
 }
 
 export function makeAnnotation({ id, text = "", region = null, createdAt = null } = {}) {

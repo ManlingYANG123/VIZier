@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildStudyBundle,
+  buildStudyBackupFiles,
   buildStudyScaleRecord,
   buildStudyDashboardArtifacts,
   buildUncompressedZip,
@@ -192,4 +193,24 @@ test("buildUncompressedZip stores named files that start with a ZIP signature", 
   const asText = new TextDecoder().decode(zip);
   assert.match(asText, /dashboards\/final\.json/);
   assert.match(asText, /dashboards\/final\.png/);
+});
+
+test("a complete backup contains the session record and every autosaved artifact", () => {
+  const files = buildStudyBackupFiles([
+    { path: "study-runner-state.json", text: '{"phase":"complete"}' },
+    { path: "questionnaires/pre.json", text: '{"assessment":"pre"}' },
+    { path: "questionnaires/post.json", text: '{"assessment":"post"}' },
+    { path: "dashboards/final.json", text: '{"dashboard":{}}' },
+    { path: "dashboards/final.png", encoding: "base64", data: "iVBORw0KGgo=" },
+  ], { participantId: "P01", events: [{ eventName: "session_ended" }] });
+  assert.deepEqual(files.map((file) => file.name), [
+    "session.json",
+    "study-runner-state.json",
+    "questionnaires/pre.json",
+    "questionnaires/post.json",
+    "dashboards/final.json",
+    "dashboards/final.png",
+  ]);
+  assert.match(new TextDecoder().decode(files[0].bytes), /session_ended/);
+  assert.equal(files[5].bytes[0], 0x89);
 });

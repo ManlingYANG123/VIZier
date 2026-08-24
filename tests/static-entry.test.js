@@ -203,28 +203,37 @@ test("group study routes boot the neutral runner before VIZier", async () => {
   assert.match(bootstrap, /studyGroupIdFromPath/);
   assert.match(bootstrap, /bootStudyRunner/);
   assert.doesNotMatch(runner, /Review the dashboard/);
-  assert.match(runner, /id="studyZoomOut"/);
-  assert.match(runner, /id="studyZoomIn"/);
-  assert.match(runner, /id="studyZoomFit"/);
-  assert.match(runner, /assessment_canvas_zoomed/);
-  assert.match(runner, /assessment_canvas_panned/);
+  assert.match(runner, /three stages: practice, formal use/);
+  assert.match(runner, /Part \$\{part\} of 3/);
   assert.match(runner, /study_phase_intro_viewed/);
   assert.match(runner, /study_phase_intro_completed/);
+  assert.match(runner, /study_phase_timer_started/);
+  assert.match(runner, /study_phase_timer_completed/);
+  assert.match(runner, /id="studyStageTimer"/);
+  assert.match(runner, /id="studyStartStageTimer">Start timer/);
+  assert.match(runner, /"operation-page"/);
+  assert.doesNotMatch(runner, /startPhaseTimer\(phase, completedAt\)/);
+  assert.match(runner, /className: "is-phase-intro", showTimer: false/);
   assert.match(runner, /renderPhaseIntro/);
   assert.match(runner, /study-phase-axis/);
   assert.match(runner, /aria-current="step"/);
-  assert.match(runner, /Select one response for every statement/);
-  assert.match(runner, /study-scale-interview-question/);
-  assert.match(runner, /Questionnaire & interview/);
-  assert.match(runner, /Part \$\{part\} of 3/);
-  assert.match(runner, /Preview PDF/);
-  assert.match(runner, /design_document_previewed/);
-  assert.match(runner, /vizier-study-scales-v2/);
+  assert.doesNotMatch(runner, /removed_pre_questionnaire_skipped/);
+  assert.match(runner, /Questionnaire &amp; interview/);
+  assert.match(runner, /openQuestionResponseMode: "spoken-interview"/);
   assert.match(runner, /scale_response_recorded/);
+  assert.match(runner, /questionResponses: serializeQuestionResponses/);
   assert.match(runner, /scaleResponses: serializeScaleResponses/);
-  assert.doesNotMatch(runner, /<textarea name="q/);
+  assert.doesNotMatch(runner, /<textarea id="studyQuestion-/);
+  assert.match(runner, /class="study-scale-interview-question"/);
+  assert.doesNotMatch(runner, /study-interview-section/);
+  assert.doesNotMatch(runner, /<details class="study-interview-prompts"/);
   assert.match(runner, /openStudyMaterialForRunner/);
+  assert.match(runner, /studyPhaseUsesVizier\(runnerState\.phase\)/);
+  assert.match(runner, /isDashboardTaskPhase\(runnerState\.phase\)/);
+  assert.match(runner, /className = "study-workspace-pdf"/);
+  assert.match(runner, /window\.open\(material\.pdfUrl, "_blank", "noopener,noreferrer"\)/);
   assert.match(styles, /\.study-assessment-layout/);
+  assert.match(styles, /\.study-dashboard-wrap\s*\{[^}]*display:\s*flex/);
   assert.match(styles, /\.study-dashboard-world/);
   assert.match(styles, /\.study-dashboard-zoom-controls/);
   assert.match(styles, /\.study-dashboard-stage\.is-panning/);
@@ -238,12 +247,89 @@ test("group study routes boot the neutral runner before VIZier", async () => {
   assert.match(styles, /\.study-workspace-pdf/);
 });
 
-test("the public app removes basic auth, completion cheerleading, and Defer", async () => {
-  const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
-  const server = await readFile(new URL("../re_api/src/server.ts", import.meta.url), "utf8");
-  assert.doesNotMatch(server, /BASIC_AUTH|requireBasicAuth|WWW-Authenticate|timingSafeEqual/);
-  assert.doesNotMatch(source, /Nicely done — this draft is looking strong|No open recommendations remain/);
-  assert.doesNotMatch(source, /id="focusDefer"|decision: "defer"/);
+test("guided practice uses presets while the dashboard task keeps the live engine", async () => {
+  const app = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
+  const runner = await readFile(new URL("../src/study-runner.js", import.meta.url), "utf8");
+  const tutorial = await readFile(new URL("../src/practice-tutorial.js", import.meta.url), "utf8");
+  const presets = await readFile(new URL("../src/practice-presets.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+
+  assert.match(runner, /practice: runnerState\.phase === "training"/);
+  assert.match(runner, /if \(runnerState\.phase === "training"\) \{\s+await app\.startGuidedPracticeTutorial/);
+  assert.match(app, /if \(!practiceUsesPreset\(\)\) return streamApply/);
+  assert.match(app, /practiceReviewResponse\(practiceRuntime\.preset/);
+  assert.match(app, /executionMode: practiceUsesPreset\(\) \? "practice-preset" : "live-engine"/);
+  assert.match(presets, /Should I change the layout\?/);
+  assert.match(presets, /Is this title clear enough\?/);
+  assert.match(tutorial, /const tutorialStepCount = milestones\.length \+ 1/);
+  assert.match(tutorial, /Step \$\{displayedStep\} of \$\{tutorialStepCount\}/);
+  assert.doesNotMatch(tutorial, /Step \$\{[^}]+\} of 8/);
+  // Practice begins with a three-panel overview and requires the participant
+  // to confirm the prepared context through the real workspace control.
+  assert.match(app, /This is the Context panel/);
+  assert.match(app, /This is the Canvas/);
+  assert.match(app, /This is the Critique panel/);
+  assert.doesNotMatch(app, /orientation-workspace/);
+  assert.match(app, /expect: "context:confirmed"/);
+  assert.match(app, /emitPracticeAction\("context:confirmed"/);
+  // Tutorial state starts with an edited Context and uses deterministic local
+  // preset responses. Checkpoint saving is taught exactly once.
+  assert.match(app, /fieldStatus: \{ goal: "edited", audience: "edited", constraints: "edited" \}/);
+  assert.match(app, /practiceReviewResponse\(practiceRuntime\.preset/);
+  assert.equal((app.match(/expect: "checkpoint:saved"/g) || []).length, 1);
+  assert.doesNotMatch(app, /practiceCheckpointActions|focused-checkpoint|local-checkpoint|save-batch/);
+  // Guidance is a square-cornered, colorful clockwise outline, never a
+  // page-dimming mask.
+  assert.match(styles, /@keyframes practice-guide-orbit/);
+  assert.match(styles, /\.practice-guide-spotlight::after/);
+  assert.match(styles, /\.practice-guide-spotlight\s*\{[^}]*border-radius:\s*0/);
+  assert.match(styles, /\.practice-guide-spotlight::after\s*\{[\s\S]*?#4285f4[\s\S]*?#9b72cb[\s\S]*?#34a853/);
+  assert.doesNotMatch(styles, /\.practice-guide-spotlight\s*\{[^}]*9999px/);
+  // The card has history-aware previous/next controls. It does not create a
+  // simulated tutorial cursor; title-area selection is a real participant drag.
+  assert.match(tutorial, /<a class="practice-guide-back"/);
+  assert.match(tutorial, /practice-guide-back[\s\S]*?practice-guide-kicker[\s\S]*?practice-guide-next/);
+  assert.doesNotMatch(tutorial, /<button[^>]+class="practice-guide-(?:back|next)"/);
+  assert.match(tutorial, /function previous\(\)/);
+  assert.match(tutorial, /completedOrdinals/);
+  assert.match(tutorial, /setLinkDisabled\(next, completed\)/);
+  assert.match(tutorial, /advance\(\{ markComplete: true \}\)/);
+  assert.match(tutorial, /markComplete: !currentAction\(\)\?\.expect/);
+  assert.doesNotMatch(tutorial, /Complete the highlighted action to continue|nextDisabled|frontierOrdinal/);
+  assert.doesNotMatch(tutorial, /practice-guide-cursor|runDemo|demoAnimation/);
+  assert.match(app, /finishLocalReviewSelection[\s\S]*?emitPracticeAction\("area:selection-ready"/);
+  assert.doesNotMatch(app, /preparePracticeTitleSelection|prepare-title-selection/);
+  // Scroll the recommendation into view, then follow its live rectangle until
+  // the nested critique rail has stopped moving.
+  assert.match(tutorial, /function followTargetUntilStable\(selector\)/);
+  assert.match(tutorial, /scrollIntoView[\s\S]*?followTargetUntilStable\(action\.target\)/);
+  assert.match(tutorial, /stableFrames < 8/);
+  assert.match(tutorial, /addEventListener\("scrollend"/);
+  assert.match(tutorial, /new MutationObserver\(handleWorkspaceMutation\)/);
+  assert.match(tutorial, /childList: true,[\s\S]*?subtree: true/);
+  assert.match(tutorial, /layoutObserver\?\.disconnect\(\)/);
+  assert.match(tutorial, /getComputedStyle\(ancestor\)/);
+  assert.doesNotMatch(tutorial, /targetPadding/);
+  // Participants can pause the overlay, use the complete VIZier workspace,
+  // and resume at the same tutorial action without resetting progress.
+  assert.match(tutorial, /Explore freely/);
+  assert.match(tutorial, /Resume tutorial/);
+  assert.match(tutorial, /function setPaused\(nextPaused\)/);
+  assert.match(tutorial, /root\.hidden = paused/);
+  assert.match(tutorial, /modeToggle\.addEventListener\("click", \(\) => setPaused\(!paused\)\)/);
+  assert.match(app, /practice_tutorial_mode_changed/);
+  assert.match(app, /practiceRuntime\.tutorialMode = mode === "tutorial"/);
+  assert.match(app, /practiceMode: practiceRuntime\.tutorialMode \? "tutorial" : "free-explore"/);
+  assert.match(app, /function practiceUsesPreset\(\)/);
+  assert.match(app, /const resp = practiceUsesPreset\(\)/);
+  assert.match(styles, /\.practice-guide-mode-toggle\[data-mode="explore"\]/);
+});
+
+test("Heroku runtime packaging includes maintainable backend data sources", async () => {
+  const deploy = await readFile(new URL("../scripts/deploy-heroku.sh", import.meta.url), "utf8");
+
+  assert.match(deploy, /RUNTIME_PATHS=\([\s\S]*?"re_api\/data"/);
+  assert.match(deploy, /RUNTIME_PATHS=\([\s\S]*?"slack_codebook"/);
 });
 
 test("focused critique details render before preview hydration", async () => {
@@ -876,7 +962,7 @@ test("session end archives high-resolution PNG and reloadable JSON for checkpoin
   assert.match(source, /full: faithful \|\| full/);
   assert.match(source, /async function collectStudyDashboardArtifacts\(\)/);
   assert.match(source, /captured\.snapshot \|\| buildDashboardCaptureSnapshot\(\)/);
-  assert.match(source, /exportStudyDashboardsZip\(out\.artifacts, out\.bundle\)/);
+  assert.match(source, /exportStudyBackupZip\(out\.artifacts, out\.bundle\)/);
   assert.match(source, /saveStudyBundle\("end"\)/);
 });
 
@@ -898,10 +984,19 @@ test("study telemetry pairs review requests with displayed or failed, and checkp
   assert.match(source, /endStudySession\(\{ reason: "end" \}\)/);
   assert.match(source, /final_state_captured/);
   assert.match(source, /decision: "apply"/);
+  assert.doesNotMatch(source, /id="focusDefer"|decision: "defer"/);
   assert.match(source, /critiques_unresolved/);
   assert.match(source, /dwellMs/);
   assert.match(source, /critique_request_failed/);
   assert.match(source, /const recommendationIds = \[\.\.\.\(state\.workingDraft\.applicationOrder \|\| \[\]\)\];/);
   assert.match(source, /const committedIds = Array\.isArray\(result\.applicationOrder\)/);
   assert.match(source, /workingDraft\.applicationOrder \|\| \[\]\)\.length/);
+});
+
+test("the public app has no basic-auth login gate or completion cheerleading", async () => {
+  const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
+  const server = await readFile(new URL("../re_api/src/server.ts", import.meta.url), "utf8");
+
+  assert.doesNotMatch(server, /BASIC_AUTH|requireBasicAuth|WWW-Authenticate|timingSafeEqual/);
+  assert.doesNotMatch(source, /Nicely done — this draft is looking strong|No open recommendations remain/);
 });

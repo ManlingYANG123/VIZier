@@ -1,8 +1,8 @@
 /*
-THESIS: One quiet study path reveals only the tool needed now, moving from practice to formal use to the final questionnaire and interview.
+THESIS: One quiet study path reveals only the tool needed now, moving from practice to formal use to a closing questionnaire and interview.
 OWN-WORLD: The incumbent VIZier grayscale system, firm rules, compact controls, and one dark primary action continue across a wider research canvas.
-STORY: A participant enters an anonymous ID, practices with guidance, uses VIZier formally, and completes the final questionnaire and interview.
-FIRST VIEWPORT: A restrained study header and single participant-ID field lead directly to Begin.
+STORY: A participant enters an anonymous ID, practices with guidance, uses VIZier formally, completes the questionnaire and interview, and finishes without seeing counterbalancing codes.
+FIRST VIEWPORT: A restrained study header and single participant-ID field lead directly to Begin; each stage exposes only the controls needed for that work.
 FORM: Operate mode, staged as a three-part session runner with a persistent progress line and phase-specific workspace.
 */
 import embed from "vega-embed";
@@ -12,7 +12,7 @@ import {
   buildStudyBundle,
   discardStudySession,
   endStudySession,
-  exportStudyBundleLocal,
+  exportStudyBackupZip,
   isStudyActive,
   recordStudyAction,
   restoreStudySession,
@@ -20,24 +20,37 @@ import {
   setStudyPhase,
   startStudySession,
   studySessionInfo,
+  studyTaskCapture,
 } from "./study-session.js";
 import {
   POST_QUESTIONS,
   scaleSectionsForAssessment,
+  serializeQuestionResponses,
   serializeScaleResponses,
   STUDY_GROUPS,
   STUDY_PHASE_INTROS,
   STUDY_RUNNER_PHASES,
   assessmentKeyForPhase,
   createStudyRunnerState,
+  formatStudyPhaseTimer,
+  isDashboardTaskPhase,
   isStudyRunnerState,
   makeAnnotation,
   materialForPhase,
   nextStudyPhase,
   normalizeStudyPhase,
+  operationStudyScreenId,
+  previousStudyScreenId,
+  startStudyPhaseTimerSegment,
+  stopStudyPhaseTimerSegment,
+  studyPhaseTimerIsRunning,
   studyPhaseLabel,
   studyPhaseNumber,
+  studyPhaseTimerElapsedMs,
+  studyPhaseUsesVizier,
   studyRunnerStorageKey,
+  studyScreenDescriptor,
+  studyScreenIdForState,
 } from "./study-runner-model.js";
 
 let runnerState = null;
@@ -50,6 +63,9 @@ let assessmentViews = [];
 let assessmentCanvas = null;
 let assessmentCanvasAbortController = null;
 let assessmentCanvasTelemetryTimer = null;
+let stageTimerInterval = null;
+let studyNavigationBusy = false;
+let studyBrowserHistoryBound = false;
 
 function escapeHTML(value) {
   return String(value ?? "")
@@ -71,10 +87,9 @@ function runnerKey() {
 function loadRunnerState() {
   try {
     const parsed = JSON.parse(localStorage.getItem(runnerKey()) || "null");
-    if (!isStudyRunnerState(parsed, runnerGroup.id)) return null;
-    parsed.phase = normalizeStudyPhase(parsed.phase);
-    if (parsed.phase === "post_assessment") parsed.assessmentStep = "questionnaire";
-    return parsed;
+    if (!parsed || typeof parsed !== "object") return null;
+    const normalized = { ...parsed, phase: normalizeStudyPhase(parsed.phase) };
+    return isStudyRunnerState(normalized, runnerGroup.id) ? normalized : null;
   } catch {
     return null;
   }
@@ -87,13 +102,373 @@ function persistRunnerState() {
 }
 
 function ensureAssessmentState(key) {
-  const fallback = { annotations: [], answers: {}, scales: {}, filters: {}, submittedAt: null };
+  const fallback = {
+    annotations: [],
+    answers: {},
+    scales: {},
+    filters: {},
+    canvasView: null,
+    questionnaireScrollTop: 0,
+    submissions: [],
+    submittedAt: null,
+  };
   runnerState.assessments ||= {};
   runnerState.assessments[key] = { ...fallback, ...(runnerState.assessments[key] || {}) };
   runnerState.assessments[key].annotations = Array.isArray(runnerState.assessments[key].annotations)
     ? runnerState.assessments[key].annotations
     : [];
+  runnerState.assessments[key].submissions = Array.isArray(runnerState.assessments[key].submissions)
+    ? runnerState.assessments[key].submissions
+    : [];
   return runnerState.assessments[key];
+}
+
+function appendAssessmentSubmission(assessment, submission) {
+  assessment.submissions ||= [];
+  assessment.submissions.push({
+    id: `submission-${assessment.submissions.length + 1}`,
+    ...clone(submission),
+  });
+}
+
+function ensureRunnerNavigation() {
+  if (!runnerState) return null;
+  const currentScreenId = studyScreenIdForState(runnerState);
+  const existing = runnerState.navigation && typeof runnerState.navigation === "object"
+    ? runnerState.navigation
+    : {};
+  const history = Array.isArray(existing.history)
+    ? existing.history.filter((screenId) => studyScreenDescriptor(screenId))
+    : [];
+  let historyIndex = Number.isInteger(existing.historyIndex)
+    ? Math.max(0, Math.min(existing.historyIndex, Math.max(0, history.length - 1)))
+    : history.length - 1;
+  if (!history.length) {
+    history.push(currentScreenId);
+    historyIndex = 0;
+  } else if (history[historyIndex] !== currentScreenId) {
+    history.splice(historyIndex + 1);
+    history.push(currentScreenId);
+    historyIndex = history.length - 1;
+  }
+  runnerState.navigation = {
+    currentScreenId,
+    history,
+    historyIndex,
+    reopenings: Array.isArray(existing.reopenings) ? existing.reopenings : [],
+  };
+  runnerState.workspaces ||= {};
+  return runnerState.navigation;
+}
+
+function currentStudyScreenId() {
+  return ensureRunnerNavigation()?.currentScreenId || null;
+}
+
+function previousScreenForCurrent() {
+  const navigation = ensureRunnerNavigation();
+  if (!navigation || navigation.currentScreenId === "complete") return null;
+  if (navigation.historyIndex > 0) {
+    return navigation.history[navigation.historyIndex - 1];
+  }
+  return previousStudyScreenId(navigation.currentScreenId);
+}
+
+function ensurePhaseTimers() {
+  runnerState.phaseTimers ||= {};
+  return runnerState.phaseTimers;
+}
+
+function activePhaseTimer() {
+  if (!runnerState || runnerState.phase === "complete") return null;
+  return ensurePhaseTimers()[normalizeStudyPhase(runnerState.phase)] || null;
+}
+
+function clearStageTimerTicker() {
+  if (stageTimerInterval !== null) clearInterval(stageTimerInterval);
+  stageTimerInterval = null;
+}
+
+function updateStageTimerDisplay() {
+  const output = document.getElementById("studyStageTimer");
+  const timer = activePhaseTimer();
+  if (!output || !timer) return;
+  output.textContent = formatStudyPhaseTimer(studyPhaseTimerElapsedMs(timer));
+}
+
+function wireStageTimerControl() {
+  const button = document.getElementById("studyStartStageTimer");
+  if (!button) return;
+  button.addEventListener("click", () => {
+    startPhaseTimer(runnerState.phase, new Date().toISOString(), "operation-page");
+    button.remove();
+    document.querySelector(".study-stage-timer")?.classList.add("is-running");
+    startStageTimerTicker();
+    document.dispatchEvent(new CustomEvent("vizier:practice-action", {
+      detail: { type: "timer:started", phase: runnerState.phase },
+    }));
+  }, { once: true });
+}
+
+function startStageTimerTicker() {
+  clearStageTimerTicker();
+  if (!document.getElementById("studyStageTimer") || !studyPhaseTimerIsRunning(activePhaseTimer())) return;
+  updateStageTimerDisplay();
+  stageTimerInterval = setInterval(updateStageTimerDisplay, 1000);
+}
+
+function stageTimerMarkup(className = "") {
+  if (!runnerState || runnerState.phase === "complete") return "";
+  const timer = activePhaseTimer();
+  const running = studyPhaseTimerIsRunning(timer);
+  const elapsed = studyPhaseTimerElapsedMs(timer);
+  return `<div class="study-stage-timer ${escapeHTML(className)}" aria-label="Elapsed time in ${escapeHTML(studyPhaseLabel(runnerState.phase))}">
+    <span>Stage time</span><time id="studyStageTimer">${formatStudyPhaseTimer(elapsed)}</time>
+    ${running ? "" : '<button type="button" id="studyStartStageTimer">Start timer</button>'}
+  </div>`;
+}
+
+function startPhaseTimer(phase, startedAt = new Date().toISOString(), source = "participant") {
+  const normalized = normalizeStudyPhase(phase);
+  const timers = ensurePhaseTimers();
+  if (studyPhaseTimerIsRunning(timers[normalized])) return timers[normalized];
+  const timer = startStudyPhaseTimerSegment(timers[normalized], {
+    startedAt,
+    reason: timers[normalized] ? "reopened" : "initial",
+    source,
+  });
+  timers[normalized] = timer;
+  persistRunnerState();
+  const segment = timer.segments[timer.segments.length - 1];
+  recordStudyAction("study_phase_timer_started", `Started timer for ${studyPhaseLabel(normalized)}`, {
+    phase: normalized,
+    part: studyPhaseNumber(normalized),
+    startedAt,
+    source,
+    segmentId: segment.id,
+    segmentReason: segment.reason,
+    segmentNumber: timer.segments.length,
+    accumulatedDurationMs: studyPhaseTimerElapsedMs(timer, Date.parse(startedAt)),
+  });
+  return timer;
+}
+
+function stopPhaseTimer(phase, completedAt = new Date().toISOString()) {
+  const normalized = normalizeStudyPhase(phase);
+  const timer = ensurePhaseTimers()[normalized];
+  if (!studyPhaseTimerIsRunning(timer)) return timer || null;
+  const completed = stopStudyPhaseTimerSegment(timer, completedAt);
+  const segment = completed.segments[completed.segments.length - 1];
+  const durationMs = completed.totalDurationMs;
+  runnerState.phaseTimers[normalized] = completed;
+  persistRunnerState();
+  clearStageTimerTicker();
+  recordStudyAction("study_phase_timer_completed", `Completed timer for ${studyPhaseLabel(normalized)}`, {
+    phase: normalized,
+    part: studyPhaseNumber(normalized),
+    startedAt: segment.startedAt,
+    completedAt,
+    durationMs,
+    durationSeconds: Math.round(durationMs / 1000),
+    segmentId: segment.id,
+    segmentReason: segment.reason,
+    segmentDurationMs: segment.durationMs,
+    segmentDurationSeconds: Math.round(segment.durationMs / 1000),
+    segmentNumber: completed.segments.length,
+    totalDurationMs: durationMs,
+  });
+  return completed;
+}
+
+function captureAssessmentInterfaceState(screen) {
+  const key = screen.phase === "pre_assessment" ? "pre" : "post";
+  const assessment = ensureAssessmentState(key);
+  if (assessmentCanvas) {
+    assessment.canvasView = {
+      x: assessmentCanvas.x,
+      y: assessmentCanvas.y,
+      scale: assessmentCanvas.scale,
+    };
+  }
+  const shell = document.querySelector(".study-runner-shell");
+  if (screen.view === "questionnaire" && shell) {
+    assessment.questionnaireScrollTop = shell.scrollTop;
+  }
+  const noteInput = document.getElementById("studyNoteText");
+  if (noteInput) {
+    assessment.noteDraft = {
+      text: noteInput.value,
+      region: draftRegion ? clone(draftRegion) : null,
+      editingAnnotationId,
+      kind: document.getElementById("studyNotesPanel")?.dataset.composing || "global",
+    };
+  } else {
+    assessment.noteDraft = null;
+  }
+}
+
+async function captureCurrentInterfaceState() {
+  if (!runnerState) return;
+  const screen = studyScreenDescriptor(currentStudyScreenId());
+  if (!screen) return;
+  if (screen.view === "review" || screen.view === "questionnaire") {
+    captureAssessmentInterfaceState(screen);
+  }
+  if (screen.view === "workspace") {
+    const app = await import("./app.js");
+    if (typeof app.captureStudyRunnerWorkspaceState === "function") {
+      runnerState.workspaces ||= {};
+      runnerState.workspaces[screen.phase] = app.captureStudyRunnerWorkspaceState();
+    }
+  }
+  persistRunnerState();
+}
+
+function applyStudyScreenState(screenId, direction = "forward") {
+  const screen = studyScreenDescriptor(screenId);
+  if (!screen) throw new Error(`Unknown study screen: ${screenId}`);
+  const navigation = ensureRunnerNavigation();
+  const currentId = navigation.currentScreenId;
+  if (direction === "back") {
+    if (navigation.historyIndex > 0 && navigation.history[navigation.historyIndex - 1] === screenId) {
+      navigation.historyIndex -= 1;
+    } else {
+      navigation.history.splice(navigation.historyIndex, 0, screenId);
+    }
+  } else if (currentId !== screenId) {
+    navigation.history.splice(navigation.historyIndex + 1);
+    navigation.history.push(screenId);
+    navigation.historyIndex = navigation.history.length - 1;
+  }
+  navigation.currentScreenId = screenId;
+  runnerState.phase = screen.phase;
+  if (screen.view === "review") runnerState.assessmentStep = "review";
+  if (screen.view === "questionnaire") runnerState.assessmentStep = "questionnaire";
+}
+
+async function navigateToStudyScreen(screenId, {
+  direction = "forward",
+  source = "study-control",
+  capture = true,
+  historyMode = direction === "forward" ? "push" : "replace",
+} = {}) {
+  if (studyNavigationBusy) return false;
+  const target = studyScreenDescriptor(screenId);
+  const fromId = currentStudyScreenId();
+  const from = studyScreenDescriptor(fromId);
+  if (!target || !from || target.id === from.id) return false;
+  studyNavigationBusy = true;
+  try {
+    if (capture) await captureCurrentInterfaceState();
+    if (direction === "back" && from.phase !== target.phase) {
+      if (studyPhaseTimerIsRunning(activePhaseTimer())) {
+        stopPhaseTimer(from.phase, new Date().toISOString());
+      }
+      const reopening = {
+        id: `reopen-${Date.now().toString(36)}`,
+        fromScreenId: from.id,
+        toScreenId: target.id,
+        fromPhase: from.phase,
+        phase: target.phase,
+        reopenedAt: new Date().toISOString(),
+      };
+      ensureRunnerNavigation().reopenings.push(reopening);
+      recordStudyAction("study_phase_reopened", `Reopened ${studyPhaseLabel(target.phase)}`, {
+        ...reopening,
+        source,
+        timerRequiresManualRestart: true,
+      });
+    }
+    applyStudyScreenState(screenId, direction);
+    persistRunnerState();
+    if (historyMode === "push") {
+      window.history.pushState({ vizierStudyRunner: true, screenId }, "", location.href);
+    } else if (historyMode === "replace") {
+      window.history.replaceState({ vizierStudyRunner: true, screenId }, "", location.href);
+    }
+    setStudyPhase(target.phase);
+    recordStudyAction(direction === "back" ? "study_screen_restored" : "study_screen_opened",
+      direction === "back" ? `Returned to ${target.id}` : `Opened ${target.id}`, {
+        fromScreenId: from.id,
+        screenId: target.id,
+        phase: target.phase,
+        direction,
+        source,
+      });
+    // The VIZier module owns the complete #app DOM. A hard reload is required
+    // when crossing its boundary; otherwise the cached module cannot rebuild
+    // the workspace after a neutral runner page replaced that DOM.
+    if (from.view === "workspace" || target.view === "workspace") {
+      location.reload();
+      return true;
+    }
+    await renderCurrentPhase();
+    return true;
+  } finally {
+    studyNavigationBusy = false;
+  }
+}
+
+function bindStudyBrowserHistory() {
+  if (studyBrowserHistoryBound) return;
+  studyBrowserHistoryBound = true;
+  window.addEventListener("popstate", (event) => {
+    const targetId = event.state?.vizierStudyRunner ? event.state.screenId : null;
+    const target = studyScreenDescriptor(targetId);
+    const current = studyScreenDescriptor(currentStudyScreenId());
+    if (!runnerState || !target || !current || target.id === current.id) return;
+    if (current.view === "complete") {
+      window.history.pushState({ vizierStudyRunner: true, screenId: current.id }, "", location.href);
+      return;
+    }
+    const navigation = ensureRunnerNavigation();
+    const targetIndex = navigation.history.lastIndexOf(target.id);
+    const direction = targetIndex >= 0 && targetIndex < navigation.historyIndex ? "back" : "forward";
+    if (direction === "back" && current.phase !== target.phase) {
+      const confirmed = window.confirm(
+        `Return to ${studyPhaseLabel(target.phase)}? This completed stage will reopen. The participant will need to start its timer again before continuing.`,
+      );
+      if (!confirmed) {
+        window.history.pushState({ vizierStudyRunner: true, screenId: current.id }, "", location.href);
+        return;
+      }
+    }
+    void navigateToStudyScreen(target.id, {
+      direction,
+      source: "browser-history",
+      historyMode: "none",
+    });
+  });
+}
+
+async function returnToPreviousStudyScreen(source = "back-control") {
+  const current = studyScreenDescriptor(currentStudyScreenId());
+  const previousId = previousScreenForCurrent();
+  const previous = studyScreenDescriptor(previousId);
+  if (!current || !previous) return false;
+  if (current.phase !== previous.phase) {
+    const confirmed = window.confirm(
+      `Return to ${studyPhaseLabel(previous.phase)}? This completed stage will reopen. The participant will need to start its timer again before continuing.`,
+    );
+    if (!confirmed) return false;
+  }
+  return navigateToStudyScreen(previous.id, { direction: "back", source });
+}
+
+function studyBackButtonMarkup() {
+  const previousId = previousScreenForCurrent();
+  if (!previousId) return "";
+  const previous = studyScreenDescriptor(previousId);
+  const label = previous?.phase === runnerState.phase
+    ? "Back"
+    : `Reopen ${studyPhaseLabel(previous?.phase)}`;
+  return `<button class="study-runner-back" id="studyRunnerBack" type="button" aria-label="${escapeHTML(label)}"><span aria-hidden="true">←</span><span>Back</span></button>`;
+}
+
+function wireStudyBackControl() {
+  document.getElementById("studyRunnerBack")?.addEventListener("click", () => {
+    void returnToPreviousStudyScreen();
+  });
 }
 
 function progressMarkup() {
@@ -107,17 +482,24 @@ function progressMarkup() {
     </div>`;
 }
 
-function neutralShell(content, { className = "" } = {}) {
+function neutralShell(content, { className = "", showTimer = true } = {}) {
+  clearStageTimerTicker();
   document.title = `${studyPhaseLabel(runnerState?.phase)} · VIZier Study`;
   document.querySelector("#app").innerHTML = `
     <div class="study-runner-shell ${className}">
       <header class="study-runner-topbar">
-        <div class="study-runner-brand"><span aria-hidden="true">▦</span><strong>VIZier Study</strong></div>
+        <div class="study-runner-leading">
+          <div class="study-runner-brand"><span aria-hidden="true">▦</span><strong>VIZier Study</strong></div>
+          ${runnerState ? studyBackButtonMarkup() : ""}
+        </div>
         ${runnerState ? progressMarkup() : ""}
-        <span class="study-runner-save-state">Progress saves automatically</span>
+        <div class="study-runner-status">${runnerState && showTimer ? stageTimerMarkup() : ""}<span class="study-runner-save-state">Progress saves automatically</span></div>
       </header>
       ${content}
     </div>`;
+  startStageTimerTicker();
+  wireStageTimerControl();
+  wireStudyBackControl();
 }
 
 function telemetryPhase(phase) {
@@ -210,13 +592,14 @@ function renderPhaseIntro() {
         <div class="study-phase-intro-content">
           <h1>${escapeHTML(studyPhaseLabel(phase))}</h1>
           <p>${escapeHTML(intro.description)}</p>
-          <button type="button" id="studyBeginPhase">${escapeHTML(intro.action)}</button>
+          <div class="study-phase-intro-action"><button type="button" id="studyBeginPhase">${escapeHTML(intro.action)}</button></div>
         </div>
       </div>
-    </main>`, { className: "is-phase-intro" });
+    </main>`, { className: "is-phase-intro", showTimer: false });
   document.getElementById("studyBeginPhase").addEventListener("click", () => {
     const completedAt = new Date().toISOString();
     runnerState.phaseIntros[phase] = { ...existing, completedAt };
+    telemetryPhase(phase);
     persistRunnerState();
     recordStudyAction("study_phase_intro_completed", "Continued from study phase introduction", {
       phase,
@@ -225,8 +608,8 @@ function renderPhaseIntro() {
       completedAt,
       groupId: runnerGroup.id,
     });
-    telemetryPhase(phase);
-    void renderCurrentPhase();
+    const nextScreenId = operationStudyScreenId(phase);
+    if (nextScreenId) void navigateToStudyScreen(nextScreenId, { source: "phase-intro" });
   });
   return true;
 }
@@ -490,8 +873,17 @@ function bindAssessmentCanvas(normalized) {
   }, { signal });
 
   controls?.addEventListener("dblclick", (event) => event.stopPropagation(), { signal });
-  fitAssessmentCanvas();
-  requestAnimationFrame(() => fitAssessmentCanvas());
+  const savedView = currentAssessment()?.canvasView;
+  if (savedView && ["x", "y", "scale"].every((key) => Number.isFinite(Number(savedView[key])))) {
+    assessmentCanvas.x = Number(savedView.x);
+    assessmentCanvas.y = Number(savedView.y);
+    assessmentCanvas.scale = Number(savedView.scale);
+    applyAssessmentCanvasView();
+    requestAnimationFrame(() => applyAssessmentCanvasView());
+  } else {
+    fitAssessmentCanvas();
+    requestAnimationFrame(() => fitAssessmentCanvas());
+  }
   dashboardResizeObserver = new ResizeObserver(() => applyAssessmentCanvasView());
   dashboardResizeObserver.observe(stage);
 }
@@ -614,6 +1006,11 @@ function openAnnotationComposer(region = null, annotationId = null) {
 }
 
 function closeAnnotationComposer() {
+  const assessmentKey = assessmentKeyForPhase(runnerState?.phase);
+  if (assessmentKey) {
+    ensureAssessmentState(assessmentKey).noteDraft = null;
+    persistRunnerState();
+  }
   annotationMode = false;
   draftRegion = null;
   editingAnnotationId = null;
@@ -713,6 +1110,9 @@ async function renderAssessmentReview() {
   const key = assessmentKeyForPhase(runnerState.phase);
   const assessment = ensureAssessmentState(key);
   const material = materialForPhase(runnerGroup.id, runnerState.phase);
+  const savedDraft = assessment.noteDraft;
+  draftRegion = savedDraft?.region ? clone(savedDraft.region) : null;
+  editingAnnotationId = savedDraft?.editingAnnotationId || null;
   neutralShell(`
     <main class="study-assessment-layout">
       <section class="study-assessment-main" aria-labelledby="studyAssessmentTitle">
@@ -723,9 +1123,14 @@ async function renderAssessmentReview() {
         <div class="study-dashboard-loading" id="studyDashboardMount" role="status">Loading dashboard…</div>
       </section>
       <aside class="study-notes-panel" id="studyNotesPanel" aria-label="Dashboard notes"></aside>
-      <footer class="study-assessment-footer"><span>Your notes save automatically.</span><button type="button" id="studyAssessmentReviewDone">Continue to questions</button></footer>
+      <footer class="study-assessment-footer"><span>Your notes save automatically.</span><button type="button" id="studyAssessmentReviewDone">${key === "pre" ? "Continue to guided practice" : "Continue to questions"}</button></footer>
     </main>`, { className: "is-assessment" });
+  if (savedDraft?.text) document.getElementById("studyNotesPanel").dataset.composing = savedDraft.kind || "global";
   renderNotesPanel();
+  if (savedDraft?.text) {
+    const draftInput = document.getElementById("studyNoteText");
+    if (draftInput) draftInput.value = savedDraft.text;
+  }
   const mount = document.getElementById("studyDashboardMount");
   try {
     const response = await fetch(material.dashboardUrl);
@@ -745,20 +1150,40 @@ async function renderAssessmentReview() {
     mount.querySelector("#studyRetryDashboard")?.addEventListener("click", () => void renderAssessmentReview());
   }
   document.getElementById("studyAssessmentReviewDone").addEventListener("click", () => {
+    const completedAt = new Date().toISOString();
+    appendAssessmentSubmission(assessment, {
+      kind: "dashboard-review",
+      phase: runnerState.phase,
+      materialCode: material.code,
+      submittedAt: completedAt,
+      annotations: assessment.annotations,
+      filters: assessment.filters,
+      canvasView: assessmentCanvas ? {
+        x: assessmentCanvas.x,
+        y: assessmentCanvas.y,
+        scale: assessmentCanvas.scale,
+      } : assessment.canvasView,
+    });
     recordStudyAction("assessment_review_submitted", "Submitted dashboard review", {
       phase: runnerState.phase,
       materialCode: material.code,
       annotationCount: assessment.annotations.length,
       annotations: clone(assessment.annotations),
     });
-    runnerState.assessmentStep = "questionnaire";
-    persistRunnerState();
-    void renderCurrentPhase();
+    if (key === "pre") {
+      assessment.reviewCompletedAt = completedAt;
+      stopPhaseTimer(runnerState.phase, completedAt);
+      recordStudyAction("pre_assessment_completed", "Completed initial dashboard assessment", {
+        phase: runnerState.phase,
+        materialCode: material.code,
+        annotationCount: assessment.annotations.length,
+        completedAt,
+      });
+      void navigateToStudyScreen("training:intro", { source: "pre-assessment-complete" });
+      return;
+    }
+    void navigateToStudyScreen("post_assessment:questionnaire", { source: "post-review-complete" });
   });
-}
-
-function questionFieldMarkup(question) {
-  return `<li class="study-question">${escapeHTML(question)}</li>`;
 }
 
 function scaleFieldMarkup(item, value, itemIndex) {
@@ -798,21 +1223,26 @@ function scaleSectionMarkup(section, responseMap) {
 
 function renderQuestionnaire() {
   cleanupAssessmentViews();
-  const key = "post";
+  const key = assessmentKeyForPhase(runnerState.phase);
   const assessment = ensureAssessmentState(key);
   const questions = POST_QUESTIONS;
   const scaleSections = scaleSectionsForAssessment(key);
   const scaleItems = scaleSections.flatMap((section) => section.items);
+  const scaleQuestionnaire = scaleItems.length ? `<div class="study-scale-questionnaire">
+    <div class="study-scale-progress" aria-live="polite"><div><strong id="studyScaleProgress">0 of ${scaleItems.length} answered</strong><span>Your responses save automatically.</span></div><span class="study-scale-progress-track" aria-hidden="true"><span id="studyScaleProgressFill"></span></span></div>
+    ${scaleSections.map((section) => scaleSectionMarkup(section, assessment.scales)).join("")}
+  </div>` : "";
   neutralShell(`
     <main class="study-questionnaire-page">
-      <header><span>Stage 3 of 3</span><h1>Questionnaire & interview</h1><p>Select one response for every statement, then answer the interview question in the same item aloud.</p></header>
+      <header><span>After formal use</span><h1>Questionnaire &amp; interview</h1><p>Select one response for every statement, then discuss the interview prompt in the same item aloud.</p></header>
       <form id="studyQuestionnaireForm">
-        <div class="study-scale-progress" aria-live="polite"><div><strong id="studyScaleProgress">0 of ${scaleItems.length} answered</strong><span>Your selections save automatically.</span></div><span class="study-scale-progress-track" aria-hidden="true"><span id="studyScaleProgressFill"></span></span></div>
-        ${scaleSections.map((section) => scaleSectionMarkup(section, assessment.scales)).join("")}
+        ${scaleQuestionnaire}
         <footer><button type="submit">Complete study</button></footer>
       </form>
     </main>`, { className: "is-questionnaire" });
-  document.querySelector(".study-runner-shell.is-questionnaire")?.scrollTo({ top: 0 });
+  document.querySelector(".study-runner-shell.is-questionnaire")?.scrollTo({
+    top: Number(assessment.questionnaireScrollTop) || 0,
+  });
   const form = document.getElementById("studyQuestionnaireForm");
   const saveDraft = () => {
     const data = new FormData(form);
@@ -847,20 +1277,29 @@ function renderQuestionnaire() {
     event.preventDefault();
     saveDraft();
     assessment.submittedAt = new Date().toISOString();
+    appendAssessmentSubmission(assessment, {
+      kind: "questionnaire",
+      phase: runnerState.phase,
+      submittedAt: assessment.submittedAt,
+      scales: assessment.scales,
+      questionsPresented: questions,
+    });
+    stopPhaseTimer(runnerState.phase, assessment.submittedAt);
     recordStudyAction("assessment_questionnaire_submitted", `Submitted ${key}-session questionnaire`, {
       phase: runnerState.phase,
-      instrumentVersion: "vizier-study-scales-v2",
+      instrumentVersion: "vizier-study-protocol-v2",
+      openQuestionResponseMode: "spoken-interview",
       questionsPresented: clone(questions),
+      questionResponses: serializeQuestionResponses(questions, assessment.answers),
       scaleResponses: serializeScaleResponses(scaleSections, assessment.scales),
     });
-    runnerState.phase = nextStudyPhase(runnerState.phase);
-    persistRunnerState();
-    if (runnerState.phase === "complete") {
+    if (nextStudyPhase(runnerState.phase) === "complete") {
+      applyStudyScreenState("complete", "forward");
+      persistRunnerState();
       await completeRunnerSession();
       renderComplete();
       return;
     }
-    location.reload();
   });
 }
 
@@ -868,14 +1307,16 @@ async function completeRunnerSession() {
   recordStudyAction("study_runner_completed", "Completed all study runner phases", {
     groupId: runnerGroup.id,
     postScaleResponses: serializeScaleResponses(scaleSectionsForAssessment("post"), ensureAssessmentState("post").scales),
+    phaseTimers: clone(runnerState.phaseTimers || {}),
   });
   endStudySession({ reason: "runner-complete" });
-  const bundle = buildStudyBundle(null, "runner-complete");
   runnerState.completedAt = new Date().toISOString();
   runnerState.saveStatus = "saving";
   persistRunnerState();
+  const backup = buildRunnerBackup();
+  const bundle = buildStudyBundle(backup.snapshot, "runner-complete");
   try {
-    const result = await saveStudySessionToServer(bundle);
+    const result = await saveStudySessionToServer({ ...bundle, artifacts: backup.artifacts });
     runnerState.saveStatus = "saved";
     runnerState.saveLocation = result.location || "";
   } catch (error) {
@@ -883,6 +1324,44 @@ async function completeRunnerSession() {
     runnerState.saveError = error?.message || String(error);
   }
   persistRunnerState();
+}
+
+function questionnaireBackupArtifact(key) {
+  const assessment = ensureAssessmentState(key);
+  const questions = POST_QUESTIONS;
+  const sections = scaleSectionsForAssessment(key);
+  return {
+    path: `questionnaires/${key}.json`,
+    contentType: "application/json",
+    text: JSON.stringify({
+      schema: "vizier-study-questionnaire/1",
+      assessment: key,
+      submittedAt: assessment.submittedAt,
+      openQuestionResponseMode: "spoken-interview",
+      questionsPresented: questions,
+      questionResponses: serializeQuestionResponses(questions, assessment.answers),
+      scaleResponses: serializeScaleResponses(sections, assessment.scales),
+      annotations: assessment.annotations,
+      dashboardFilters: assessment.filters,
+      submissionHistory: assessment.submissions,
+    }, null, 2),
+  };
+}
+
+function buildRunnerBackup() {
+  const capture = studyTaskCapture();
+  return {
+    snapshot: capture.snapshot,
+    artifacts: [
+      ...capture.artifacts,
+      {
+        path: "study-runner-state.json",
+        contentType: "application/json",
+        text: JSON.stringify(runnerState, null, 2),
+      },
+      questionnaireBackupArtifact("post"),
+    ],
+  };
 }
 
 function renderComplete() {
@@ -897,8 +1376,14 @@ function renderComplete() {
       <div><button type="button" id="studyDownloadFinal">Download backup</button><button type="button" id="studyStartAnother">Start another participant</button></div>
     </main>`, { className: "is-complete" });
   document.getElementById("studyDownloadFinal").addEventListener("click", () => {
-    const bundle = buildStudyBundle(null, "manual-download");
-    exportStudyBundleLocal(bundle);
+    const button = document.getElementById("studyDownloadFinal");
+    button.disabled = true;
+    button.textContent = "Preparing backup…";
+    const backup = buildRunnerBackup();
+    const bundle = buildStudyBundle(backup.snapshot, "manual-download");
+    const downloaded = exportStudyBackupZip(backup.artifacts, bundle);
+    button.disabled = false;
+    button.textContent = downloaded ? "Download backup again" : "Retry download";
   });
   document.getElementById("studyStartAnother").addEventListener("click", () => {
     if (!window.confirm("Clear this completed session from this browser and return to the start page?")) return;
@@ -909,16 +1394,28 @@ function renderComplete() {
 }
 
 async function mountVizierPhase() {
+  clearStageTimerTicker();
   cleanupAssessmentViews();
   document.body.classList.add("study-workspace-booting");
   const app = await import("./app.js");
   document.getElementById("uploadScreen")?.setAttribute("hidden", "");
   const material = materialForPhase(runnerGroup.id, runnerState.phase);
   try {
-    await app.openStudyMaterialForRunner(material.code);
+    await app.openStudyMaterialForRunner(material.code, {
+      practice: runnerState.phase === "training",
+    });
+    const savedWorkspace = runnerState.workspaces?.[runnerState.phase];
+    if (savedWorkspace && typeof app.restoreStudyRunnerWorkspaceState === "function") {
+      await app.restoreStudyRunnerWorkspaceState(savedWorkspace);
+      recordStudyAction("study_workspace_restored", `Restored ${studyPhaseLabel(runnerState.phase)} workspace`, {
+        phase: runnerState.phase,
+        materialCode: material.code,
+        capturedAt: savedWorkspace.capturedAt || null,
+      });
+    }
   } catch (error) {
     document.body.classList.remove("study-workspace-booting");
-    neutralShell(`<main class="study-workspace-error"><h1>Material unavailable</h1><p>${escapeHTML(error.message || error)}</p><button type="button" id="studyRetryWorkspace">Try again</button></main>`);
+    neutralShell(`<main class="study-workspace-error"><h1>Material unavailable</h1><p>${escapeHTML(error.message || error)}</p><button type="button" id="studyRetryWorkspace">Try again</button></main>`, { showTimer: false });
     document.getElementById("studyRetryWorkspace")?.addEventListener("click", () => location.reload());
     return;
   }
@@ -932,64 +1429,123 @@ async function mountVizierPhase() {
   progress.className = "study-workspace-progress";
   progress.innerHTML = `<span>Part ${part} of 3</span><strong>${escapeHTML(title)}</strong>`;
   topbar?.querySelector(".brand-title")?.insertAdjacentElement("afterend", progress);
-  const pdfButton = document.createElement("button");
-  pdfButton.type = "button";
-  pdfButton.className = "study-workspace-pdf";
-  pdfButton.textContent = "Preview PDF";
-  pdfButton.setAttribute("aria-label", "Preview the assigned design document PDF in a new tab");
-  pdfButton.addEventListener("click", () => {
-    window.open(material.pdfUrl, "_blank", "noopener,noreferrer");
-    recordStudyAction("design_document_previewed", "Previewed assigned design document", {
-      phase: runnerState.phase,
-      materialCode: material.code,
-      pdfUrl: material.pdfUrl,
-    });
-  });
-  document.querySelector(".top-actions")?.prepend(pdfButton);
+  const backButton = document.createElement("button");
+  backButton.type = "button";
+  backButton.id = "studyRunnerBack";
+  backButton.className = "study-runner-back is-workspace";
+  backButton.setAttribute("aria-label", "Back");
+  backButton.innerHTML = '<span aria-hidden="true">←</span><span>Back</span>';
+  progress.insertAdjacentElement("beforebegin", backButton);
+  const timerHost = document.createElement("div");
+  timerHost.innerHTML = stageTimerMarkup("study-workspace-timer");
+  const timerElement = timerHost.firstElementChild;
   const button = document.createElement("button");
   button.type = "button";
   button.className = "study-workspace-finish";
-  button.textContent = runnerState.phase === "training" ? "Finish practice" : "Finish task";
-  document.querySelector(".top-actions")?.prepend(button);
+  button.textContent = runnerState.phase === "training" ? "Finish practice" : "Finish formal use";
+  const pdfButton = material?.pdfUrl ? document.createElement("button") : null;
+  if (pdfButton) {
+    pdfButton.type = "button";
+    pdfButton.className = "study-workspace-pdf";
+    pdfButton.textContent = "Preview PDF";
+    pdfButton.setAttribute("aria-label", "Preview the assigned design document PDF in a new tab");
+    pdfButton.addEventListener("click", () => {
+      window.open(material.pdfUrl, "_blank", "noopener,noreferrer");
+      recordStudyAction("design_document_previewed", "Previewed the assigned design document", {
+        phase: runnerState.phase,
+        materialCode: material.code,
+        pdfUrl: material.pdfUrl,
+      });
+    });
+  }
+  const topActions = document.querySelector(".top-actions");
+  topActions?.prepend(...[pdfButton, timerElement, button].filter(Boolean));
+  startStageTimerTicker();
+  wireStageTimerControl();
+  wireStudyBackControl();
+  if (runnerState.phase === "training") {
+    await app.startGuidedPracticeTutorial(material.code);
+  }
   button.addEventListener("click", async () => {
-    const isTask = ["dashboard_task", "timed_task"].includes(runnerState.phase);
+    const isTask = isDashboardTaskPhase(runnerState.phase);
     const confirmed = window.confirm(isTask
       ? "Finish formal use and continue to the questionnaire and interview?"
       : "Finish practice and continue to formal use?");
     if (!confirmed) return;
     button.disabled = true;
-    button.textContent = isTask ? "Saving task…" : "Opening task…";
+    button.textContent = isTask ? "Saving formal-use session…" : "Opening formal use…";
+    const completedAt = new Date().toISOString();
+    clearStageTimerTicker();
+    const timerOutput = document.getElementById("studyStageTimer");
+    if (timerOutput) timerOutput.textContent = formatStudyPhaseTimer(
+      studyPhaseTimerElapsedMs(activePhaseTimer(), Date.parse(completedAt)),
+    );
     recordStudyAction(isTask ? "controlled_task_finished" : "training_finished", isTask ? "Finished controlled task" : "Finished guided practice", {
       groupId: runnerGroup.id,
       materialCode: material.code,
     });
-    if (isTask) await app.saveStudyRunnerTaskBundle("task-complete");
-    runnerState.phase = nextStudyPhase(runnerState.phase);
-    runnerState.assessmentStep = "questionnaire";
+    runnerState.workspaces ||= {};
+    const finishedWorkspace = app.captureStudyRunnerWorkspaceState();
+    runnerState.workspaces[runnerState.phase] = finishedWorkspace;
+    runnerState.workspaceSubmissions ||= {};
+    runnerState.workspaceSubmissions[runnerState.phase] ||= [];
+    runnerState.workspaceSubmissions[runnerState.phase].push({
+      id: `submission-${runnerState.workspaceSubmissions[runnerState.phase].length + 1}`,
+      phase: runnerState.phase,
+      materialCode: material.code,
+      submittedAt: completedAt,
+      workspace: finishedWorkspace,
+    });
     persistRunnerState();
-    location.reload();
+    if (isTask) {
+      try {
+        await app.captureStudyRunnerTaskDashboard();
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = "Retry finish task";
+        startStageTimerTicker();
+        recordStudyAction("task_backup_failed", "Could not capture the dashboard task backup", {
+          groupId: runnerGroup.id,
+          materialCode: material.code,
+          error: error?.message || String(error),
+        });
+        window.alert("The task backup could not be prepared. Your work is still open; please try again.");
+        return;
+      }
+    }
+    stopPhaseTimer(runnerState.phase, completedAt);
+    const nextPhase = nextStudyPhase(runnerState.phase);
+    await navigateToStudyScreen(`${nextPhase}:intro`, {
+      source: isTask ? "dashboard-task-complete" : "training-complete",
+      capture: false,
+    });
   });
 }
 
 async function renderCurrentPhase() {
+  clearStageTimerTicker();
   document.body.classList.remove("study-workspace-booting", "study-workspace-phase");
   if (!runnerState) {
     renderWelcome();
     return;
   }
-  if (runnerState.phase === "complete") {
+  const navigation = ensureRunnerNavigation();
+  const screen = studyScreenDescriptor(navigation.currentScreenId);
+  runnerState.phase = screen?.phase || runnerState.phase;
+  if (screen?.view === "complete" || runnerState.phase === "complete") {
     renderComplete();
     return;
   }
-  if (!runnerState.phaseIntros?.[runnerState.phase]?.completedAt) {
+  if (screen?.view === "intro") {
     renderPhaseIntro();
     return;
   }
-  if (["training", "dashboard_task", "timed_task"].includes(runnerState.phase)) {
+  if (screen?.view === "workspace" && studyPhaseUsesVizier(runnerState.phase)) {
     await mountVizierPhase();
     return;
   }
-  renderQuestionnaire();
+  if (screen?.view === "questionnaire") renderQuestionnaire();
+  else await renderAssessmentReview();
 }
 
 export async function bootStudyRunner(groupId) {
@@ -1004,5 +1560,14 @@ export async function bootStudyRunner(groupId) {
   if (runnerState?.phase === "complete" && !["saved", "local-only"].includes(runnerState.saveStatus)) {
     await completeRunnerSession();
   }
+  if (runnerState) {
+    ensureRunnerNavigation();
+    window.history.replaceState({
+      vizierStudyRunner: true,
+      screenId: runnerState.navigation.currentScreenId,
+    }, "", location.href);
+    persistRunnerState();
+  }
+  bindStudyBrowserHistory();
   await renderCurrentPhase();
 }
