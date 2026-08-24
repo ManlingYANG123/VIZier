@@ -26,6 +26,7 @@ import {
   POST_QUESTIONS,
   PRE_QUESTIONS,
   scaleSectionsForAssessment,
+  serializeQuestionResponses,
   serializeScaleResponses,
   STUDY_GROUPS,
   STUDY_PHASE_INTROS,
@@ -760,8 +761,12 @@ async function renderAssessmentReview() {
   });
 }
 
-function questionFieldMarkup(question) {
-  return `<li class="study-question">${escapeHTML(question)}</li>`;
+function questionFieldMarkup(question, value, itemIndex) {
+  const itemId = `q${itemIndex + 1}`;
+  return `<li class="study-question">
+    <label class="study-question-label" for="studyQuestion-${escapeHTML(itemId)}"><span class="study-question-number" aria-hidden="true">${itemIndex + 1}</span><span>${escapeHTML(question)}</span></label>
+    <textarea id="studyQuestion-${escapeHTML(itemId)}" name="question_${escapeHTML(itemId)}" data-question-id="${escapeHTML(itemId)}" rows="4" autocomplete="off">${escapeHTML(value || "")}</textarea>
+  </li>`;
 }
 
 function scaleFieldMarkup(item, value, itemIndex) {
@@ -807,17 +812,16 @@ function renderQuestionnaire() {
   const scaleItems = scaleSections.flatMap((section) => section.items);
   neutralShell(`
     <main class="study-questionnaire-page">
-      <header><span>${key === "pre" ? "Before guided practice" : "After the dashboard task"}</span><h1>Questionnaire</h1><p>Select one response for every statement.</p></header>
+      <header><span>${key === "pre" ? "Before guided practice" : "After the dashboard task"}</span><h1>Questionnaire</h1><p>${key === "pre" ? "Take a few minutes to reflect on how you currently approach dashboard design." : "Reflect on whether working with VIZier affected how you think about dashboard design."}</p></header>
       <form id="studyQuestionnaireForm">
-        <div class="study-scale-progress" aria-live="polite"><div><strong id="studyScaleProgress">0 of ${scaleItems.length} answered</strong><span>Your selections save automatically.</span></div><span class="study-scale-progress-track" aria-hidden="true"><span id="studyScaleProgressFill"></span></span></div>
-        ${scaleSections.map((section) => scaleSectionMarkup(section, assessment.scales)).join("")}
-        <details class="study-interview-prompts">
-          <summary>Discussion prompts</summary>
-          <p>Please answer these questions aloud.</p>
-          <ol class="study-question-list" aria-label="Reflection questions">
-            ${questions.map((question) => questionFieldMarkup(question)).join("")}
+        <section class="study-open-response-section" aria-labelledby="studyReflectionQuestions">
+          <header><h2 id="studyReflectionQuestions">Reflection questions</h2><p>Please fill out this form. You may leave any question blank.</p></header>
+          <ol class="study-question-list">
+            ${questions.map((question, index) => questionFieldMarkup(question, assessment.answers?.[`q${index + 1}`], index)).join("")}
           </ol>
-        </details>
+        </section>
+        ${scaleItems.length ? `<div class="study-scale-progress" aria-live="polite"><div><strong id="studyScaleProgress">0 of ${scaleItems.length} answered</strong><span>Your responses save automatically.</span></div><span class="study-scale-progress-track" aria-hidden="true"><span id="studyScaleProgressFill"></span></span></div>` : ""}
+        ${scaleSections.map((section) => scaleSectionMarkup(section, assessment.scales)).join("")}
         <footer><button type="submit">${key === "pre" ? "Continue to guided practice" : "Complete study"}</button></footer>
       </form>
     </main>`, { className: "is-questionnaire" });
@@ -825,6 +829,10 @@ function renderQuestionnaire() {
   const form = document.getElementById("studyQuestionnaireForm");
   const saveDraft = () => {
     const data = new FormData(form);
+    questions.forEach((question, index) => {
+      const itemId = `q${index + 1}`;
+      assessment.answers[itemId] = String(data.get(`question_${itemId}`) || "");
+    });
     scaleItems.forEach((item) => {
       assessment.scales[item.id] = String(data.get(`scale_${item.id}`) || "");
     });
@@ -838,6 +846,9 @@ function renderQuestionnaire() {
     if (progressFill) progressFill.style.transform = `scaleX(${scaleItems.length ? answered / scaleItems.length : 0})`;
   };
   updateScaleProgress();
+  form.addEventListener("input", (event) => {
+    if (event.target.closest?.("textarea[data-question-id]")) saveDraft();
+  });
   form.addEventListener("change", (event) => {
     const input = event.target.closest?.("input[data-scale-id]");
     saveDraft();
@@ -858,8 +869,9 @@ function renderQuestionnaire() {
     assessment.submittedAt = new Date().toISOString();
     recordStudyAction("assessment_questionnaire_submitted", `Submitted ${key}-session questionnaire`, {
       phase: runnerState.phase,
-      instrumentVersion: "vizier-study-scales-v1",
+      instrumentVersion: "vizier-study-protocol-v1",
       questionsPresented: clone(questions),
+      questionResponses: serializeQuestionResponses(questions, assessment.answers),
       scaleResponses: serializeScaleResponses(scaleSections, assessment.scales),
     });
     runnerState.assessmentStep = "review";
@@ -911,6 +923,7 @@ function questionnaireBackupArtifact(key) {
       assessment: key,
       submittedAt: assessment.submittedAt,
       questionsPresented: questions,
+      questionResponses: serializeQuestionResponses(questions, assessment.answers),
       scaleResponses: serializeScaleResponses(sections, assessment.scales),
       annotations: assessment.annotations,
       dashboardFilters: assessment.filters,

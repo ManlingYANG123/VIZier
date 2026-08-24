@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import {
   STUDY_GROUPS,
   STUDY_PHASE_INTROS,
+  POST_EXPERIENCE_SCALE_ITEMS,
+  POST_QUESTIONS,
+  PRE_QUESTIONS,
   createStudyRunnerState,
   isDashboardTaskPhase,
   isStudyRunnerState,
@@ -11,6 +14,7 @@ import {
   nextStudyPhase,
   normalizeStudyPhase,
   scaleSectionsForAssessment,
+  serializeQuestionResponses,
   serializeScaleResponses,
   studyGroupIdFromPath,
   studyPhaseNumber,
@@ -86,23 +90,28 @@ test("annotations retain normalized optional regions", () => {
   assert.throws(() => makeAnnotation({ text: "   " }), /required/);
 });
 
-test("pre and post expose paired scale IDs for direct comparison", () => {
+test("questionnaire content follows the study protocol exactly", () => {
   const pre = scaleSectionsForAssessment("pre");
   const post = scaleSectionsForAssessment("post");
-  assert.deepEqual(pre[0].items.map((item) => item.id), post[0].items.map((item) => item.id));
-  assert.equal(pre.length, 1);
-  assert.equal(post.length, 2);
+  assert.equal(PRE_QUESTIONS.length, 3);
+  assert.equal(POST_QUESTIONS.length, 9);
+  assert.equal(pre.length, 0);
+  assert.equal(post.length, 1);
+  assert.deepEqual(post[0].items, POST_EXPERIENCE_SCALE_ITEMS);
+  assert.equal(post[0].items.length, 7);
+  assert.match(PRE_QUESTIONS[0], /Please list as many as readily come to mind\.$/);
+  assert.match(POST_QUESTIONS[1], /If not, please explain\.$/);
 });
 
 test("scale telemetry serializes numeric, N/A, and missing responses explicitly", () => {
-  const sections = scaleSectionsForAssessment("pre");
+  const sections = scaleSectionsForAssessment("post");
   const responses = serializeScaleResponses(sections, {
-    review_awareness: "6",
-    review_explanation: "NA",
+    vizier_awareness: "6",
+    vizier_understanding: "NA",
   });
   assert.deepEqual(responses[0], {
-    instrument: "dashboard-review-confidence",
-    itemId: "review_awareness",
+    instrument: "vizier-experience",
+    itemId: "vizier_awareness",
     statement: sections[0].items[0].statement,
     value: 6,
     notApplicable: false,
@@ -111,4 +120,15 @@ test("scale telemetry serializes numeric, N/A, and missing responses explicitly"
   assert.equal(responses[1].value, null);
   assert.equal(responses[1].notApplicable, true);
   assert.equal(responses[2].answered, false);
+});
+
+test("open-ended protocol responses serialize without forcing an answer", () => {
+  const responses = serializeQuestionResponses(PRE_QUESTIONS, { q1: "  Hierarchy and legibility.  " });
+  assert.deepEqual(responses[0], {
+    itemId: "q1",
+    question: PRE_QUESTIONS[0],
+    response: "  Hierarchy and legibility.  ",
+    answered: true,
+  });
+  assert.equal(responses[1].answered, false);
 });

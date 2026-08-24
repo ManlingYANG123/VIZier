@@ -91,17 +91,17 @@ export const STUDY_PHASE_INTROS = Object.freeze({
 });
 
 export const PRE_QUESTIONS = Object.freeze([
-  "What dashboard-design principles or best practices guide your work?",
+  "What dashboard-design principles or best practices guide your work? Please list as many as readily come to mind.",
   "When reviewing a dashboard, what do you typically look for when deciding whether it should be revised?",
   "How do you normally decide what kind of feedback to request about a dashboard?",
 ]);
 
 export const POST_QUESTIONS = Object.freeze([
-  "What dashboard-design principles or best practices guide your work?",
-  "Did working with VIZier change your awareness or understanding of any dashboard-design principles? If so, which ones, and how?",
-  "Did working with VIZier change how you would approach reviewing or revising a dashboard?",
+  "What dashboard-design principles or best practices guide your work? Please list as many as readily come to mind.",
+  "Did working with VIZier change your awareness or understanding of any dashboard-design principles? If so, which ones, and how? If not, please explain.",
+  "Did working with VIZier change how you would approach reviewing or revising a dashboard? If so, please describe what you might do differently.",
   "Did the experience change how you would ask another person or system for feedback about a dashboard? If so, how?",
-  "Was anything presented by VIZier familiar, new, surprising, questionable, or inconsistent with your existing practice?",
+  "Was anything presented by VIZier already familiar to you? Was anything new, surprising, questionable, or inconsistent with your existing practice?",
   "Do you expect to apply anything from this experience to a future dashboard-design task? Why or why not?",
   "How confident are you in the final dashboard, and what would you still change with more time?",
   "Where in your real workflow would VIZier be most useful and least useful?",
@@ -109,17 +109,6 @@ export const POST_QUESTIONS = Object.freeze([
 ]);
 
 const freezeScaleItems = (items) => Object.freeze(items.map((item) => Object.freeze(item)));
-
-/** Identical before/after items support a direct paired comparison without
- * changing the wording between measurements. */
-export const PAIRED_SCALE_ITEMS = freezeScaleItems([
-  { id: "review_awareness", statement: "I notice dashboard-design considerations that might otherwise be overlooked." },
-  { id: "review_explanation", statement: "I can explain why particular dashboard-design choices may be effective or ineffective." },
-  { id: "revision_ideas", statement: "I can generate concrete ideas for revising a dashboard." },
-  { id: "systematic_review", statement: "I can systematically review a dashboard." },
-  { id: "feedback_request", statement: "I can formulate a useful request for dashboard-design feedback." },
-  { id: "guidance_familiarity", statement: "Most dashboard-design guidance is already familiar to me." },
-]);
 
 export const POST_EXPERIENCE_SCALE_ITEMS = freezeScaleItems([
   { id: "vizier_awareness", statement: "VIZier made me more aware of dashboard-design considerations that I might otherwise overlook." },
@@ -132,17 +121,25 @@ export const POST_EXPERIENCE_SCALE_ITEMS = freezeScaleItems([
 ]);
 
 export function scaleSectionsForAssessment(key) {
-  const paired = {
-    id: "dashboard-review-confidence",
-    title: key === "pre" ? "Before using VIZier" : "After using VIZier",
-    items: PAIRED_SCALE_ITEMS,
-  };
-  if (key !== "post") return [paired];
-  return [paired, {
+  if (key !== "post") return [];
+  return [{
     id: "vizier-experience",
-    title: "Experience with VIZier",
+    title: "After using VIZier",
     items: POST_EXPERIENCE_SCALE_ITEMS,
   }];
+}
+
+export function serializeQuestionResponses(questions, responseMap = {}) {
+  return questions.map((question, index) => {
+    const itemId = `q${index + 1}`;
+    const response = String(responseMap[itemId] ?? "");
+    return {
+      itemId,
+      question,
+      response,
+      answered: response.trim() !== "",
+    };
+  });
 }
 
 export function serializeScaleResponses(sections, responseMap = {}) {

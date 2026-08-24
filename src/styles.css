@@ -10527,10 +10527,17 @@ body.panel-resizing * {
 .study-scale-progress > div span { color: #6e6e73; font-size: 11px; }
 .study-scale-progress-track { height: 2px; overflow: hidden; background: #d8d8dd; }
 .study-scale-progress-track > span { display: block; width: 100%; height: 100%; transform: scaleX(0); transform-origin: left center; background: #2c2c2e; transition: transform .22s cubic-bezier(.22, 1, .36, 1); }
-.study-question-list { display: grid; gap: 0; margin: 0; padding: 0 0 0 28px; }
-.study-question { max-width: 70ch; padding: 18px 0 20px 8px; border-bottom: 1px solid #dedee3; color: #2c2c2e; font-size: 15px; font-weight: 620; line-height: 1.55; }
-.study-question:first-child { padding-top: 0; }
-.study-question::marker { color: #6e6e73; font-size: 12px; font-weight: 700; }
+.study-open-response-section { display: grid; gap: 0; overflow: hidden; border: 1px solid #d4d4d9; border-radius: 14px; background: #fff; }
+.study-open-response-section > header { padding: 20px 28px 18px; border-bottom: 1px solid #dedee3; background: #fafafa; }
+.study-open-response-section h2 { margin: 0; font-size: 20px; letter-spacing: -.025em; }
+.study-open-response-section header p { margin: 6px 0 0; color: #6e6e73; font-size: 12px; }
+.study-question-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.study-question { display: grid; gap: 12px; padding: 22px 28px 24px; border-bottom: 1px solid #dedee3; }
+.study-question:last-child { border-bottom: 0; }
+.study-question-label { display: flex; gap: 12px; color: #2c2c2e; font-size: 15px; font-weight: 620; line-height: 1.55; }
+.study-question-number { flex: 0 0 18px; padding-top: 3px; color: #8a8a90; font-size: 11px; font-weight: 720; }
+.study-question textarea { width: calc(100% - 30px); min-height: 104px; margin-left: 30px; padding: 11px 13px; resize: vertical; border: 1px solid #c9c9ce; border-radius: 8px; background: #fff; color: #2c2c2e; font: inherit; font-size: 14px; line-height: 1.5; }
+.study-question textarea:focus-visible { outline: 2px solid #525257; outline-offset: 2px; border-color: #77777c; }
 
 .study-scale-section { display: grid; gap: 0; overflow: hidden; border: 1px solid #d4d4d9; border-radius: 14px; background: #fff; }
 .study-scale-section-head { display: grid; gap: 14px; padding: 20px 28px 16px; border-bottom: 1px solid #dedee3; background: #fafafa; }
@@ -10567,12 +10574,6 @@ body.panel-resizing * {
 .study-scale-na:hover > span { border-color: #9d9da3; background: #f0f0f2; transform: translateY(-1px); }
 .study-scale-na input:checked + span { border-color: #2c2c2e; background: #2c2c2e; color: #fff; }
 .study-scale-na input:focus-visible + span { outline: 2px solid #525257; outline-offset: 2px; }
-
-.study-interview-prompts { padding-top: 4px; border-top: 1px solid #d2d2d7; }
-.study-interview-prompts summary { width: fit-content; cursor: pointer; color: #2c2c2e; font-size: 13px; font-weight: 680; }
-.study-interview-prompts summary:hover { text-decoration: underline; text-underline-offset: 3px; }
-.study-interview-prompts > p { margin: 12px 0 22px; color: #6e6e73; font-size: 12px; }
-.study-interview-prompts .study-question-list { margin-top: 8px; }
 
 .study-questionnaire-page form > footer { display: flex; align-items: center; justify-content: flex-end; gap: 20px; padding: 14px 0 0; border-top: 1px solid #d2d2d7; background: #f4f4f6; }
 .study-questionnaire-page form > footer span { color: #6e6e73; font-size: 11px; }
@@ -10642,6 +10643,10 @@ body.panel-resizing * {
   .study-scale-key span:nth-child(2) { border-right: 0; }
   .study-scale-key span:nth-child(-n + 2) { border-bottom: 1px solid #e2e2e6; }
   .study-scale-question { padding: 22px 18px 20px; }
+  .study-open-response-section { border-radius: 12px; }
+  .study-open-response-section > header { padding: 20px 18px 17px; }
+  .study-question { padding: 20px 18px 22px; }
+  .study-question textarea { width: 100%; margin-left: 0; }
   .study-scale-question legend { gap: 8px; font-size: 14px; }
   .study-scale-response { grid-template-columns: 1fr; gap: 16px; margin-left: 0; }
   .study-scale-options { width: 100%; }

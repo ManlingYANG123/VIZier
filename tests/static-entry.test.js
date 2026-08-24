@@ -215,10 +215,12 @@ test("group study routes boot the neutral runner before VIZier", async () => {
   assert.match(runner, /renderPhaseIntro/);
   assert.match(runner, /study-phase-axis/);
   assert.match(runner, /aria-current="step"/);
-  assert.match(runner, /Select one response for every statement/);
+  assert.match(runner, /Please fill out this form\. You may leave any question blank\./);
   assert.match(runner, /scale_response_recorded/);
+  assert.match(runner, /questionResponses: serializeQuestionResponses/);
   assert.match(runner, /scaleResponses: serializeScaleResponses/);
-  assert.doesNotMatch(runner, /<textarea name="q/);
+  assert.match(runner, /<textarea id="studyQuestion-/);
+  assert.doesNotMatch(runner, /<details class="study-interview-prompts"/);
   assert.match(runner, /openStudyMaterialForRunner/);
   assert.match(runner, /studyPhaseUsesVizier\(runnerState\.phase\)/);
   assert.match(runner, /isDashboardTaskPhase\(runnerState\.phase\)/);
