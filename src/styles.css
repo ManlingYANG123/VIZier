@@ -10222,6 +10222,14 @@ body.panel-resizing * {
   flex: 1;
 }
 
+/* The assessment canvas is made entirely of positioned children. Keep its
+ * wrapper in the flex sizing chain so the stage receives the remaining
+ * viewport height instead of collapsing to its one-pixel border. */
+.study-dashboard-wrap {
+  display: flex;
+  overflow: hidden;
+}
+
 .study-dashboard-stage {
   position: relative;
   overflow: hidden;
