@@ -20,23 +20,10 @@ RUNTIME_PATHS=(
   "re_api/data"
   "re_api/src"
   "slack_codebook"
-  "src/api-client.js"
-  "src/app.js"
-  "src/bootstrap.js"
-  "src/category-color-system.js"
-  "src/context-box.js"
-  "src/context-workflow.js"
-  "src/critique-merge.js"
-  "src/intake-client.js"
-  "src/interaction-journal.js"
-  "src/panel-resize.js"
-  "src/recommendation-engine.js"
-  "src/revision-preview.js"
-  "src/study-runner-model.js"
-  "src/study-runner.js"
-  "src/study-session.js"
-  "src/styles.css"
-  "src/vega-dashboard-adapter.js"
+  # Keep the frontend source directory atomic. Imported modules are added here
+  # frequently; enumerating files individually can produce a locally valid
+  # build but an incomplete Heroku deployment tree.
+  "src"
 )
 
 fail() {

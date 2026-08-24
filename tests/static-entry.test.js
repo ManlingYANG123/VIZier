@@ -356,6 +356,8 @@ test("Heroku runtime packaging includes maintainable backend data sources", asyn
 
   assert.match(deploy, /RUNTIME_PATHS=\([\s\S]*?"re_api\/data"/);
   assert.match(deploy, /RUNTIME_PATHS=\([\s\S]*?"slack_codebook"/);
+  assert.match(deploy, /RUNTIME_PATHS=\([\s\S]*?"src"/);
+  assert.doesNotMatch(deploy, /"src\/app\.js"/);
 });
 
 test("focused critique details render before preview hydration", async () => {
