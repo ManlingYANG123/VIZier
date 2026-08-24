@@ -9914,6 +9914,9 @@ body.panel-resizing * {
 .study-runner-status { justify-self: end; display: inline-flex; align-items: center; gap: 14px; min-width: 0; }
 .study-stage-timer { display: inline-flex; align-items: baseline; gap: 7px; white-space: nowrap; color: #6e6e73; font-size: 10px; }
 .study-stage-timer time { min-width: 38px; color: #2c2c2e; font-size: 12px; font-weight: 720; font-variant-numeric: tabular-nums; letter-spacing: .015em; }
+.study-stage-timer button { min-height: 26px; padding: 4px 8px; border: 1px solid #2c2c2e; border-radius: 6px; background: #2c2c2e; color: #fff; font: inherit; font-size: 10px; font-weight: 680; cursor: pointer; }
+.study-stage-timer button:hover { background: #424245; }
+.study-stage-timer button:focus-visible { outline: 2px solid #525257; outline-offset: 2px; }
 
 .study-runner-progress {
   min-width: 250px;
@@ -10097,10 +10100,8 @@ body.panel-resizing * {
 .study-phase-intro-content button:hover { background: #424245; }
 .study-phase-intro-content button:focus-visible { outline: 2px solid #525257; outline-offset: 3px; }
 
-.study-phase-intro-action { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin-top: 34px; }
+.study-phase-intro-action { display: flex; align-items: center; margin-top: 34px; }
 .study-phase-intro-action button { margin-top: 0; }
-.study-phase-intro-action span { color: #6e6e73; font-size: 11px; }
-.study-phase-intro-action strong { color: #3a3a3c; font-size: 12px; font-variant-numeric: tabular-nums; }
 
 .study-runner-start-form {
   display: grid;
