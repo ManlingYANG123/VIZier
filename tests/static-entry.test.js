@@ -876,6 +876,10 @@ test("study telemetry pairs review requests with displayed or failed, and checkp
   assert.match(source, /recordCritiquesDisplayed\("selected-region", askId,/);
   assert.match(source, /requestId/);
   assert.match(source, /requestMode/);
+  assert.match(source, /fewShotSetId/);
+  assert.match(source, /fewShotVersion/);
+  assert.match(source, /fewShotIds/);
+  assert.match(source, /fewShotContentHash/);
   assert.match(source, /recommendation_apply_requested/);
   assert.match(source, /dashboard_changed/);
   assert.match(source, /endStudySession\(\{ reason: "end" \}\)/);

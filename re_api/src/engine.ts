@@ -25,6 +25,12 @@ import {
   REVIEW_ENGINE_VERSION,
   REVIEW_PROMPT_VERSION,
 } from "./generate/review-data.ts";
+import {
+  CRITIQUE_FEW_SHOT_CONTENT_HASH,
+  CRITIQUE_FEW_SHOT_IDS,
+  CRITIQUE_FEW_SHOT_SET_ID,
+  CRITIQUE_FEW_SHOT_VERSION,
+} from "./generate/critique-few-shots.ts";
 
 export interface EngineDeps {
   client?: LLMClient;
@@ -82,6 +88,10 @@ export async function runCritique(
     reviewScope,
     registryVersion: CRITERION_REGISTRY_VERSION,
     promptVersion: REVIEW_PROMPT_VERSION,
+    fewShotSetId: CRITIQUE_FEW_SHOT_SET_ID,
+    fewShotVersion: CRITIQUE_FEW_SHOT_VERSION,
+    fewShotIds: CRITIQUE_FEW_SHOT_IDS,
+    fewShotContentHash: CRITIQUE_FEW_SHOT_CONTENT_HASH,
   });
   const result = await discoverDashboardCritiques(
     req.specMap,
@@ -151,6 +161,10 @@ export async function runCritique(
     registryVersion: CRITERION_REGISTRY_VERSION,
     promptVersion: REVIEW_PROMPT_VERSION,
     engineVersion: REVIEW_ENGINE_VERSION,
+    fewShotSetId: CRITIQUE_FEW_SHOT_SET_ID,
+    fewShotVersion: CRITIQUE_FEW_SHOT_VERSION,
+    fewShotIds: [...CRITIQUE_FEW_SHOT_IDS],
+    fewShotContentHash: CRITIQUE_FEW_SHOT_CONTENT_HASH,
     contextSnapshotId: result.contextSnapshotId,
     ...(req.focus ? { focus: req.focus } : {}),
     ...(result.answer ? { answer: result.answer } : {}),

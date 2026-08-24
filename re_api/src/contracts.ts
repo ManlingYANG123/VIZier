@@ -769,6 +769,12 @@ export interface CritiqueResponse {
   registryVersion: string;
   promptVersion: string;
   engineVersion: string;
+  /** Exact end-to-end demonstration set used in the model request. The content
+   * hash disambiguates runs even if a maintainer forgets to bump the version. */
+  fewShotSetId: string;
+  fewShotVersion: string;
+  fewShotIds: string[];
+  fewShotContentHash: string;
   contextSnapshotId: string;
   /** Echoes the normalized focused-review request used for this run. */
   focus?: FocusedReviewRequest;

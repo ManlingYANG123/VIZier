@@ -24,6 +24,13 @@ import {
   parseRecommendationCsv,
 } from "../src/generate/recommendations.ts";
 import { DASHBOARD_REVIEW_SYSTEM, dashboardReviewUser } from "../src/generate/prompts.ts";
+import {
+  CRITIQUE_FEW_SHOT_CONTENT_HASH,
+  CRITIQUE_FEW_SHOT_IDS,
+  CRITIQUE_FEW_SHOT_SET,
+  critiqueFewShotPrompt,
+  parseCritiqueFewShotSet,
+} from "../src/generate/critique-few-shots.ts";
 
 test("review policy makes critique coverage primary and Well Done secondary", () => {
   assert.match(DASHBOARD_REVIEW_SYSTEM, /Work critique-first/);
@@ -133,6 +140,43 @@ test("recommendation leaves are validated by exact id across all branches", () =
   assert.ok(isRecommendationLeafId("text:communicate takeaways"));
   assert.ok(!isRecommendationLeafId("interaction:invented leaf"));
   assert.equal(new Set(RECOMMENDATION_LEAVES.map((leaf) => leaf.id)).size, RECOMMENDATION_LEAVES.length);
+});
+
+test("the fixed end-to-end few-shot set is complete, compact, and provenance-safe", () => {
+  assert.equal(CRITIQUE_FEW_SHOT_SET.examples.length, 6);
+  assert.equal(new Set(CRITIQUE_FEW_SHOT_IDS).size, 6);
+  assert.match(CRITIQUE_FEW_SHOT_CONTENT_HASH, /^[a-f0-9]{64}$/);
+  const prompt = critiqueFewShotPrompt();
+  assert.match(prompt, /END-TO-END CRITIQUE DEMONSTRATIONS/);
+  assert.match(prompt, /INPUT:/);
+  assert.match(prompt, /EXPECTED OUTPUT:/);
+  assert.ok(prompt.includes("fs-03-analytical-interaction-applicability"));
+  assert.ok(prompt.includes("fs-04-infographic-interaction-nonapplicability"));
+  assert.ok(prompt.length < 80_000, `few-shot prompt is ${prompt.length} chars`);
+  // Maintainership provenance stays in the JSON but is never sent to the LLM.
+  assert.doesNotMatch(prompt, /slack-replies-coded-consolidated-08-17/);
+  assert.doesNotMatch(prompt, /threadId|replyId|unitId|adaptation/);
+});
+
+test("few-shot parsing fails fast for unknown catalog codes", () => {
+  const source = readFileSync(
+    new URL("../data/critique-few-shots-v1.json", import.meta.url),
+    "utf8",
+  );
+  assert.throws(
+    () => parseCritiqueFewShotSet(source.replace(
+      "chart:support perception",
+      "chart:not-a-real-recommendation",
+    )),
+    /unknown recommendation/,
+  );
+});
+
+test("the system prompt includes full demonstrations in addition to mapping cues", () => {
+  assert.match(DASHBOARD_REVIEW_SYSTEM, /END-TO-END CRITIQUE DEMONSTRATIONS/);
+  assert.match(DASHBOARD_REVIEW_SYSTEM, /evidence→diagnosis→critique/);
+  assert.match(DASHBOARD_REVIEW_SYSTEM, /fs-03-analytical-interaction-applicability/);
+  assert.match(DASHBOARD_REVIEW_SYSTEM, /fs-04-infographic-interaction-nonapplicability/);
 });
 
 test("context provenance distinguishes missing, inferred, and confirmed values", () => {
