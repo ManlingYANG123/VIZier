@@ -216,10 +216,14 @@ test("group study routes boot the neutral runner before VIZier", async () => {
   assert.match(runner, /study-phase-axis/);
   assert.match(runner, /aria-current="step"/);
   assert.match(runner, /Please fill out this form\. You may leave any question blank\./);
+  assert.match(runner, /First complete the questionnaire\. The facilitator will then guide you through the interview questions\./);
+  assert.match(runner, /The facilitator will ask these questions aloud after you complete the questionnaire\./);
+  assert.match(runner, /openQuestionResponseMode: key === "post" \? "spoken-interview" : "written-form"/);
   assert.match(runner, /scale_response_recorded/);
   assert.match(runner, /questionResponses: serializeQuestionResponses/);
   assert.match(runner, /scaleResponses: serializeScaleResponses/);
   assert.match(runner, /<textarea id="studyQuestion-/);
+  assert.match(runner, /class="study-interview-question"/);
   assert.doesNotMatch(runner, /<details class="study-interview-prompts"/);
   assert.match(runner, /openStudyMaterialForRunner/);
   assert.match(runner, /studyPhaseUsesVizier\(runnerState\.phase\)/);

@@ -769,6 +769,31 @@ function questionFieldMarkup(question, value, itemIndex) {
   </li>`;
 }
 
+function interviewQuestionMarkup(question, itemIndex) {
+  return `<li class="study-interview-question">
+    <span class="study-interview-question-number" aria-hidden="true">${itemIndex + 1}</span>
+    <span>${escapeHTML(question)}</span>
+  </li>`;
+}
+
+function writtenQuestionsMarkup(questions, assessment) {
+  return `<section class="study-open-response-section" aria-labelledby="studyReflectionQuestions">
+    <header><h2 id="studyReflectionQuestions">Reflection questions</h2><p>Please fill out this form. You may leave any question blank.</p></header>
+    <ol class="study-question-list">
+      ${questions.map((question, index) => questionFieldMarkup(question, assessment.answers?.[`q${index + 1}`], index)).join("")}
+    </ol>
+  </section>`;
+}
+
+function interviewQuestionsMarkup(questions) {
+  return `<section class="study-interview-section" aria-labelledby="studyInterviewQuestions">
+    <header><h2 id="studyInterviewQuestions">Interview questions</h2><p>The facilitator will ask these questions aloud after you complete the questionnaire.</p></header>
+    <ol class="study-interview-question-list">
+      ${questions.map((question, index) => interviewQuestionMarkup(question, index)).join("")}
+    </ol>
+  </section>`;
+}
+
 function scaleFieldMarkup(item, value, itemIndex) {
   const choices = [1, 2, 3, 4, 5, 6, 7];
   const choiceLabels = {
@@ -810,18 +835,19 @@ function renderQuestionnaire() {
   const questions = key === "pre" ? PRE_QUESTIONS : POST_QUESTIONS;
   const scaleSections = scaleSectionsForAssessment(key);
   const scaleItems = scaleSections.flatMap((section) => section.items);
+  const scaleQuestionnaire = scaleItems.length ? `<div class="study-scale-questionnaire">
+    <div class="study-scale-progress" aria-live="polite"><div><strong id="studyScaleProgress">0 of ${scaleItems.length} answered</strong><span>Your responses save automatically.</span></div><span class="study-scale-progress-track" aria-hidden="true"><span id="studyScaleProgressFill"></span></span></div>
+    ${scaleSections.map((section) => scaleSectionMarkup(section, assessment.scales)).join("")}
+  </div>` : "";
+  const reflectionQuestions = key === "post"
+    ? interviewQuestionsMarkup(questions)
+    : writtenQuestionsMarkup(questions, assessment);
   neutralShell(`
     <main class="study-questionnaire-page">
-      <header><span>${key === "pre" ? "Before guided practice" : "After the dashboard task"}</span><h1>Questionnaire</h1><p>${key === "pre" ? "Take a few minutes to reflect on how you currently approach dashboard design." : "Reflect on whether working with VIZier affected how you think about dashboard design."}</p></header>
+      <header><span>${key === "pre" ? "Before guided practice" : "After the dashboard task"}</span><h1>${key === "pre" ? "Questionnaire" : "Final questionnaire"}</h1><p>${key === "pre" ? "Take a few minutes to reflect on how you currently approach dashboard design." : "First complete the questionnaire. The facilitator will then guide you through the interview questions."}</p></header>
       <form id="studyQuestionnaireForm">
-        <section class="study-open-response-section" aria-labelledby="studyReflectionQuestions">
-          <header><h2 id="studyReflectionQuestions">Reflection questions</h2><p>Please fill out this form. You may leave any question blank.</p></header>
-          <ol class="study-question-list">
-            ${questions.map((question, index) => questionFieldMarkup(question, assessment.answers?.[`q${index + 1}`], index)).join("")}
-          </ol>
-        </section>
-        ${scaleItems.length ? `<div class="study-scale-progress" aria-live="polite"><div><strong id="studyScaleProgress">0 of ${scaleItems.length} answered</strong><span>Your responses save automatically.</span></div><span class="study-scale-progress-track" aria-hidden="true"><span id="studyScaleProgressFill"></span></span></div>` : ""}
-        ${scaleSections.map((section) => scaleSectionMarkup(section, assessment.scales)).join("")}
+        ${key === "post" ? scaleQuestionnaire : reflectionQuestions}
+        ${key === "post" ? reflectionQuestions : scaleQuestionnaire}
         <footer><button type="submit">${key === "pre" ? "Continue to guided practice" : "Complete study"}</button></footer>
       </form>
     </main>`, { className: "is-questionnaire" });
@@ -870,6 +896,7 @@ function renderQuestionnaire() {
     recordStudyAction("assessment_questionnaire_submitted", `Submitted ${key}-session questionnaire`, {
       phase: runnerState.phase,
       instrumentVersion: "vizier-study-protocol-v1",
+      openQuestionResponseMode: key === "post" ? "spoken-interview" : "written-form",
       questionsPresented: clone(questions),
       questionResponses: serializeQuestionResponses(questions, assessment.answers),
       scaleResponses: serializeScaleResponses(scaleSections, assessment.scales),
@@ -922,6 +949,7 @@ function questionnaireBackupArtifact(key) {
       schema: "vizier-study-questionnaire/1",
       assessment: key,
       submittedAt: assessment.submittedAt,
+      openQuestionResponseMode: key === "post" ? "spoken-interview" : "written-form",
       questionsPresented: questions,
       questionResponses: serializeQuestionResponses(questions, assessment.answers),
       scaleResponses: serializeScaleResponses(sections, assessment.scales),
