@@ -234,6 +234,13 @@ test("group study routes boot the neutral runner before VIZier", async () => {
   assert.match(styles, /\.study-workspace-progress/);
 });
 
+test("Heroku runtime packaging includes maintainable backend data sources", async () => {
+  const deploy = await readFile(new URL("../scripts/deploy-heroku.sh", import.meta.url), "utf8");
+
+  assert.match(deploy, /RUNTIME_PATHS=\([\s\S]*?"re_api\/data"/);
+  assert.match(deploy, /RUNTIME_PATHS=\([\s\S]*?"slack_codebook"/);
+});
+
 test("focused critique details render before preview hydration", async () => {
   const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
 

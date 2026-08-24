@@ -17,6 +17,7 @@ RUNTIME_PATHS=(
   "package-lock.json"
   "vite.config.js"
   "public"
+  "re_api/data"
   "re_api/src"
   "slack_codebook"
   "src/api-client.js"
