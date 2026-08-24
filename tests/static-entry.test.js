@@ -204,7 +204,7 @@ test("group study routes boot the neutral runner before VIZier", async () => {
   assert.match(bootstrap, /bootStudyRunner/);
   assert.match(runner, /Review the dashboard/);
   assert.match(runner, /Add area note/);
-  assert.match(runner, /Continue to questions/);
+  assert.match(runner, /key === "pre" \? "Continue to guided practice" : "Continue to questions"/);
   assert.match(runner, /id="studyZoomOut"/);
   assert.match(runner, /id="studyZoomIn"/);
   assert.match(runner, /id="studyZoomFit"/);
@@ -222,14 +222,15 @@ test("group study routes boot the neutral runner before VIZier", async () => {
   assert.match(runner, /renderPhaseIntro/);
   assert.match(runner, /study-phase-axis/);
   assert.match(runner, /aria-current="step"/);
-  assert.match(runner, /Please fill out this form\. You may leave any question blank\./);
+  assert.match(runner, /pre_assessment_completed/);
+  assert.match(runner, /removed_pre_questionnaire_skipped/);
   assert.match(runner, /First complete the questionnaire\. The facilitator will then guide you through the interview questions\./);
   assert.match(runner, /The facilitator will ask these questions aloud after you complete the questionnaire\./);
-  assert.match(runner, /openQuestionResponseMode: key === "post" \? "spoken-interview" : "written-form"/);
+  assert.match(runner, /openQuestionResponseMode: "spoken-interview"/);
   assert.match(runner, /scale_response_recorded/);
   assert.match(runner, /questionResponses: serializeQuestionResponses/);
   assert.match(runner, /scaleResponses: serializeScaleResponses/);
-  assert.match(runner, /<textarea id="studyQuestion-/);
+  assert.doesNotMatch(runner, /<textarea id="studyQuestion-/);
   assert.match(runner, /class="study-interview-question"/);
   assert.doesNotMatch(runner, /<details class="study-interview-prompts"/);
   assert.match(runner, /openStudyMaterialForRunner/);

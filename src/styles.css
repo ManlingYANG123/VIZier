@@ -10536,18 +10536,6 @@ body.panel-resizing * {
 .study-scale-progress > div span { color: #6e6e73; font-size: 11px; }
 .study-scale-progress-track { height: 2px; overflow: hidden; background: #d8d8dd; }
 .study-scale-progress-track > span { display: block; width: 100%; height: 100%; transform: scaleX(0); transform-origin: left center; background: #2c2c2e; transition: transform .22s cubic-bezier(.22, 1, .36, 1); }
-.study-open-response-section { display: grid; gap: 0; overflow: hidden; border: 1px solid #d4d4d9; border-radius: 14px; background: #fff; }
-.study-open-response-section > header { padding: 20px 28px 18px; border-bottom: 1px solid #dedee3; background: #fafafa; }
-.study-open-response-section h2 { margin: 0; font-size: 20px; letter-spacing: -.025em; }
-.study-open-response-section header p { margin: 6px 0 0; color: #6e6e73; font-size: 12px; }
-.study-question-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
-.study-question { display: grid; gap: 12px; padding: 22px 28px 24px; border-bottom: 1px solid #dedee3; }
-.study-question:last-child { border-bottom: 0; }
-.study-question-label { display: flex; gap: 12px; color: #2c2c2e; font-size: 15px; font-weight: 620; line-height: 1.55; }
-.study-question-number { flex: 0 0 18px; padding-top: 3px; color: #8a8a90; font-size: 11px; font-weight: 720; }
-.study-question textarea { width: calc(100% - 30px); min-height: 104px; margin-left: 30px; padding: 11px 13px; resize: vertical; border: 1px solid #c9c9ce; border-radius: 8px; background: #fff; color: #2c2c2e; font: inherit; font-size: 14px; line-height: 1.5; }
-.study-question textarea:focus-visible { outline: 2px solid #525257; outline-offset: 2px; border-color: #77777c; }
-
 .study-scale-questionnaire { display: grid; gap: 0; }
 
 .study-interview-section { display: grid; gap: 0; overflow: hidden; border: 1px solid #d4d4d9; border-radius: 14px; background: #fff; }
@@ -10665,10 +10653,6 @@ body.panel-resizing * {
   .study-scale-key span:nth-child(2) { border-right: 0; }
   .study-scale-key span:nth-child(-n + 2) { border-bottom: 1px solid #e2e2e6; }
   .study-scale-question { padding: 22px 18px 20px; }
-  .study-open-response-section { border-radius: 12px; }
-  .study-open-response-section > header { padding: 20px 18px 17px; }
-  .study-question { padding: 20px 18px 22px; }
-  .study-question textarea { width: 100%; margin-left: 0; }
   .study-interview-section { border-radius: 12px; }
   .study-interview-section > header { padding: 20px 18px 17px; }
   .study-interview-question { grid-template-columns: 20px minmax(0, 1fr); gap: 9px; padding: 17px 18px 18px; font-size: 13.5px; }

@@ -819,7 +819,7 @@ async function renderAssessmentReview() {
         <div class="study-dashboard-loading" id="studyDashboardMount" role="status">Loading dashboard…</div>
       </section>
       <aside class="study-notes-panel" id="studyNotesPanel" aria-label="Dashboard notes"></aside>
-      <footer class="study-assessment-footer"><span>Your notes save automatically.</span><button type="button" id="studyAssessmentReviewDone">Continue to questions</button></footer>
+      <footer class="study-assessment-footer"><span>Your notes save automatically.</span><button type="button" id="studyAssessmentReviewDone">${key === "pre" ? "Continue to guided practice" : "Continue to questions"}</button></footer>
     </main>`, { className: "is-assessment" });
   renderNotesPanel();
   const mount = document.getElementById("studyDashboardMount");
@@ -841,24 +841,32 @@ async function renderAssessmentReview() {
     mount.querySelector("#studyRetryDashboard")?.addEventListener("click", () => void renderAssessmentReview());
   }
   document.getElementById("studyAssessmentReviewDone").addEventListener("click", () => {
+    const completedAt = new Date().toISOString();
     recordStudyAction("assessment_review_submitted", "Submitted dashboard review", {
       phase: runnerState.phase,
       materialCode: material.code,
       annotationCount: assessment.annotations.length,
       annotations: clone(assessment.annotations),
     });
+    if (key === "pre") {
+      assessment.reviewCompletedAt = completedAt;
+      stopPhaseTimer(runnerState.phase, completedAt);
+      recordStudyAction("pre_assessment_completed", "Completed initial dashboard assessment", {
+        phase: runnerState.phase,
+        materialCode: material.code,
+        annotationCount: assessment.annotations.length,
+        completedAt,
+      });
+      runnerState.assessmentStep = "review";
+      runnerState.phase = nextStudyPhase(runnerState.phase);
+      persistRunnerState();
+      location.reload();
+      return;
+    }
     runnerState.assessmentStep = "questionnaire";
     persistRunnerState();
     void renderCurrentPhase();
   });
-}
-
-function questionFieldMarkup(question, value, itemIndex) {
-  const itemId = `q${itemIndex + 1}`;
-  return `<li class="study-question">
-    <label class="study-question-label" for="studyQuestion-${escapeHTML(itemId)}"><span class="study-question-number" aria-hidden="true">${itemIndex + 1}</span><span>${escapeHTML(question)}</span></label>
-    <textarea id="studyQuestion-${escapeHTML(itemId)}" name="question_${escapeHTML(itemId)}" data-question-id="${escapeHTML(itemId)}" rows="4" autocomplete="off">${escapeHTML(value || "")}</textarea>
-  </li>`;
 }
 
 function interviewQuestionMarkup(question, itemIndex) {
@@ -866,15 +874,6 @@ function interviewQuestionMarkup(question, itemIndex) {
     <span class="study-interview-question-number" aria-hidden="true">${itemIndex + 1}</span>
     <span>${escapeHTML(question)}</span>
   </li>`;
-}
-
-function writtenQuestionsMarkup(questions, assessment) {
-  return `<section class="study-open-response-section" aria-labelledby="studyReflectionQuestions">
-    <header><h2 id="studyReflectionQuestions">Reflection questions</h2><p>Please fill out this form. You may leave any question blank.</p></header>
-    <ol class="study-question-list">
-      ${questions.map((question, index) => questionFieldMarkup(question, assessment.answers?.[`q${index + 1}`], index)).join("")}
-    </ol>
-  </section>`;
 }
 
 function interviewQuestionsMarkup(questions) {
@@ -924,33 +923,27 @@ function renderQuestionnaire() {
   cleanupAssessmentViews();
   const key = assessmentKeyForPhase(runnerState.phase);
   const assessment = ensureAssessmentState(key);
-  const questions = key === "pre" ? PRE_QUESTIONS : POST_QUESTIONS;
+  const questions = POST_QUESTIONS;
   const scaleSections = scaleSectionsForAssessment(key);
   const scaleItems = scaleSections.flatMap((section) => section.items);
   const scaleQuestionnaire = scaleItems.length ? `<div class="study-scale-questionnaire">
     <div class="study-scale-progress" aria-live="polite"><div><strong id="studyScaleProgress">0 of ${scaleItems.length} answered</strong><span>Your responses save automatically.</span></div><span class="study-scale-progress-track" aria-hidden="true"><span id="studyScaleProgressFill"></span></span></div>
     ${scaleSections.map((section) => scaleSectionMarkup(section, assessment.scales)).join("")}
   </div>` : "";
-  const reflectionQuestions = key === "post"
-    ? interviewQuestionsMarkup(questions)
-    : writtenQuestionsMarkup(questions, assessment);
+  const reflectionQuestions = interviewQuestionsMarkup(questions);
   neutralShell(`
     <main class="study-questionnaire-page">
-      <header><span>${key === "pre" ? "Before guided practice" : "After the dashboard task"}</span><h1>${key === "pre" ? "Questionnaire" : "Final questionnaire"}</h1><p>${key === "pre" ? "Take a few minutes to reflect on how you currently approach dashboard design." : "First complete the questionnaire. The facilitator will then guide you through the interview questions."}</p></header>
+      <header><span>After the dashboard task</span><h1>Final questionnaire</h1><p>First complete the questionnaire. The facilitator will then guide you through the interview questions.</p></header>
       <form id="studyQuestionnaireForm">
-        ${key === "post" ? scaleQuestionnaire : reflectionQuestions}
-        ${key === "post" ? reflectionQuestions : scaleQuestionnaire}
-        <footer><button type="submit">${key === "pre" ? "Continue to guided practice" : "Complete study"}</button></footer>
+        ${scaleQuestionnaire}
+        ${reflectionQuestions}
+        <footer><button type="submit">Complete study</button></footer>
       </form>
     </main>`, { className: "is-questionnaire" });
   document.querySelector(".study-runner-shell.is-questionnaire")?.scrollTo({ top: 0 });
   const form = document.getElementById("studyQuestionnaireForm");
   const saveDraft = () => {
     const data = new FormData(form);
-    questions.forEach((question, index) => {
-      const itemId = `q${index + 1}`;
-      assessment.answers[itemId] = String(data.get(`question_${itemId}`) || "");
-    });
     scaleItems.forEach((item) => {
       assessment.scales[item.id] = String(data.get(`scale_${item.id}`) || "");
     });
@@ -964,9 +957,6 @@ function renderQuestionnaire() {
     if (progressFill) progressFill.style.transform = `scaleX(${scaleItems.length ? answered / scaleItems.length : 0})`;
   };
   updateScaleProgress();
-  form.addEventListener("input", (event) => {
-    if (event.target.closest?.("textarea[data-question-id]")) saveDraft();
-  });
   form.addEventListener("change", (event) => {
     const input = event.target.closest?.("input[data-scale-id]");
     saveDraft();
@@ -989,7 +979,7 @@ function renderQuestionnaire() {
     recordStudyAction("assessment_questionnaire_submitted", `Submitted ${key}-session questionnaire`, {
       phase: runnerState.phase,
       instrumentVersion: "vizier-study-protocol-v1",
-      openQuestionResponseMode: key === "post" ? "spoken-interview" : "written-form",
+      openQuestionResponseMode: "spoken-interview",
       questionsPresented: clone(questions),
       questionResponses: serializeQuestionResponses(questions, assessment.answers),
       scaleResponses: serializeScaleResponses(scaleSections, assessment.scales),
@@ -1188,6 +1178,21 @@ async function renderCurrentPhase() {
   }
   if (!runnerState.phaseIntros?.[runnerState.phase]?.completedAt) {
     renderPhaseIntro();
+    return;
+  }
+  if (runnerState.phase === "pre_assessment" && runnerState.assessmentStep === "questionnaire") {
+    const completedAt = new Date().toISOString();
+    const assessment = ensureAssessmentState("pre");
+    assessment.reviewCompletedAt ||= completedAt;
+    stopPhaseTimer(runnerState.phase, completedAt);
+    recordStudyAction("removed_pre_questionnaire_skipped", "Skipped the removed initial questionnaire", {
+      phase: runnerState.phase,
+      completedAt,
+    });
+    runnerState.assessmentStep = "review";
+    runnerState.phase = nextStudyPhase(runnerState.phase);
+    persistRunnerState();
+    location.reload();
     return;
   }
   if (studyPhaseUsesVizier(runnerState.phase)) {
