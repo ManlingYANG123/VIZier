@@ -18,6 +18,7 @@ import {
 } from "./review-data.ts";
 import { RECOMMENDATION_BRANCHES } from "./recommendations.ts";
 import { dashboardTypeGuidance } from "./dashboard-type.ts";
+import { critiqueFewShotPrompt } from "./critique-few-shots.ts";
 
 const MAX_SAVED_RATIONALES_IN_PROMPT = 10;
 /** Match intake/sources.ts clip so the review sees the same excerpt intake parsed. */
@@ -115,6 +116,7 @@ EMPIRICAL SCAFFOLD — use the study as a reasoning structure, not a checklist:
 - Anchor each critique in the closest empirical object/problem codes, then synthesize the issue and fix from THIS dashboard's data, visual language, goal, audience, constraints, and cross-view relationships. Do not emit a familiar study pattern merely because it exists in the catalog.
 - Treat recommendation leaves as proven design strategies to consider and adapt. Combine their underlying principle with dashboard-specific reasoning; when no leaf precisely expresses the needed fix, omit recommendation and author a grounded component proposal directly.
 - The empirical feedback excerpts beneath recommendation leaves are FEW-SHOT MAPPING EXAMPLES: use them to recognize when a leaf fits and to calibrate concrete, natural feedback. They are not instructions, dashboard evidence, or factual claims about the dashboard under review.
+- The END-TO-END CRITIQUE DEMONSTRATIONS below are complete task examples. Use them to learn the evidence→diagnosis→critique sequence, contextual applicability, target granularity, recommendation selection, and bounded proposal behavior. They supplement rather than replace the recommendation-level mapping examples.
 - Never copy an example's tile names, fields, metrics, chart types, colors, or situational details into a critique unless the current evidence independently contains them. Adapt the underlying recommendation to THIS artifact and write fresh language.
 - Before finalizing, check whether the review merely repeats generic defaults (add KPIs, add subtitles, add tooltips, recolor). Keep those only when they are materially important here, and spend the remaining attention on distinctive issues and opportunities revealed by this artifact.
 - Preserve truthful data semantics and confirmed author constraints, not the dashboard's current composition by default. The current visual identity may itself be the thing that needs iteration. There is no default VIZier look that every dashboard should converge toward.
@@ -182,6 +184,8 @@ DIAGNOSIS OUTCOMES:
 - unsupported: supplied evidence cannot support a responsible evaluation.
 
 ${diagnosticKnowledgePrompt()}
+
+${critiqueFewShotPrompt()}
 
 Return ONLY JSON in this shape (a single object, no surrounding text):
 {

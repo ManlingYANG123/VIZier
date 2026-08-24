@@ -1,0 +1,615 @@
+{
+  "setId": "critique-end-to-end-v1",
+  "version": "2026-08-24",
+  "description": "Six fixed, compact demonstrations for evidence-grounded structured critique generation. Source references are maintainership provenance and are never sent to the model.",
+  "examples": [
+    {
+      "id": "fs-01-evidence-to-executable-fix",
+      "purpose": "Turn a concrete analytical comparison obstacle into one grounded, executable critique.",
+      "sources": [
+        {
+          "dataset": "slack-replies-coded-consolidated-08-17",
+          "threadId": "9",
+          "replyId": "1",
+          "unitId": "1",
+          "adaptation": "The empirical feedback asks for a more direct comparison; the demonstration converts that principle into a Vega-Lite sort operation."
+        }
+      ],
+      "input": {
+        "requestScope": { "kind": "full" },
+        "dashboardGenre": "analytical",
+        "context": {
+          "goal": "Compare department costs and identify the highest-cost departments.",
+          "fieldStatus": { "goal": "confirmed" }
+        },
+        "evidence": {
+          "board": {
+            "title": "Department costs",
+            "filters": [],
+            "tiles": [{ "id": "department-cost", "bounds": { "x": 20, "y": 80, "w": 560, "h": 330 } }]
+          },
+          "specMap": {
+            "department-cost": {
+              "mark": "bar",
+              "data": { "values": [
+                { "department": "Support", "cost": 72 },
+                { "department": "Sales", "cost": 118 },
+                { "department": "Engineering", "cost": 96 },
+                { "department": "Operations", "cost": 84 }
+              ] },
+              "encoding": {
+                "x": { "field": "department", "type": "nominal" },
+                "y": { "field": "cost", "type": "quantitative", "title": "Cost (USD thousands)" }
+              }
+            }
+          }
+        }
+      },
+      "expectedOutput": {
+        "diagnoses": [{
+          "object": "chart",
+          "problem": "slow, time-consuming",
+          "outcome": "evaluated_issue",
+          "judgmentBasis": ["dashboard evidence", "analytical task"],
+          "requiredContext": ["analytical_task"],
+          "contextStatus": "available",
+          "evidenceRefs": [
+            { "source": "dashboard", "path": "tile.department-cost.encoding.x", "tileId": "department-cost", "field": "department", "channel": "x", "detail": "Department categories remain in source order rather than cost order." },
+            { "source": "context", "path": "context.goal", "detail": "The confirmed task is to identify the highest-cost departments." }
+          ],
+          "rationale": "The unsorted bars make the stated ranking comparison slower than necessary."
+        }],
+        "critiques": [{
+          "object": "chart",
+          "problem": "slow, time-consuming",
+          "recommendation": "chart:support perception",
+          "kind": "sort-departments-by-cost",
+          "priority": "medium",
+          "surface": "encoding",
+          "tileId": "department-cost",
+          "title": "Make the cost ranking immediate",
+          "issue": "The department bars follow source order, so the highest-cost departments are not immediately apparent.",
+          "rationale": "A descending order directly supports the confirmed task of identifying the largest costs.",
+          "evidence": "The x encoding lists departments without a value-based sort while cost is encoded on y.",
+          "suggestion": "Sort departments by cost from highest to lowest.",
+          "judgmentBasis": ["dashboard evidence", "analytical task"],
+          "requiredContext": ["analytical_task"],
+          "contextStatus": "available",
+          "evidenceRefs": [
+            { "source": "dashboard", "path": "tile.department-cost.encoding.x", "tileId": "department-cost", "field": "department", "channel": "x", "detail": "The nominal x encoding has no value-based sort." },
+            { "source": "context", "path": "context.goal", "detail": "The confirmed task is to identify the highest-cost departments." }
+          ],
+          "proposal": {
+            "kind": "edit-spec",
+            "mode": "executable",
+            "edits": [{ "op": "set", "path": ["encoding", "x", "sort"], "value": "-y" }]
+          },
+          "target": { "granularity": "chart", "ref": { "tile": "department-cost" } }
+        }],
+        "strengths": []
+      }
+    },
+    {
+      "id": "fs-02-select-root-recommendation",
+      "purpose": "Choose the recommendation that most directly resolves a symptom that could fit several catalog leaves.",
+      "sources": [
+        {
+          "dataset": "slack-replies-coded-consolidated-08-17",
+          "threadId": "54",
+          "replyId": "1",
+          "unitId": "2",
+          "adaptation": "The empirical feedback describes colors that are difficult to map to their meaning; the demonstration isolates series differentiation as the root issue."
+        }
+      ],
+      "input": {
+        "requestScope": { "kind": "full" },
+        "dashboardGenre": "analytical",
+        "context": {
+          "goal": "Compare monthly revenue trends across six regions.",
+          "fieldStatus": { "goal": "confirmed" }
+        },
+        "evidence": {
+          "board": {
+            "title": "Regional revenue trends",
+            "filters": [],
+            "tiles": [{ "id": "regional-trend", "bounds": { "x": 20, "y": 80, "w": 760, "h": 380 } }]
+          },
+          "specMap": {
+            "regional-trend": {
+              "mark": { "type": "line", "point": true },
+              "encoding": {
+                "x": { "field": "month", "type": "temporal" },
+                "y": { "field": "revenue", "type": "quantitative" },
+                "color": {
+                  "field": "region",
+                  "type": "nominal",
+                  "scale": { "range": ["#123a63", "#18456f", "#1f507b", "#265b87", "#2d6693", "#34719f"] }
+                }
+              }
+            }
+          }
+        }
+      },
+      "expectedOutput": {
+        "diagnoses": [{
+          "object": "color",
+          "problem": "unclear | ambiguous",
+          "outcome": "evaluated_issue",
+          "judgmentBasis": ["dashboard evidence", "analytical task"],
+          "requiredContext": ["analytical_task"],
+          "contextStatus": "available",
+          "evidenceRefs": [
+            { "source": "dashboard", "path": "tile.regional-trend.encoding.color.scale.range", "tileId": "regional-trend", "field": "region", "channel": "color", "detail": "Six region series use closely spaced dark-blue values." },
+            { "source": "context", "path": "context.goal", "detail": "The task requires comparing six regional trends." }
+          ],
+          "rationale": "The palette does not provide enough categorical separation for the requested regional comparison."
+        }],
+        "critiques": [{
+          "object": "color",
+          "problem": "unclear | ambiguous",
+          "recommendation": "color:encode and distinguish meaning",
+          "kind": "differentiate-region-series",
+          "priority": "high",
+          "surface": "encoding",
+          "tileId": "regional-trend",
+          "title": "Differentiate the regional series",
+          "issue": "The six region lines are difficult to distinguish because their colors are closely related.",
+          "rationale": "Reliable series identification is necessary for comparing regional trends; this is more direct than issuing separate generic critiques about visual polish or chart form.",
+          "evidence": "The color scale assigns six neighboring dark-blue values to the region field.",
+          "suggestion": "Use a categorical palette with clearly separated colors while preserving adequate contrast.",
+          "judgmentBasis": ["dashboard evidence", "analytical task"],
+          "requiredContext": ["analytical_task"],
+          "contextStatus": "available",
+          "evidenceRefs": [
+            { "source": "dashboard", "path": "tile.regional-trend.encoding.color.scale.range", "tileId": "regional-trend", "field": "region", "channel": "color", "detail": "The six supplied colors occupy a narrow blue range." },
+            { "source": "context", "path": "context.goal", "detail": "The confirmed goal is comparison across regions." }
+          ],
+          "proposal": {
+            "kind": "v2-palette",
+            "mode": "executable",
+            "palette": ["#2F5597", "#D97904", "#2E7D5B", "#A23B72", "#6C5CE7", "#7A6A58"]
+          },
+          "target": { "granularity": "chart", "ref": { "tile": "regional-trend" } }
+        }],
+        "strengths": []
+      }
+    },
+    {
+      "id": "fs-03-analytical-interaction-applicability",
+      "purpose": "Treat interaction as task support when an analytical dashboard is explicitly intended for exploration.",
+      "sources": [
+        {
+          "dataset": "slack-replies-coded-consolidated-08-17",
+          "threadId": "20",
+          "replyId": "1",
+          "unitId": "3",
+          "adaptation": "The empirical feedback proposes coordinated filtering; the demonstration makes applicability conditional on an analytical comparison goal."
+        }
+      ],
+      "input": {
+        "requestScope": { "kind": "full" },
+        "dashboardGenre": "analytical",
+        "context": {
+          "goal": "Explore how product performance changes by region and quarter.",
+          "audience": "Sales analysts",
+          "fieldStatus": { "goal": "confirmed", "audience": "confirmed" }
+        },
+        "evidence": {
+          "board": {
+            "title": "Product performance explorer",
+            "filters": [],
+            "tiles": [
+              { "id": "sales-by-region", "bounds": { "x": 20, "y": 80, "w": 420, "h": 300 } },
+              { "id": "quarterly-trend", "bounds": { "x": 460, "y": 80, "w": 540, "h": 300 } }
+            ]
+          },
+          "specMap": {
+            "sales-by-region": {
+              "mark": "bar",
+              "encoding": {
+                "x": { "field": "region", "type": "nominal" },
+                "y": { "field": "sales", "type": "quantitative" }
+              }
+            },
+            "quarterly-trend": {
+              "mark": "line",
+              "encoding": {
+                "x": { "field": "quarter", "type": "ordinal" },
+                "y": { "field": "sales", "type": "quantitative" },
+                "color": { "field": "region", "type": "nominal" }
+              }
+            }
+          }
+        }
+      },
+      "expectedOutput": {
+        "diagnoses": [{
+          "object": "interaction",
+          "problem": "limited affordance",
+          "outcome": "evaluated_issue",
+          "judgmentBasis": ["dashboard evidence", "analytical task", "audience"],
+          "requiredContext": ["analytical_task", "audience"],
+          "contextStatus": "available",
+          "evidenceRefs": [
+            { "source": "dashboard", "path": "board.filters", "detail": "No dashboard filter controls are present." },
+            { "source": "dashboard", "path": "tile.sales-by-region.encoding.x", "tileId": "sales-by-region", "field": "region", "channel": "x", "detail": "The region field is visible in the source chart." },
+            { "source": "dashboard", "path": "tile.quarterly-trend.encoding.color", "tileId": "quarterly-trend", "field": "region", "channel": "color", "detail": "The target trend also contains the region field." },
+            { "source": "context", "path": "context.goal", "detail": "The confirmed task is exploratory comparison by region and quarter." }
+          ],
+          "rationale": "The two views share a real region field, but analysts cannot use one view to narrow the other for the stated exploration task."
+        }],
+        "critiques": [{
+          "object": "interaction",
+          "problem": "limited affordance",
+          "recommendation": "interaction:support exploration and detail access",
+          "kind": "coordinate-region-exploration",
+          "priority": "high",
+          "surface": "interaction",
+          "tileId": "sales-by-region",
+          "interactionKind": "cross-filter",
+          "title": "Connect the regional and quarterly views",
+          "issue": "The dashboard shows region in both charts but provides no coordinated way to isolate a region.",
+          "rationale": "Cross-filtering directly supports the confirmed analytical goal without adding unrelated controls.",
+          "evidence": "Both charts contain the region field and the board has no filter or coordinated selection.",
+          "suggestion": "Let a region selection in the bar chart filter the quarterly trend.",
+          "judgmentBasis": ["dashboard evidence", "analytical task", "audience"],
+          "requiredContext": ["analytical_task", "audience"],
+          "contextStatus": "available",
+          "evidenceRefs": [
+            { "source": "dashboard", "path": "board.filters", "detail": "No dashboard filter controls are present." },
+            { "source": "dashboard", "path": "tile.sales-by-region.encoding.x", "tileId": "sales-by-region", "field": "region", "channel": "x", "detail": "The source chart exposes region." },
+            { "source": "dashboard", "path": "tile.quarterly-trend.encoding.color", "tileId": "quarterly-trend", "field": "region", "channel": "color", "detail": "The target chart also uses region." },
+            { "source": "context", "path": "context.goal", "detail": "The task calls for exploration by region." }
+          ],
+          "proposal": { "kind": "add-cross-filter", "mode": "executable" },
+          "target": {
+            "granularity": "interaction",
+            "ref": { "source": "sales-by-region", "targets": ["quarterly-trend"], "field": "region" }
+          }
+        }],
+        "strengths": []
+      }
+    },
+    {
+      "id": "fs-04-infographic-interaction-nonapplicability",
+      "purpose": "Do not transfer an analytical interaction default to an infographic; critique the narrative requirement that actually applies.",
+      "sources": [
+        {
+          "dataset": "slack-op-coded-consolidated-08-17",
+          "threadId": "3",
+          "adaptation": "The consolidated original-post coding identifies the artifact as an infographic."
+        },
+        {
+          "dataset": "slack-replies-coded-consolidated-08-17",
+          "threadId": "51",
+          "replyId": "1",
+          "unitId": "2",
+          "adaptation": "The empirical feedback emphasizes reading flow; the demonstration contrasts narrative guidance with an inapplicable interaction default."
+        }
+      ],
+      "input": {
+        "requestScope": { "kind": "full" },
+        "dashboardGenre": "infographic",
+        "context": {
+          "goal": "Communicate a concise comparison of pet ownership to a general audience.",
+          "audience": "General public",
+          "fieldStatus": { "goal": "confirmed", "audience": "confirmed" }
+        },
+        "evidence": {
+          "board": {
+            "title": "Pet ownership by country",
+            "filters": [],
+            "tiles": [{ "id": "pet-share", "bounds": { "x": 120, "y": 120, "w": 720, "h": 460 } }]
+          },
+          "specMap": {
+            "pet-share": {
+              "mark": "bar",
+              "data": { "values": [
+                { "country": "A", "pet": "Dogs", "share": 44 },
+                { "country": "A", "pet": "Cats", "share": 31 },
+                { "country": "B", "pet": "Dogs", "share": 39 },
+                { "country": "B", "pet": "Cats", "share": 35 },
+                { "country": "C", "pet": "Dogs", "share": 48 },
+                { "country": "C", "pet": "Cats", "share": 28 },
+                { "country": "D", "pet": "Dogs", "share": 30 },
+                { "country": "D", "pet": "Cats", "share": 36 }
+              ] },
+              "encoding": {
+                "x": { "field": "share", "type": "quantitative" },
+                "y": { "field": "country", "type": "nominal" },
+                "color": { "field": "pet", "type": "nominal" }
+              }
+            }
+          }
+        }
+      },
+      "expectedOutput": {
+        "diagnoses": [
+          {
+            "object": "interaction",
+            "outcome": "evaluated_no_issue",
+            "judgmentBasis": ["dashboard evidence", "analytical task", "audience"],
+            "requiredContext": ["analytical_task", "audience"],
+            "contextStatus": "available",
+            "evidenceRefs": [
+              { "source": "dashboard", "path": "board.filters", "detail": "The infographic has no interactive controls." },
+              { "source": "context", "path": "context.goal", "detail": "The confirmed goal is to communicate a fixed comparison, not support open exploration." },
+              { "source": "context", "path": "context.audience", "detail": "The stated audience is the general public." }
+            ],
+            "rationale": "The lack of filters is not a defect for this fixed narrative artifact."
+          },
+          {
+            "object": "text",
+            "problem": "missing | absent | unsupported",
+            "outcome": "evaluated_issue",
+            "judgmentBasis": ["dashboard evidence", "analytical task", "audience"],
+            "requiredContext": ["analytical_task", "audience"],
+            "contextStatus": "available",
+            "evidenceRefs": [
+              { "source": "dashboard", "path": "board.title", "detail": "The title names the topic but does not communicate the visible takeaway." },
+              { "source": "dashboard", "path": "tile.pet-share.data.values", "tileId": "pet-share", "field": "share", "detail": "Dogs lead cats in three of the four displayed countries." },
+              { "source": "context", "path": "context.goal", "detail": "The infographic is intended to communicate a concise comparison." }
+            ],
+            "rationale": "A narrative artifact benefits from stating the supported conclusion rather than adding exploratory controls."
+          }
+        ],
+        "critiques": [{
+          "object": "text",
+          "problem": "missing | absent | unsupported",
+          "recommendation": "text:communicate takeaways",
+          "kind": "state-pet-ownership-takeaway",
+          "priority": "medium",
+          "surface": "text",
+          "tileId": null,
+          "title": "Lead with the comparison",
+          "issue": "The title identifies the subject but leaves the infographic's main comparison unstated.",
+          "rationale": "A clear takeaway supports the infographic's fixed explanatory purpose; an interaction recommendation would not.",
+          "evidence": "Dogs have the higher displayed share in three of four countries, while the title only says “Pet ownership by country.”",
+          "suggestion": "Use the supported comparison as the headline takeaway.",
+          "judgmentBasis": ["dashboard evidence", "analytical task", "audience"],
+          "requiredContext": ["analytical_task", "audience"],
+          "contextStatus": "available",
+          "evidenceRefs": [
+            { "source": "dashboard", "path": "board.title", "detail": "The current title is descriptive rather than interpretive." },
+            { "source": "dashboard", "path": "tile.pet-share.data.values", "tileId": "pet-share", "field": "share", "detail": "The supplied values show dogs leading cats in three of four countries." },
+            { "source": "context", "path": "context.goal", "detail": "The confirmed purpose is explanatory communication." }
+          ],
+          "proposal": {
+            "kind": "dashboard-title",
+            "mode": "executable",
+            "label": "Dogs lead pet ownership in most surveyed countries"
+          },
+          "target": { "granularity": "dashboard", "ref": {} }
+        }],
+        "strengths": []
+      }
+    },
+    {
+      "id": "fs-05-keep-local-issue-local",
+      "purpose": "Keep a chart-specific readability issue attached to the affected tile instead of generalizing it to the dashboard.",
+      "sources": [
+        {
+          "dataset": "slack-replies-coded-consolidated-08-17",
+          "threadId": "42",
+          "replyId": "1",
+          "unitId": "1",
+          "adaptation": "The empirical feedback identifies small text in one chart; the demonstration preserves that local target."
+        }
+      ],
+      "input": {
+        "requestScope": { "kind": "full" },
+        "dashboardGenre": "analytical",
+        "context": {
+          "goal": "Compare satisfaction across service categories.",
+          "fieldStatus": { "goal": "confirmed" }
+        },
+        "evidence": {
+          "board": {
+            "title": "Service satisfaction",
+            "filters": [],
+            "tiles": [
+              { "id": "category-satisfaction", "bounds": { "x": 20, "y": 100, "w": 320, "h": 300 } },
+              { "id": "monthly-satisfaction", "bounds": { "x": 360, "y": 100, "w": 640, "h": 300 } }
+            ]
+          },
+          "specMap": {
+            "category-satisfaction": {
+              "mark": "bar",
+              "encoding": {
+                "x": {
+                  "field": "service_category",
+                  "type": "nominal",
+                  "axis": { "labelAngle": 0, "labelFontSize": 9 }
+                },
+                "y": { "field": "satisfaction", "type": "quantitative" }
+              }
+            },
+            "monthly-satisfaction": {
+              "mark": "line",
+              "encoding": {
+                "x": { "field": "month", "type": "temporal" },
+                "y": { "field": "satisfaction", "type": "quantitative" }
+              }
+            }
+          }
+        }
+      },
+      "expectedOutput": {
+        "diagnoses": [{
+          "object": "readability",
+          "problem": "overly complex | difficult",
+          "outcome": "evaluated_issue",
+          "judgmentBasis": ["dashboard evidence", "general design principle"],
+          "requiredContext": [],
+          "contextStatus": "not_applicable",
+          "evidenceRefs": [{
+            "source": "dashboard",
+            "path": "tile.category-satisfaction.encoding.x.axis",
+            "tileId": "category-satisfaction",
+            "field": "service_category",
+            "channel": "x",
+            "detail": "The narrow category chart keeps labels horizontal at 9 px."
+          }],
+          "rationale": "The readability weakness is supported on one tile; the other chart and board layout do not share it."
+        }],
+        "critiques": [{
+          "object": "readability",
+          "problem": "overly complex | difficult",
+          "recommendation": "chart:support perception",
+          "kind": "make-category-labels-readable",
+          "priority": "medium",
+          "surface": "text",
+          "tileId": "category-satisfaction",
+          "title": "Give the category labels room",
+          "issue": "The category labels are difficult to scan in the narrow chart.",
+          "rationale": "This is a local axis-label issue, not evidence that the whole dashboard layout is unreadable.",
+          "evidence": "The category chart is 320 pixels wide and uses horizontal 9 px x-axis labels.",
+          "suggestion": "Rotate the category labels and increase their font size within this chart.",
+          "judgmentBasis": ["dashboard evidence", "general design principle"],
+          "requiredContext": [],
+          "contextStatus": "not_applicable",
+          "evidenceRefs": [{
+            "source": "dashboard",
+            "path": "tile.category-satisfaction.encoding.x.axis",
+            "tileId": "category-satisfaction",
+            "field": "service_category",
+            "channel": "x",
+            "detail": "The affected chart uses horizontal 9 px category labels."
+          }],
+          "proposal": {
+            "kind": "edit-spec",
+            "mode": "executable",
+            "edits": [
+              { "op": "set", "path": ["encoding", "x", "axis", "labelAngle"], "value": -35 },
+              { "op": "set", "path": ["encoding", "x", "axis", "labelFontSize"], "value": 12 }
+            ]
+          },
+          "target": { "granularity": "chart", "ref": { "tile": "category-satisfaction" } }
+        }],
+        "strengths": []
+      }
+    },
+    {
+      "id": "fs-06-respect-focused-scope",
+      "purpose": "Answer the selected feedback scope and explicitly leave unrelated visible issues out of scope.",
+      "sources": [
+        {
+          "dataset": "slack-replies-coded-consolidated-08-17",
+          "threadId": "9",
+          "replyId": "2",
+          "unitId": "1",
+          "adaptation": "The empirical feedback isolates a color-contrast concern and recommends a bounded palette change."
+        }
+      ],
+      "input": {
+        "requestScope": { "kind": "focused", "request": "Review color accessibility only." },
+        "dashboardGenre": "analytical",
+        "context": {
+          "goal": "Compare approval levels across demographic groups.",
+          "fieldStatus": { "goal": "confirmed" }
+        },
+        "evidence": {
+          "board": {
+            "title": "Approval by demographic group",
+            "filters": [],
+            "tiles": [
+              { "id": "approval-bars", "bounds": { "x": 20, "y": 80, "w": 640, "h": 320 } },
+              { "id": "detail-table", "bounds": { "x": 680, "y": 80, "w": 300, "h": 320 } }
+            ]
+          },
+          "specMap": {
+            "approval-bars": {
+              "background": "#20242A",
+              "mark": "bar",
+              "encoding": {
+                "x": { "field": "approval", "type": "quantitative" },
+                "y": { "field": "group", "type": "nominal" },
+                "color": {
+                  "field": "response",
+                  "type": "nominal",
+                  "scale": { "range": ["#26313A", "#34414B", "#43515B"] }
+                }
+              }
+            },
+            "detail-table": {
+              "mark": "text",
+              "encoding": {
+                "text": { "field": "approval", "type": "quantitative" },
+                "y": { "field": "group", "type": "nominal" }
+              }
+            }
+          }
+        }
+      },
+      "expectedOutput": {
+        "diagnoses": [
+          {
+            "object": "color",
+            "problem": "breaks established principles",
+            "outcome": "evaluated_issue",
+            "judgmentBasis": ["dashboard evidence", "general design principle"],
+            "requiredContext": [],
+            "contextStatus": "not_applicable",
+            "evidenceRefs": [{
+              "source": "dashboard",
+              "path": "tile.approval-bars.encoding.color.scale.range",
+              "tileId": "approval-bars",
+              "field": "response",
+              "channel": "color",
+              "detail": "Three dark gray-blue response colors are placed on a dark #20242A background."
+            }],
+            "rationale": "The closely valued colors reduce contrast and category differentiation in the requested color-accessibility scope."
+          },
+          {
+            "object": "layout",
+            "problem": "cluttered | crowded",
+            "outcome": "out_of_scope",
+            "judgmentBasis": ["dashboard evidence"],
+            "requiredContext": [],
+            "contextStatus": "not_applicable",
+            "evidenceRefs": [{
+              "source": "dashboard",
+              "path": "board.tiles",
+              "detail": "The detail table occupies a narrow adjacent column."
+            }],
+            "rationale": "Layout was not evaluated because the author requested color accessibility only."
+          }
+        ],
+        "critiques": [{
+          "object": "color",
+          "problem": "breaks established principles",
+          "recommendation": "color:encode and distinguish meaning",
+          "kind": "increase-response-contrast",
+          "priority": "high",
+          "surface": "encoding",
+          "tileId": "approval-bars",
+          "crosscutting": ["accessibility"],
+          "title": "Increase response-color contrast",
+          "issue": "The response categories are difficult to distinguish against the dark chart background.",
+          "rationale": "Clear luminance and hue separation improves category identification while staying within the requested color-accessibility scope.",
+          "evidence": "The three response colors are dark gray-blue values on a #20242A background.",
+          "suggestion": "Replace only the response palette with higher-contrast, distinguishable colors; do not rework the unrelated layout.",
+          "answer": "The primary color-accessibility issue is insufficient contrast and separation among the response colors.",
+          "judgmentBasis": ["dashboard evidence", "general design principle"],
+          "requiredContext": [],
+          "contextStatus": "not_applicable",
+          "evidenceRefs": [{
+            "source": "dashboard",
+            "path": "tile.approval-bars.encoding.color.scale.range",
+            "tileId": "approval-bars",
+            "field": "response",
+            "channel": "color",
+            "detail": "The supplied colors are close in luminance to each other and to the dark background."
+          }],
+          "proposal": {
+            "kind": "v2-palette",
+            "mode": "executable",
+            "palette": ["#74C0FC", "#FFD166", "#EF7C8E"]
+          },
+          "target": { "granularity": "chart", "ref": { "tile": "approval-bars" } }
+        }],
+        "strengths": []
+      }
+    }
+  ]
+}

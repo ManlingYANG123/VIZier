@@ -5,6 +5,12 @@ import { Tracer } from "../src/trace.ts";
 import { dashboardBoard, dashboardSpecMap } from "../fixtures/specs.ts";
 import { StubClient, assertSubsequence, diagnosisPayload } from "./helpers.ts";
 import type { Critique } from "../src/contracts.ts";
+import {
+  CRITIQUE_FEW_SHOT_CONTENT_HASH,
+  CRITIQUE_FEW_SHOT_IDS,
+  CRITIQUE_FEW_SHOT_SET_ID,
+  CRITIQUE_FEW_SHOT_VERSION,
+} from "../src/generate/critique-few-shots.ts";
 
 const titleCritique = {
   object: "text",
@@ -114,6 +120,10 @@ test("artifact-only review uses the unified LLM path and returns diagnostic prov
   assert.equal(res.critiques[0].dimension, "text");
   assert.equal(res.critiques[0].judgmentBasis?.[0], "dashboard evidence");
   assert.match(res.registryVersion, /^diagnostic-knowledge-v4/);
+  assert.equal(res.fewShotSetId, CRITIQUE_FEW_SHOT_SET_ID);
+  assert.equal(res.fewShotVersion, CRITIQUE_FEW_SHOT_VERSION);
+  assert.deepEqual(res.fewShotIds, [...CRITIQUE_FEW_SHOT_IDS]);
+  assert.equal(res.fewShotContentHash, CRITIQUE_FEW_SHOT_CONTENT_HASH);
   // The run reports the diagnosis outcomes, not legacy criterion evaluations.
   assert.ok(res.diagnoses.some((diagnosis) =>
     diagnosis.object === "text" && diagnosis.outcome === "evaluated_issue"
@@ -319,7 +329,16 @@ test("generation tokens stream through the unified diagnostic trace", async () =
     { client: new StubClient(diagnosisPayload([titleCritique])) },
   );
   const genStart = tracer.events.find((event) => event.phase === "generate_start");
-  assert.equal((genStart?.data as { llm: boolean }).llm, true);
+  const data = genStart?.data as {
+    llm: boolean;
+    fewShotSetId: string;
+    fewShotIds: string[];
+    fewShotContentHash: string;
+  };
+  assert.equal(data.llm, true);
+  assert.equal(data.fewShotSetId, CRITIQUE_FEW_SHOT_SET_ID);
+  assert.deepEqual(data.fewShotIds, [...CRITIQUE_FEW_SHOT_IDS]);
+  assert.equal(data.fewShotContentHash, CRITIQUE_FEW_SHOT_CONTENT_HASH);
 });
 
 test("focused review uses the same engine and retains direct-answer metadata", async () => {

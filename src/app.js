@@ -7645,6 +7645,10 @@ async function generateCritiquesFromEngine(focusedRequest = "", options = {}) {
     promptVersion: resp?.promptVersion || critiques[0]?.promptVersion || null,
     systemVersion: resp?.engineVersion || critiques[0]?.engineVersion || null,
     registryVersion: resp?.registryVersion || critiques[0]?.registryVersion || null,
+    fewShotSetId: resp?.fewShotSetId || null,
+    fewShotVersion: resp?.fewShotVersion || null,
+    fewShotIds: Array.isArray(resp?.fewShotIds) ? [...resp.fewShotIds] : [],
+    fewShotContentHash: resp?.fewShotContentHash || null,
     runId: resp?.runId || null,
   } };
 }
@@ -7707,6 +7711,10 @@ async function generateLocalCritiques({ bounds, request, dimension }) {
       promptVersion: resp?.promptVersion || critiques[0]?.promptVersion || null,
       systemVersion: resp?.engineVersion || critiques[0]?.engineVersion || null,
       registryVersion: resp?.registryVersion || critiques[0]?.registryVersion || null,
+      fewShotSetId: resp?.fewShotSetId || null,
+      fewShotVersion: resp?.fewShotVersion || null,
+      fewShotIds: Array.isArray(resp?.fewShotIds) ? [...resp.fewShotIds] : [],
+      fewShotContentHash: resp?.fewShotContentHash || null,
       runId: resp?.runId || null,
     },
   };
@@ -7726,6 +7734,10 @@ function recordCritiquesDisplayed(scope, askId, extra = {}) {
       dashboardVersion: Number(state.version) || 1,
       promptVersion: extra.promptVersion || null,
       systemVersion: extra.systemVersion || STUDY_APP_VERSION,
+      fewShotSetId: extra.fewShotSetId || null,
+      fewShotVersion: extra.fewShotVersion || null,
+      fewShotIds: Array.isArray(extra.fewShotIds) ? [...extra.fewShotIds] : [],
+      fewShotContentHash: extra.fewShotContentHash || null,
       reviewTemperature: Number(state.reviewTemperature),
       model: extra.model || null,
       latencyMs: extra.latencyMs ?? null,
@@ -7858,6 +7870,10 @@ async function runAIAssist(options = {}) {
       model: reviewMeta?.model || null,
       promptVersion: reviewMeta?.promptVersion || null,
       systemVersion: reviewMeta?.systemVersion || null,
+      fewShotSetId: reviewMeta?.fewShotSetId || null,
+      fewShotVersion: reviewMeta?.fewShotVersion || null,
+      fewShotIds: reviewMeta?.fewShotIds || [],
+      fewShotContentHash: reviewMeta?.fewShotContentHash || null,
     });
     return true;
   } catch (err) {
@@ -8550,6 +8566,10 @@ document.getElementById("localReviewForm").addEventListener("submit", async (eve
       model: reviewMeta?.model || null,
       promptVersion: reviewMeta?.promptVersion || null,
       systemVersion: reviewMeta?.systemVersion || null,
+      fewShotSetId: reviewMeta?.fewShotSetId || null,
+      fewShotVersion: reviewMeta?.fewShotVersion || null,
+      fewShotIds: reviewMeta?.fewShotIds || [],
+      fewShotContentHash: reviewMeta?.fewShotContentHash || null,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

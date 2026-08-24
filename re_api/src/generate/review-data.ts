@@ -37,7 +37,10 @@ export const CRITERION_REGISTRY_VERSION = "diagnostic-knowledge-v4-2026-08-23";
 // enter the review user prompt (still filtered after generation).
 // v23: recommendation ids, definitions, and empirical few-shot examples load
 // from recommendation_v3_examples.csv as one maintainable source of truth.
-export const REVIEW_PROMPT_VERSION = "diagnostic-review-v23-2026-08-23";
+// v24: six fixed, provenance-tracked end-to-end critique demonstrations teach
+// evidence→diagnosis→critique structure, genre applicability, target level,
+// recommendation choice, and focused-scope discipline.
+export const REVIEW_PROMPT_VERSION = "diagnostic-review-v24-2026-08-24";
 // v3.2: the engine now assembles and returns the grounded `strengths` array
 // alongside critiques/diagnoses (rendered as inline positive cards in the
 // critique list, grouped by dimension).
