@@ -57,6 +57,23 @@ export const STUDY_RUNNER_PHASES = Object.freeze([
   "complete",
 ]);
 
+export const STUDY_RUNNER_SCREENS = Object.freeze([
+  Object.freeze({ id: "pre_assessment:intro", phase: "pre_assessment", view: "intro" }),
+  Object.freeze({ id: "pre_assessment:review", phase: "pre_assessment", view: "review" }),
+  Object.freeze({ id: "training:intro", phase: "training", view: "intro" }),
+  Object.freeze({ id: "training:workspace", phase: "training", view: "workspace" }),
+  Object.freeze({ id: "dashboard_task:intro", phase: "dashboard_task", view: "intro" }),
+  Object.freeze({ id: "dashboard_task:workspace", phase: "dashboard_task", view: "workspace" }),
+  Object.freeze({ id: "post_assessment:intro", phase: "post_assessment", view: "intro" }),
+  Object.freeze({ id: "post_assessment:review", phase: "post_assessment", view: "review" }),
+  Object.freeze({ id: "post_assessment:questionnaire", phase: "post_assessment", view: "questionnaire" }),
+  Object.freeze({ id: "complete", phase: "complete", view: "complete" }),
+]);
+
+const STUDY_RUNNER_SCREEN_BY_ID = new Map(
+  STUDY_RUNNER_SCREENS.map((screen) => [screen.id, screen]),
+);
+
 /** Older sessions stored this phase as `timed_task`; normalize it to the
  * current phase name before routing, timing, or persistence. */
 export function normalizeStudyPhase(phase) {
@@ -97,35 +114,61 @@ export const PRE_QUESTIONS = Object.freeze([
   "How do you normally decide what kind of feedback to request about a dashboard?",
 ]);
 
-export const POST_QUESTIONS = Object.freeze([
-  "What dashboard-design principles or best practices guide your work? Please list as many as readily come to mind.",
-  "Did working with VIZier change your awareness or understanding of any dashboard-design principles? If so, which ones, and how? If not, please explain.",
-  "Did working with VIZier change how you would approach reviewing or revising a dashboard? If so, please describe what you might do differently.",
-  "Did the experience change how you would ask another person or system for feedback about a dashboard? If so, how?",
-  "Was anything presented by VIZier already familiar to you? Was anything new, surprising, questionable, or inconsistent with your existing practice?",
-  "Do you expect to apply anything from this experience to a future dashboard-design task? Why or why not?",
-  "How confident are you in the final dashboard, and what would you still change with more time?",
-  "Where in your real workflow would VIZier be most useful and least useful?",
-  "What were the best and worst parts of the experience? What should change?",
-]);
-
 const freezeScaleItems = (items) => Object.freeze(items.map((item) => Object.freeze(item)));
 
 export const POST_EXPERIENCE_SCALE_ITEMS = freezeScaleItems([
-  { id: "vizier_awareness", statement: "VIZier made me more aware of dashboard-design considerations that I might otherwise overlook." },
-  { id: "vizier_understanding", statement: "VIZier helped me understand why particular dashboard-design choices may be effective or ineffective." },
-  { id: "vizier_revision_ideas", statement: "VIZier gave me new ideas for how to revise a dashboard." },
-  { id: "vizier_systematic_review", statement: "After using VIZier, I feel better able to systematically review a dashboard." },
-  { id: "vizier_feedback_request", statement: "After using VIZier, I feel better able to formulate a useful request for dashboard-design feedback." },
-  { id: "vizier_future_use", statement: "I expect to apply something from this session to future dashboard-design work." },
-  { id: "vizier_guidance_familiarity", statement: "Most of the design guidance provided by VIZier was already familiar to me." },
+  {
+    id: "vizier_final_dashboard_confidence",
+    statement: "I’m confident in the final dashboard I arrived at with VIZier.",
+    interviewQuestion: "What else would you still change given more time and capabilities?",
+  },
+  {
+    id: "vizier_comfort",
+    statement: "I felt confident and comfortable using VIZier.",
+    interviewQuestion: "What were the best and worst parts of the experience? What should change?",
+  },
+  {
+    id: "vizier_awareness",
+    statement: "VIZier made me more aware of dashboard design considerations that I might otherwise overlook.",
+    interviewQuestion: "Any examples? Please explain.",
+  },
+  {
+    id: "vizier_understanding",
+    statement: "VIZier helped me understand why particular dashboard-design choices may be effective or ineffective.",
+    interviewQuestion: "Please explain.",
+  },
+  {
+    id: "vizier_systematic_review",
+    statement: "After using VIZier, I feel better equipped to systematically review a dashboard.",
+    interviewQuestion: "Why or why not? If yes, what, and in what ways?",
+  },
+  {
+    id: "vizier_feedback_request",
+    statement: "After using VIZier, I feel better able to formulate a useful request for dashboard-design feedback.",
+    interviewQuestion: "Please explain any changes to how you might ask another person or system for feedback.",
+  },
+  {
+    id: "vizier_control",
+    statement: "I felt in control of the design decisions and process when using VIZier.",
+    interviewQuestion: "Please explain what helped you feel more in control and what didn’t?",
+  },
+  {
+    id: "vizier_future_use",
+    statement: "I expect to apply something from this session to future dashboard-design work.",
+    interviewQuestion: "How would you envision VIZier fitting into your existing workflows?",
+  },
 ]);
+
+/** Study 1 and Study 2 share these eight paired questionnaire/interview themes. */
+export const POST_QUESTIONS = Object.freeze(
+  POST_EXPERIENCE_SCALE_ITEMS.map((item) => item.interviewQuestion),
+);
 
 export function scaleSectionsForAssessment(key) {
   if (key !== "post") return [];
   return [{
     id: "vizier-experience",
-    title: "After using VIZier",
+    title: "Experience with VIZier",
     items: POST_EXPERIENCE_SCALE_ITEMS,
   }];
 }
@@ -180,6 +223,14 @@ export function createStudyRunnerState(groupId, participantId) {
     assessmentStep: "review",
     phaseIntros: {},
     phaseTimers: {},
+    navigation: {
+      currentScreenId: "pre_assessment:intro",
+      history: ["pre_assessment:intro"],
+      historyIndex: 0,
+      reopenings: [],
+    },
+    workspaces: {},
+    workspaceSubmissions: {},
     startedAt: now,
     updatedAt: now,
     assessments: {
@@ -187,6 +238,37 @@ export function createStudyRunnerState(groupId, participantId) {
       post: { annotations: [], answers: {}, scales: {}, submittedAt: null },
     },
   };
+}
+
+export function studyScreenDescriptor(screenId) {
+  return STUDY_RUNNER_SCREEN_BY_ID.get(String(screenId || "")) || null;
+}
+
+export function studyScreenIdForState(state) {
+  const phase = normalizeStudyPhase(state?.phase);
+  if (phase === "complete") return "complete";
+  const explicit = studyScreenDescriptor(state?.navigation?.currentScreenId);
+  if (explicit && explicit.phase === phase) return explicit.id;
+  if (!state?.phaseIntros?.[phase]?.completedAt) return `${phase}:intro`;
+  if (studyPhaseUsesVizier(phase)) return `${phase}:workspace`;
+  if (phase === "post_assessment" && state?.assessmentStep === "questionnaire") {
+    return "post_assessment:questionnaire";
+  }
+  return `${phase}:review`;
+}
+
+export function previousStudyScreenId(screenId) {
+  const index = STUDY_RUNNER_SCREENS.findIndex((screen) => screen.id === screenId);
+  return index > 0 ? STUDY_RUNNER_SCREENS[index - 1].id : null;
+}
+
+export function operationStudyScreenId(phase) {
+  const normalized = normalizeStudyPhase(phase);
+  if (studyPhaseUsesVizier(normalized)) return `${normalized}:workspace`;
+  if (normalized === "pre_assessment" || normalized === "post_assessment") {
+    return `${normalized}:review`;
+  }
+  return null;
 }
 
 export function isStudyRunnerState(value, groupId = null) {
@@ -246,11 +328,83 @@ export function nextStudyPhase(phase) {
 }
 
 export function studyPhaseTimerElapsedMs(timer, now = Date.now()) {
-  const startedAt = Date.parse(String(timer?.startedAt || ""));
-  if (!Number.isFinite(startedAt)) return 0;
-  const completedAt = timer?.completedAt ? Date.parse(String(timer.completedAt)) : Number(now);
-  if (!Number.isFinite(completedAt)) return 0;
-  return Math.max(0, completedAt - startedAt);
+  return studyPhaseTimerSegments(timer).reduce((total, segment) => {
+    const startedAt = Date.parse(String(segment?.startedAt || ""));
+    if (!Number.isFinite(startedAt)) return total;
+    const completedAt = segment?.completedAt
+      ? Date.parse(String(segment.completedAt))
+      : Number(now);
+    if (!Number.isFinite(completedAt)) return total;
+    return total + Math.max(0, completedAt - startedAt);
+  }, 0);
+}
+
+export function studyPhaseTimerSegments(timer) {
+  if (Array.isArray(timer?.segments)) {
+    return timer.segments.filter((segment) => segment && typeof segment === "object");
+  }
+  if (!timer?.startedAt) return [];
+  return [{
+    id: "segment-1",
+    reason: "initial",
+    source: "legacy",
+    startedAt: timer.startedAt,
+    completedAt: timer.completedAt || null,
+    durationMs: Number.isFinite(Number(timer.durationMs)) ? Number(timer.durationMs) : null,
+  }];
+}
+
+export function studyPhaseTimerIsRunning(timer) {
+  const segments = studyPhaseTimerSegments(timer);
+  return Boolean(segments.length && !segments[segments.length - 1].completedAt);
+}
+
+export function startStudyPhaseTimerSegment(timer, {
+  startedAt = new Date().toISOString(),
+  reason = "initial",
+  source = "participant",
+} = {}) {
+  const segments = studyPhaseTimerSegments(timer).map((segment) => ({ ...segment }));
+  if (segments.length && !segments[segments.length - 1].completedAt) {
+    return timer;
+  }
+  segments.push({
+    id: `segment-${segments.length + 1}`,
+    reason: segments.length ? "reopened" : reason,
+    source,
+    startedAt,
+    completedAt: null,
+    durationMs: null,
+  });
+  return {
+    schemaVersion: 2,
+    startedAt: segments[0].startedAt,
+    completedAt: null,
+    durationMs: studyPhaseTimerElapsedMs({ segments }, Date.parse(startedAt)),
+    totalDurationMs: studyPhaseTimerElapsedMs({ segments }, Date.parse(startedAt)),
+    segments,
+  };
+}
+
+export function stopStudyPhaseTimerSegment(timer, completedAt = new Date().toISOString()) {
+  const segments = studyPhaseTimerSegments(timer).map((segment) => ({ ...segment }));
+  const active = segments[segments.length - 1];
+  if (!active || active.completedAt) return timer || null;
+  const startedAtMs = Date.parse(String(active.startedAt || ""));
+  const completedAtMs = Date.parse(String(completedAt || ""));
+  active.completedAt = completedAt;
+  active.durationMs = Number.isFinite(startedAtMs) && Number.isFinite(completedAtMs)
+    ? Math.max(0, completedAtMs - startedAtMs)
+    : 0;
+  const totalDurationMs = studyPhaseTimerElapsedMs({ segments }, completedAtMs);
+  return {
+    schemaVersion: 2,
+    startedAt: segments[0]?.startedAt || null,
+    completedAt,
+    durationMs: totalDurationMs,
+    totalDurationMs,
+    segments,
+  };
 }
 
 export function formatStudyPhaseTimer(elapsedMs) {

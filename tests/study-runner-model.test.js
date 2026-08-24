@@ -17,10 +17,16 @@ import {
   scaleSectionsForAssessment,
   serializeQuestionResponses,
   serializeScaleResponses,
+  startStudyPhaseTimerSegment,
+  stopStudyPhaseTimerSegment,
   studyGroupIdFromPath,
   studyPhaseNumber,
   studyPhaseTimerElapsedMs,
+  studyPhaseTimerIsRunning,
   studyPhaseUsesVizier,
+  studyScreenDescriptor,
+  studyScreenIdForState,
+  previousStudyScreenId,
 } from "../src/study-runner-model.js";
 
 test("only the two fixed group routes start the study runner", () => {
@@ -51,6 +57,8 @@ test("a participant state starts at the neutral pre assessment and advances in o
   assert.equal(state.assessmentStep, "review");
   assert.deepEqual(state.phaseIntros, {});
   assert.deepEqual(state.phaseTimers, {});
+  assert.equal(state.navigation.currentScreenId, "pre_assessment:intro");
+  assert.deepEqual(state.navigation.history, ["pre_assessment:intro"]);
   assert.equal(nextStudyPhase("pre_assessment"), "training");
   assert.equal(nextStudyPhase("training"), "dashboard_task");
   assert.equal(nextStudyPhase("dashboard_task"), "post_assessment");
@@ -58,6 +66,22 @@ test("a participant state starts at the neutral pre assessment and advances in o
   assert.equal(normalizeStudyPhase("timed_task"), "dashboard_task");
   assert.equal(nextStudyPhase("post_assessment"), "complete");
   assert.equal(studyPhaseNumber("post_assessment"), 4);
+});
+
+test("study screens describe the complete protocol path and its previous interface", () => {
+  assert.deepEqual(studyScreenDescriptor("training:workspace"), {
+    id: "training:workspace",
+    phase: "training",
+    view: "workspace",
+  });
+  assert.equal(previousStudyScreenId("training:workspace"), "training:intro");
+  assert.equal(previousStudyScreenId("training:intro"), "pre_assessment:review");
+  assert.equal(previousStudyScreenId("pre_assessment:intro"), null);
+
+  const state = createStudyRunnerState("group-1", "P022");
+  state.phaseIntros.pre_assessment = { completedAt: "2026-08-24T10:00:00.000Z" };
+  state.navigation = null;
+  assert.equal(studyScreenIdForState(state), "pre_assessment:review");
 });
 
 test("stage timers format and preserve elapsed time across refreshes", () => {
@@ -73,6 +97,33 @@ test("stage timers format and preserve elapsed time across refreshes", () => {
     completedAt: "2026-08-24T10:04:00.000Z",
   }), 240_000);
   assert.equal(studyPhaseTimerElapsedMs({ startedAt: "invalid" }), 0);
+});
+
+test("reopened stage timers use manual, cumulative segments", () => {
+  const firstStart = "2026-08-24T10:00:00.000Z";
+  const firstStop = "2026-08-24T10:08:00.000Z";
+  const secondStart = "2026-08-24T10:20:00.000Z";
+  const secondStop = "2026-08-24T10:22:00.000Z";
+  const first = startStudyPhaseTimerSegment(null, { startedAt: firstStart, source: "operation-page" });
+  assert.equal(studyPhaseTimerIsRunning(first), true);
+  const completed = stopStudyPhaseTimerSegment(first, firstStop);
+  assert.equal(studyPhaseTimerIsRunning(completed), false);
+  assert.equal(completed.totalDurationMs, 480_000);
+
+  // Reopening alone does not start another segment. The second segment appears
+  // only after the participant selects Start timer on the operation page.
+  assert.equal(completed.segments.length, 1);
+  const reopened = startStudyPhaseTimerSegment(completed, {
+    startedAt: secondStart,
+    source: "operation-page",
+  });
+  assert.equal(reopened.segments[1].reason, "reopened");
+  assert.equal(studyPhaseTimerIsRunning(reopened), true);
+  const finished = stopStudyPhaseTimerSegment(reopened, secondStop);
+  assert.equal(finished.segments.length, 2);
+  assert.equal(finished.segments[1].durationMs, 120_000);
+  assert.equal(finished.totalDurationMs, 600_000);
+  assert.equal(formatStudyPhaseTimer(finished.totalDurationMs), "10:00");
 });
 
 test("only guided practice and the dashboard task use the full VIZier workspace", () => {
@@ -112,24 +163,28 @@ test("questionnaire content follows the study protocol exactly", () => {
   const pre = scaleSectionsForAssessment("pre");
   const post = scaleSectionsForAssessment("post");
   assert.equal(PRE_QUESTIONS.length, 3);
-  assert.equal(POST_QUESTIONS.length, 9);
+  assert.equal(POST_QUESTIONS.length, 8);
   assert.equal(pre.length, 0);
   assert.equal(post.length, 1);
   assert.deepEqual(post[0].items, POST_EXPERIENCE_SCALE_ITEMS);
-  assert.equal(post[0].items.length, 7);
+  assert.equal(post[0].items.length, 8);
   assert.match(PRE_QUESTIONS[0], /Please list as many as readily come to mind\.$/);
-  assert.match(POST_QUESTIONS[1], /If not, please explain\.$/);
+  assert.deepEqual(POST_QUESTIONS, post[0].items.map((item) => item.interviewQuestion));
+  post[0].items.forEach((item) => {
+    assert.ok(item.statement.length > 0);
+    assert.ok(item.interviewQuestion.length > 0);
+  });
 });
 
 test("scale telemetry serializes numeric, N/A, and missing responses explicitly", () => {
   const sections = scaleSectionsForAssessment("post");
   const responses = serializeScaleResponses(sections, {
-    vizier_awareness: "6",
-    vizier_understanding: "NA",
+    vizier_final_dashboard_confidence: "6",
+    vizier_comfort: "NA",
   });
   assert.deepEqual(responses[0], {
     instrument: "vizier-experience",
-    itemId: "vizier_awareness",
+    itemId: "vizier_final_dashboard_confidence",
     statement: sections[0].items[0].statement,
     value: 6,
     notApplicable: false,

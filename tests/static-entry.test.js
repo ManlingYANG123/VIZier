@@ -214,8 +214,18 @@ test("group study routes boot the neutral runner before VIZier", async () => {
   assert.match(runner, /study_phase_intro_completed/);
   assert.match(runner, /study_phase_timer_started/);
   assert.match(runner, /study_phase_timer_completed/);
+  assert.match(runner, /study_phase_reopened/);
+  assert.match(runner, /segmentReason/);
+  assert.match(runner, /timerRequiresManualRestart: true/);
   assert.match(runner, /id="studyStageTimer"/);
   assert.match(runner, /id="studyStartStageTimer">Start timer/);
+  assert.match(runner, /class="study-runner-back"/);
+  assert.match(runner, /returnToPreviousStudyScreen/);
+  assert.match(runner, /study_screen_restored/);
+  assert.match(runner, /addEventListener\("popstate"/);
+  assert.match(runner, /source: "browser-history"/);
+  assert.match(runner, /captureStudyRunnerWorkspaceState/);
+  assert.match(runner, /restoreStudyRunnerWorkspaceState/);
   assert.match(runner, /"operation-page"/);
   assert.doesNotMatch(runner, /startPhaseTimer\(phase, completedAt\)/);
   assert.match(runner, /className: "is-phase-intro", showTimer: false/);
@@ -224,14 +234,14 @@ test("group study routes boot the neutral runner before VIZier", async () => {
   assert.match(runner, /aria-current="step"/);
   assert.match(runner, /pre_assessment_completed/);
   assert.match(runner, /removed_pre_questionnaire_skipped/);
-  assert.match(runner, /First complete the questionnaire\. The facilitator will then guide you through the interview questions\./);
-  assert.match(runner, /The facilitator will ask these questions aloud after you complete the questionnaire\./);
+  assert.match(runner, /answer the question in the same item aloud\./);
   assert.match(runner, /openQuestionResponseMode: "spoken-interview"/);
   assert.match(runner, /scale_response_recorded/);
   assert.match(runner, /questionResponses: serializeQuestionResponses/);
   assert.match(runner, /scaleResponses: serializeScaleResponses/);
   assert.doesNotMatch(runner, /<textarea id="studyQuestion-/);
-  assert.match(runner, /class="study-interview-question"/);
+  assert.match(runner, /class="study-scale-interview-question"/);
+  assert.doesNotMatch(runner, /study-interview-section/);
   assert.doesNotMatch(runner, /<details class="study-interview-prompts"/);
   assert.match(runner, /openStudyMaterialForRunner/);
   assert.match(runner, /studyPhaseUsesVizier\(runnerState\.phase\)/);
@@ -248,6 +258,97 @@ test("group study routes boot the neutral runner before VIZier", async () => {
   assert.doesNotMatch(styles, /\.study-scale-question legend\s*\{[^}]*max-width:\s*70ch/);
   assert.doesNotMatch(styles, /\.study-questionnaire-page form > footer\s*\{[^}]*position:\s*sticky/);
   assert.match(styles, /\.study-workspace-progress/);
+  assert.match(styles, /\.study-runner-back/);
+});
+
+test("guided practice uses presets while the dashboard task keeps the live engine", async () => {
+  const app = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
+  const runner = await readFile(new URL("../src/study-runner.js", import.meta.url), "utf8");
+  const tutorial = await readFile(new URL("../src/practice-tutorial.js", import.meta.url), "utf8");
+  const presets = await readFile(new URL("../src/practice-presets.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+
+  assert.match(runner, /practice: runnerState\.phase === "training"/);
+  assert.match(runner, /if \(runnerState\.phase === "training"\) \{\s+await app\.startGuidedPracticeTutorial/);
+  assert.match(app, /if \(!practiceUsesPreset\(\)\) return streamApply/);
+  assert.match(app, /practiceReviewResponse\(practiceRuntime\.preset/);
+  assert.match(app, /executionMode: practiceUsesPreset\(\) \? "practice-preset" : "live-engine"/);
+  assert.match(presets, /Should I change the layout\?/);
+  assert.match(presets, /Is this title clear enough\?/);
+  assert.match(tutorial, /Step \$\{milestoneIndex \+ 1\} of \$\{milestones\.length\}/);
+  assert.doesNotMatch(tutorial, /Step \$\{[^}]+\} of 8/);
+  // Practice begins with a three-panel overview and requires the participant
+  // to confirm the prepared context through the real workspace control.
+  assert.match(app, /This is the Context panel/);
+  assert.match(app, /This is the Canvas/);
+  assert.match(app, /This is the Critique panel/);
+  assert.doesNotMatch(app, /orientation-workspace/);
+  assert.match(app, /expect: "context:confirmed"/);
+  assert.match(app, /emitPracticeAction\("context:confirmed"/);
+  // Tutorial state starts with an edited Context and locally preloaded
+  // recommendations. Checkpoint saving is taught exactly once.
+  assert.match(app, /function preloadPracticeTutorialCritiques\(preset\)/);
+  assert.match(app, /practiceReviewResponse\(preset, \{ scope: "full" \}\)/);
+  assert.match(app, /fieldStatus: \{ goal: "edited", audience: "edited", constraints: "edited" \}/);
+  assert.match(app, /preloadedCritiqueIds/);
+  assert.equal((app.match(/expect: "checkpoint:saved"/g) || []).length, 1);
+  assert.doesNotMatch(app, /practiceCheckpointActions|focused-checkpoint|local-checkpoint|save-batch/);
+  // Guidance is a square-cornered, colorful clockwise outline, never a
+  // page-dimming mask.
+  assert.match(styles, /@keyframes practice-guide-orbit/);
+  assert.match(styles, /\.practice-guide-spotlight::after/);
+  assert.match(styles, /\.practice-guide-spotlight\s*\{[^}]*border-radius:\s*0/);
+  assert.match(styles, /\.practice-guide-spotlight::after\s*\{[\s\S]*?#4285f4[\s\S]*?#9b72cb[\s\S]*?#34a853/);
+  assert.doesNotMatch(styles, /\.practice-guide-spotlight\s*\{[^}]*9999px/);
+  // The card has history-aware previous/next controls. It does not create a
+  // simulated tutorial cursor; title-area selection is a real participant drag.
+  assert.match(tutorial, /<a class="practice-guide-back"/);
+  assert.match(tutorial, /practice-guide-back[\s\S]*?practice-guide-kicker[\s\S]*?practice-guide-next/);
+  assert.doesNotMatch(tutorial, /<button[^>]+class="practice-guide-(?:back|next)"/);
+  assert.match(tutorial, /function previous\(\)/);
+  assert.match(tutorial, /function getState\(\)/);
+  assert.match(tutorial, /initialState/);
+  assert.match(tutorial, /completedOrdinals/);
+  assert.match(tutorial, /setLinkDisabled\(next, completed\)/);
+  assert.match(tutorial, /advance\(\{ markComplete: true \}\)/);
+  assert.match(tutorial, /markComplete: !currentAction\(\)\?\.expect/);
+  assert.doesNotMatch(tutorial, /Complete the highlighted action to continue|nextDisabled|frontierOrdinal/);
+  assert.doesNotMatch(tutorial, /practice-guide-cursor|runDemo|demoAnimation/);
+  assert.match(app, /finishLocalReviewSelection[\s\S]*?emitPracticeAction\("area:selection-ready"/);
+  assert.doesNotMatch(app, /preparePracticeTitleSelection|prepare-title-selection/);
+  // Scroll the recommendation into view, then follow its live rectangle until
+  // the nested critique rail has stopped moving.
+  assert.match(tutorial, /function followTargetUntilStable\(selector\)/);
+  assert.match(tutorial, /scrollIntoView[\s\S]*?followTargetUntilStable\(action\.target\)/);
+  assert.match(tutorial, /stableFrames < 8/);
+  assert.match(tutorial, /addEventListener\("scrollend"/);
+  assert.match(tutorial, /new MutationObserver\(handleWorkspaceMutation\)/);
+  assert.match(tutorial, /childList: true,[\s\S]*?subtree: true/);
+  assert.match(tutorial, /layoutObserver\?\.disconnect\(\)/);
+  assert.match(tutorial, /getComputedStyle\(ancestor\)/);
+  assert.doesNotMatch(tutorial, /targetPadding/);
+  // Participants can pause the overlay, use the complete VIZier workspace,
+  // and resume at the same tutorial action without resetting progress.
+  assert.match(tutorial, /Explore freely/);
+  assert.match(tutorial, /Resume tutorial/);
+  assert.match(tutorial, /function setPaused\(nextPaused\)/);
+  assert.match(tutorial, /root\.hidden = paused/);
+  assert.match(tutorial, /modeToggle\.addEventListener\("click", \(\) => setPaused\(!paused\)\)/);
+  assert.match(tutorial, /title\.textContent = completed \? "Tutorial complete"/);
+  assert.doesNotMatch(tutorial, /onComplete\(\);\s*destroy\(\)/);
+  assert.match(app, /practice_tutorial_mode_changed/);
+  assert.match(app, /practiceRuntime\.tutorialMode = mode === "tutorial"/);
+  assert.match(app, /export function captureStudyRunnerWorkspaceState\(\)/);
+  assert.match(app, /export async function restoreStudyRunnerWorkspaceState\(snapshot\)/);
+  const workspaceRestore = app.match(
+    /export async function restoreStudyRunnerWorkspaceState\(snapshot\) \{[\s\S]*?\n\}/,
+  )?.[0] || "";
+  assert.match(workspaceRestore, /applyViewTransform\(\)/);
+  assert.doesNotMatch(workspaceRestore, /\bapplyView\(\)/);
+  assert.match(app, /practiceMode: practiceRuntime\.tutorialMode \? "tutorial" : "free-explore"/);
+  assert.match(app, /function practiceUsesPreset\(\)/);
+  assert.match(app, /const resp = practiceUsesPreset\(\)/);
+  assert.match(styles, /\.practice-guide-mode-toggle\[data-mode="explore"\]/);
 });
 
 test("Heroku runtime packaging includes maintainable backend data sources", async () => {
