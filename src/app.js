@@ -9266,43 +9266,20 @@ function disablePracticeRuntime() {
   document.body.classList.remove("practice-preset-active");
 }
 
-function preloadPracticeTutorialCritiques(preset) {
-  const response = practiceReviewResponse(preset, { scope: "full" });
-  const askId = state.nextAskId++;
-  const boundsById = Object.fromEntries(
-    state.tiles.map((tile) => [tile.id, renderedTileBounds(tile)]),
-  );
-  const fullBoard = fullArtboardBounds();
-  const incoming = response.critiques.map((critique) => ({
-    ...critique,
-    bounds: critique.bounds
-      || boundsById[critique.tileId]
-      || boundsById[critique.target?.ref?.source]
-      || boundsById[critique.target?.ref?.tile]
-      || fullBoard,
-  }));
+function clearPracticeTutorialCritiques() {
   state.reviewScope = "full";
   state.criterionEvaluations = [];
-  state.strengths = readReviewStrengths(response, "full");
-  state.critiques = scopeRank(enrichRecommendations(mergeAskResults([], incoming, {
-    askId,
-    reviewScope: "full",
-    dashboardVersion: state.version,
-    synchronizeActive: true,
-  }), state.version));
+  state.strengths = [];
+  state.critiques = [];
   state.askAnswer = null;
   state.selectedCritiqueId = null;
   state.selectedTileId = null;
   state.previewCache.clear();
   state.interactionObservations.clear();
-  state.lastReviewContextFingerprint = contextFingerprint(state.context);
+  state.lastReviewContextFingerprint = null;
   renderRubrics();
   renderCritiques();
   renderMarkers();
-  return {
-    askId,
-    critiqueIds: incoming.map((critique) => critique.id),
-  };
 }
 
 function configurePracticePreset(material) {
@@ -9347,7 +9324,7 @@ function configurePracticePreset(material) {
   };
   state.constraintSelection = null;
   activeDesignDocId = material.docId || "";
-  const preparedReview = preloadPracticeTutorialCritiques(preset);
+  clearPracticeTutorialCritiques();
   renderFixedContextPanel();
   renderContextToolState();
   refreshDesignDocControls();
@@ -9356,8 +9333,7 @@ function configurePracticePreset(material) {
     materialCode: material.code,
     dashboardId: material.dashboardId,
     designDocId: material.docId || null,
-    preloadedAskId: preparedReview.askId,
-    preloadedCritiqueIds: preparedReview.critiqueIds,
+    initialCritiqueCount: 0,
     ...practiceStudyFields(),
   });
 }
@@ -9390,20 +9366,22 @@ function practiceTutorialMilestones(preset) {
     target: "#saveContextBtn",
     expect: "context:confirmed",
   }];
-  if (document.getElementById("studyStartStageTimer")) {
-    orientationActions.push({
-      id: "start-practice-timer",
-      label: "Start the Practice timer",
-      instruction: "Start the timer when you are ready to begin working in the Practice workspace.",
-      target: "#studyStartStageTimer",
-      expect: "timer:started",
-    });
-  }
   return [
     {
       id: "orientation",
       title: "Meet VIZier",
       actions: orientationActions,
+    },
+    {
+      id: "generate-review",
+      title: "Generate your first review",
+      actions: [{
+        id: "generate-initial-review",
+        label: "Select Generate Critiques",
+        instruction: "Select Generate Critiques to review the dashboard. In Practice, the prepared recommendations appear immediately.",
+        target: "#aiAssistButton",
+        expect: "review:full",
+      }],
     },
     {
       id: "single-apply",
@@ -9565,7 +9543,7 @@ async function resetPracticeWorkspace() {
     audience: state.context.audience ? "edited" : "missing",
     constraints: state.context.constraints ? "edited" : "missing",
   };
-  preloadPracticeTutorialCritiques(practiceRuntime.preset);
+  clearPracticeTutorialCritiques();
   renderFixedContextPanel();
   renderContextToolState();
   syncReviewReadiness();

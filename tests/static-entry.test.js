@@ -275,7 +275,9 @@ test("guided practice uses presets while the dashboard task keeps the live engin
   assert.match(app, /executionMode: practiceUsesPreset\(\) \? "practice-preset" : "live-engine"/);
   assert.match(presets, /Should I change the layout\?/);
   assert.match(presets, /Is this title clear enough\?/);
-  assert.match(tutorial, /Step \$\{milestoneIndex \+ 1\} of \$\{milestones\.length\}/);
+  assert.match(tutorial, /const tutorialStepCount = milestones\.length \+ 1/);
+  assert.match(tutorial, /Step \$\{displayedStep\} of \$\{tutorialStepCount\}/);
+  assert.match(tutorial, /progress\.style\.transform = `scaleX\(\$\{progressFraction\}\)`/);
   assert.doesNotMatch(tutorial, /Step \$\{[^}]+\} of 8/);
   // Practice begins with a three-panel overview and requires the participant
   // to confirm the prepared context through the real workspace control.
@@ -285,12 +287,18 @@ test("guided practice uses presets while the dashboard task keeps the live engin
   assert.doesNotMatch(app, /orientation-workspace/);
   assert.match(app, /expect: "context:confirmed"/);
   assert.match(app, /emitPracticeAction\("context:confirmed"/);
-  // Tutorial state starts with an edited Context and locally preloaded
-  // recommendations. Checkpoint saving is taught exactly once.
-  assert.match(app, /function preloadPracticeTutorialCritiques\(preset\)/);
-  assert.match(app, /practiceReviewResponse\(preset, \{ scope: "full" \}\)/);
+  assert.doesNotMatch(app, /start-practice-timer|Start the Practice timer/);
+  // Tutorial state starts with an edited Context and an empty Critique panel.
+  // The participant's first real Generate click loads the local preset.
+  assert.match(app, /function clearPracticeTutorialCritiques\(\)/);
+  assert.match(app, /initialCritiqueCount: 0/);
+  assert.match(app, /id: "generate-review"/);
+  assert.match(app, /label: "Select Generate Critiques"/);
+  assert.match(app, /target: "#aiAssistButton"/);
+  assert.match(app, /expect: "review:full"/);
+  assert.match(app, /practiceReviewResponse\(practiceRuntime\.preset, \{ scope: reviewScope \}\)/);
   assert.match(app, /fieldStatus: \{ goal: "edited", audience: "edited", constraints: "edited" \}/);
-  assert.match(app, /preloadedCritiqueIds/);
+  assert.doesNotMatch(app, /preloadPracticeTutorialCritiques|preloadedCritiqueIds|preloadedAskId/);
   assert.equal((app.match(/expect: "checkpoint:saved"/g) || []).length, 1);
   assert.doesNotMatch(app, /practiceCheckpointActions|focused-checkpoint|local-checkpoint|save-batch/);
   // Guidance is a square-cornered, colorful clockwise outline, never a
@@ -334,7 +342,11 @@ test("guided practice uses presets while the dashboard task keeps the live engin
   assert.match(tutorial, /function setPaused\(nextPaused\)/);
   assert.match(tutorial, /root\.hidden = paused/);
   assert.match(tutorial, /modeToggle\.addEventListener\("click", \(\) => setPaused\(!paused\)\)/);
-  assert.match(tutorial, /title\.textContent = completed \? "Tutorial complete"/);
+  assert.match(tutorial, /title\.textContent = completed \? "Done! Now try VIZier"/);
+  assert.match(tutorial, /class="practice-guide-explore">Explore freely/);
+  assert.match(tutorial, /class="practice-guide-review">Review tutorial/);
+  assert.match(tutorial, /explore\.addEventListener\("click", \(\) => setPaused\(true\)\)/);
+  assert.match(tutorial, /review\.addEventListener\("click"/);
   assert.doesNotMatch(tutorial, /onComplete\(\);\s*destroy\(\)/);
   assert.match(app, /practice_tutorial_mode_changed/);
   assert.match(app, /practiceRuntime\.tutorialMode = mode === "tutorial"/);

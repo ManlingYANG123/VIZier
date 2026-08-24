@@ -90,6 +90,10 @@ export function createPracticeTutorial({
       <h2 class="practice-guide-title"></h2>
       <p class="practice-guide-copy"></p>
       <ol class="practice-guide-actions"></ol>
+      <div class="practice-guide-completion-actions" hidden>
+        <button type="button" class="practice-guide-explore">Explore freely</button>
+        <button type="button" class="practice-guide-review">Review tutorial</button>
+      </div>
       <div class="practice-guide-footer">
         <button type="button" class="practice-guide-restart">Restart tour</button>
       </div>
@@ -116,6 +120,9 @@ export function createPracticeTutorial({
   const back = root.querySelector(".practice-guide-back");
   const next = root.querySelector(".practice-guide-next");
   const restart = root.querySelector(".practice-guide-restart");
+  const completionActions = root.querySelector(".practice-guide-completion-actions");
+  const explore = root.querySelector(".practice-guide-explore");
+  const review = root.querySelector(".practice-guide-review");
 
   let milestoneIndex = clamp(Number(initialState?.milestoneIndex) || 0, 0, milestones.length - 1);
   let actionIndex = clamp(
@@ -155,7 +162,7 @@ export function createPracticeTutorial({
   function positionNow() {
     if (destroyed || paused) return;
     const action = currentAction();
-    const rect = targetRect(action?.target);
+    const rect = completed ? null : targetRect(action?.target);
     spotlight.hidden = !rect;
     if (rect) {
       Object.assign(spotlight.style, {
@@ -229,14 +236,18 @@ export function createPracticeTutorial({
     const action = currentAction();
     if (!milestone || !action) return;
     const subactions = milestone.actions || [];
-    kicker.textContent = `Step ${milestoneIndex + 1} of ${milestones.length}`;
-    progress.style.width = completed
-      ? "100%"
-      : `${((milestoneIndex + 1) / milestones.length) * 100}%`;
-    title.textContent = completed ? "Tutorial complete" : milestone.title;
+    const tutorialStepCount = milestones.length + 1;
+    const displayedStep = completed ? tutorialStepCount : milestoneIndex + 1;
+    kicker.textContent = `Step ${displayedStep} of ${tutorialStepCount}`;
+    const progressFraction = completed ? 1 : (milestoneIndex + 1) / tutorialStepCount;
+    progress.style.transform = `scaleX(${progressFraction})`;
+    title.textContent = completed ? "Done! Now try VIZier" : milestone.title;
     copy.textContent = completed
-      ? "You can return to the last guidance, revisit earlier steps, or choose Explore freely."
+      ? "Choose how you would like to continue: explore the full tool on your own, or revisit the guided tutorial."
       : action.instruction || milestone.description || "";
+    actions.hidden = completed;
+    completionActions.hidden = !completed;
+    restart.hidden = completed;
     actions.innerHTML = subactions.map((item, index) => {
       const ordinal = actionOrdinal(milestoneIndex, index);
       const done = completedOrdinals.has(ordinal);
@@ -265,6 +276,8 @@ export function createPracticeTutorial({
       milestoneId: milestone.id,
       actionId: action.id,
       completed,
+      displayedStep,
+      tutorialStepCount,
     });
     Promise.resolve(onActionEnter(action, milestone)).finally(() => {
       // Reveal the real control before measuring it. Recommendation cards live
@@ -427,6 +440,13 @@ export function createPracticeTutorial({
     }
   });
   modeToggle.addEventListener("click", () => setPaused(!paused));
+  explore.addEventListener("click", () => setPaused(true));
+  review.addEventListener("click", () => {
+    completed = false;
+    milestoneIndex = 0;
+    actionIndex = 0;
+    render();
+  });
   restart.addEventListener("click", async () => {
     milestoneIndex = 0;
     actionIndex = 0;
