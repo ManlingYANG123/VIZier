@@ -5,7 +5,7 @@ import { recommendationCatalogPrompt } from "./recommendations.ts";
  * The identifiers are kept stable (imported across the engine); only the
  * values change now that the registry is the empirical diagnostic codebook
  * (object × problem × grounding) rather than a fixed list of criteria. */
-export const CRITERION_REGISTRY_VERSION = "diagnostic-knowledge-v3-2026-08-10";
+export const CRITERION_REGISTRY_VERSION = "diagnostic-knowledge-v4-2026-08-23";
 // v10: the review output schema gains a top-level `strengths` array — standout
 // positive observations, grounded under the same gate as diagnoses and produced
 // independently of critiques (so a zero-critique scope can still return them).
@@ -35,7 +35,9 @@ export const CRITERION_REGISTRY_VERSION = "diagnostic-knowledge-v3-2026-08-10";
 // of the handful of moves that read the same on every dashboard.
 // v22: confirmed design-document constraints and a clipped PDF/txt extract
 // enter the review user prompt (still filtered after generation).
-export const REVIEW_PROMPT_VERSION = "diagnostic-review-v22-2026-08-21";
+// v23: recommendation ids, definitions, and empirical few-shot examples load
+// from recommendation_v3_examples.csv as one maintainable source of truth.
+export const REVIEW_PROMPT_VERSION = "diagnostic-review-v23-2026-08-23";
 // v3.2: the engine now assembles and returns the grounded `strengths` array
 // alongside critiques/diagnoses (rendered as inline positive cards in the
 // critique list, grouped by dimension).

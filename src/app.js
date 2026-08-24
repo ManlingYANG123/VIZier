@@ -57,6 +57,7 @@ import {
   saveStudySessionToServer,
   setStudyPhase,
   startStudySession,
+  stashStudyTaskCapture,
   stripVersionMedia,
   studyEventLog,
   studySessionInfo,
@@ -136,6 +137,12 @@ try {
   // Preserve the in-progress study log across the reset so a refresh/crash mid
   // session does not lose research data (see study-session.js).
   const studySession = localStorage.getItem(STUDY_STORAGE_KEY);
+  // Group study routes keep their phase, annotation, and questionnaire state
+  // in a separate record. Preserve every group key when the VIZier workspace
+  // boots for Training/Task, otherwise a refresh would return to the welcome.
+  const studyRunnerEntries = Object.keys(localStorage)
+    .filter((key) => key.startsWith("vizierStudyRunner:"))
+    .map((key) => [key, localStorage.getItem(key)]);
   localStorage.clear();
   sessionStorage.clear();
   if (reApiBase) localStorage.setItem("reApiBase", reApiBase);
@@ -144,6 +151,9 @@ try {
     localStorage.setItem(REVISION_DOCK_HEIGHT_STORAGE_KEY, revisionDockHeight);
   }
   if (studySession) localStorage.setItem(STUDY_STORAGE_KEY, studySession);
+  studyRunnerEntries.forEach(([key, value]) => {
+    if (value != null) localStorage.setItem(key, value);
+  });
   console.log("[app] Cleared stale browser storage on load");
 } catch (e) {
   console.warn("[app] Could not clear storage:", e);
@@ -2088,36 +2098,52 @@ function copyComputedLayout(source, target) {
   for (let i = 0; i < n; i += 1) copyComputedLayout(srcKids[i], dstKids[i]);
 }
 
-async function rasterizeDashboardArtboard({ emptyVegaHosts = false, vegaImages = null } = {}) {
+function copyLiveControlState(source, target) {
+  if (!source || !target) return;
+  const sourceControls = source.querySelectorAll("input, select, textarea, output, details");
+  const targetControls = target.querySelectorAll("input, select, textarea, output, details");
+  const count = Math.min(sourceControls.length, targetControls.length);
+  for (let index = 0; index < count; index += 1) {
+    const live = sourceControls[index];
+    const cloneControl = targetControls[index];
+    if (live instanceof HTMLInputElement && cloneControl instanceof HTMLInputElement) {
+      cloneControl.value = live.value;
+      cloneControl.setAttribute("value", live.value);
+      if (live.type === "checkbox" || live.type === "radio") {
+        cloneControl.checked = live.checked;
+        cloneControl.toggleAttribute("checked", live.checked);
+      }
+    } else if (live instanceof HTMLSelectElement && cloneControl instanceof HTMLSelectElement) {
+      cloneControl.value = live.value;
+      [...cloneControl.options].forEach((option) => {
+        option.toggleAttribute("selected", option.value === live.value);
+      });
+    } else if (live instanceof HTMLTextAreaElement && cloneControl instanceof HTMLTextAreaElement) {
+      cloneControl.value = live.value;
+      cloneControl.textContent = live.value;
+    } else if (live instanceof HTMLOutputElement && cloneControl instanceof HTMLOutputElement) {
+      cloneControl.value = live.value;
+      cloneControl.textContent = live.textContent;
+    } else if (live instanceof HTMLDetailsElement && cloneControl instanceof HTMLDetailsElement) {
+      cloneControl.open = live.open;
+      cloneControl.toggleAttribute("open", live.open);
+    }
+  }
+}
+
+async function rasterizeDashboardArtboard() {
   const source = els.dashboardArtboard;
   if (!source) return null;
   await new Promise((resolve) => requestAnimationFrame(resolve));
 
   const snapshot = source.cloneNode(true);
   copyComputedLayout(source, snapshot);
+  copyLiveControlState(source, snapshot);
   snapshot.querySelector("#markersLayer")?.replaceChildren();
   snapshot.querySelectorAll(".selected, .canvas-preview-affected").forEach((node) => {
     node.classList.remove("selected", "canvas-preview-affected");
   });
   snapshot.classList.remove("canvas-proposed");
-  if (vegaImages instanceof Map) {
-    snapshot.querySelectorAll(".vega-host").forEach((host) => {
-      const tileId = String(host.id || "").replace(/^vega-/, "");
-      const src = vegaImages.get(tileId);
-      if (!src) {
-        host.replaceChildren();
-        return;
-      }
-      const image = document.createElement("img");
-      image.src = src;
-      image.alt = "";
-      image.setAttribute("aria-hidden", "true");
-      image.style.cssText = "display:block;width:100%;height:100%;object-fit:fill";
-      host.replaceChildren(image);
-    });
-  } else if (emptyVegaHosts) {
-    snapshot.querySelectorAll(".vega-host").forEach((host) => host.replaceChildren());
-  }
   snapshot.style.position = "relative";
   snapshot.style.inset = "auto";
   const snapshotWidth = state.canvasSize.width;
@@ -2133,7 +2159,7 @@ async function rasterizeDashboardArtboard({ emptyVegaHosts = false, vegaImages =
   // Do not dump the full page stylesheet into this SVG. Rules like
   // `html, body { overflow: hidden; height: 100% }` clip absolutely
   // positioned heading/KPI chrome when the clone is rasterized as an image.
-  const css = "*{box-sizing:border-box;}img,canvas,svg{max-width:100%;max-height:100%;}";
+  const css = "*{box-sizing:border-box;}";
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${snapshotWidth}" height="${snapshotHeight}" viewBox="0 0 ${snapshotWidth} ${snapshotHeight}"><foreignObject x="0" y="0" width="${snapshotWidth}" height="${snapshotHeight}"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${snapshotWidth}px;height:${snapshotHeight}px;margin:0;padding:0;"><style>${css}</style>${serialized}</div></foreignObject></svg>`;
   const svgBlob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
   const objectURL = URL.createObjectURL(svgBlob);
@@ -2209,224 +2235,53 @@ function vegaViewForExport(view) {
   return null;
 }
 
-function layoutBoxOnArtboard(el, artboard) {
-  if (!el || !artboard || (el !== artboard && !artboard.contains(el))) return null;
-  const root = artboard.getBoundingClientRect();
-  const box = el.getBoundingClientRect();
-  const sx = root.width / Math.max(1, artboard.offsetWidth || Number(state.canvasSize?.width) || 1);
-  const sy = root.height / Math.max(1, artboard.offsetHeight || Number(state.canvasSize?.height) || 1);
-  const w = box.width / sx;
-  const h = box.height / sy;
-  if (w < 1 || h < 1) return null;
-  return {
-    x: (box.left - root.left) / sx,
-    y: (box.top - root.top) / sy,
-    w,
-    h,
-  };
-}
-
-function hostBoxOnArtboard(host, artboard) {
-  return layoutBoxOnArtboard(host, artboard);
-}
-
-function cssColorVisible(color) {
-  if (!color || color === "transparent") return false;
-  const match = color.match(/rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)/i);
-  if (match && Number(match[4] ?? 1) <= 0.01) return false;
-  return color !== "rgba(0, 0, 0, 0)";
-}
-
-function paintElementChrome(ctx, el, artboard, scale) {
-  const box = layoutBoxOnArtboard(el, artboard);
-  if (!box) return;
-  const style = getComputedStyle(el);
-  const x = box.x * scale;
-  const y = box.y * scale;
-  const w = box.w * scale;
-  const h = box.h * scale;
-  const radius = Math.min(parseFloat(style.borderTopLeftRadius) || 0, box.w / 2, box.h / 2) * scale;
-  ctx.save();
-  try {
-    if (cssColorVisible(style.backgroundColor)) {
-      ctx.fillStyle = style.backgroundColor;
-      if (radius > 0.5 && typeof ctx.roundRect === "function") {
-        ctx.beginPath();
-        ctx.roundRect(x, y, w, h, radius);
-        ctx.fill();
-      } else {
-        ctx.fillRect(x, y, w, h);
-      }
-    }
-    const borderW = parseFloat(style.borderTopWidth) || 0;
-    if (borderW > 0 && style.borderTopStyle !== "none" && cssColorVisible(style.borderTopColor)) {
-      ctx.strokeStyle = style.borderTopColor;
-      ctx.lineWidth = Math.max(1, borderW * scale);
-      ctx.strokeRect(x, y, w, h);
-    }
-    const text = [...el.childNodes]
-      .filter((node) => node.nodeType === 3)
-      .map((node) => node.textContent)
-      .join("")
-      .replace(/\s+/g, " ")
-      .trim();
-    if (text && style.visibility !== "hidden" && Number(style.opacity) > 0.05) {
-      ctx.fillStyle = style.color || "#1d1d1f";
-      ctx.font = style.font || "16px sans-serif";
-      ctx.textBaseline = "top";
-      const align = style.textAlign;
-      ctx.textAlign = align === "center" || align === "right" || align === "end" ? align : "left";
-      const padX = (parseFloat(style.paddingLeft) || 0) * scale;
-      const padY = (parseFloat(style.paddingTop) || 0) * scale;
-      let tx = x + padX;
-      if (ctx.textAlign === "center") tx = x + w / 2;
-      if (ctx.textAlign === "right" || ctx.textAlign === "end") tx = x + w - padX;
-      ctx.fillText(text, tx, y + padY, Math.max(8, w - padX * 2));
-    }
-  } catch (error) {
-    console.warn("[revision-screenshot] chrome paint skipped", error);
-  }
-  ctx.restore();
-}
-
-function paintDomTreeChrome(ctx, el, artboard, scale) {
-  if (!el || el.nodeType !== 1) return;
-  if (el.hidden || el.id === "markersLayer" || el.classList?.contains("vega-host")) return;
-  try {
-    const style = getComputedStyle(el);
-    if (style.display === "none" || style.visibility === "hidden") return;
-  } catch {
-    return;
-  }
-  paintElementChrome(ctx, el, artboard, scale);
-  for (const child of el.children) paintDomTreeChrome(ctx, child, artboard, scale);
-}
-
-function paintLiveArtboardChrome(ctx, artboard, scale) {
-  if (!ctx || !artboard) return;
-  for (const tile of artboard.querySelectorAll(".tile")) {
-    paintDomTreeChrome(ctx, tile, artboard, scale);
-  }
-  paintDomTreeChrome(ctx, artboard.querySelector(".dashboard-heading"), artboard, scale);
-  paintDomTreeChrome(ctx, artboard.querySelector("#dashboardFilterBar"), artboard, scale);
-  paintDomTreeChrome(ctx, artboard.querySelector("#kpiRow"), artboard, scale);
-}
-
-async function vegaTileCanvas(tileId, scale = 2) {
-  const view = vegaViewForExport(state.views?.[tileId]);
-  if (!view) return null;
-  try {
-    if (typeof view.toCanvas === "function") {
-      const tileCanvas = await view.toCanvas(scale);
-      if (tileCanvas) return tileCanvas;
-    }
-    if (typeof view.toImageURL === "function") {
-      const image = await loadExportImage(await view.toImageURL("png", scale));
-      const canvas = document.createElement("canvas");
-      canvas.width = image.naturalWidth || 1;
-      canvas.height = image.naturalHeight || 1;
-      canvas.getContext("2d").drawImage(image, 0, 0);
-      return canvas;
-    }
-  } catch (error) {
-    console.warn(`[revision-screenshot] Vega PNG failed for tile ${tileId}`, error);
-  }
-  return null;
-}
-
 async function captureDashboardDisplaySvg() {
-  const vegaImages = new Map();
-  await Promise.all((state.tiles || []).map(async (tile) => {
-    const canvas = await vegaTileCanvas(tile.id, 2);
-    const png = canvas ? canvasPngDataUrl(canvas) : null;
-    if (png) vegaImages.set(String(tile.id), png);
-  }));
-  const raster = await rasterizeDashboardArtboard({ vegaImages });
+  // Keep the exact live Vega SVG and the exact cloned dashboard DOM together.
+  // Replacing charts with separately sized canvases introduced a second layout
+  // pass and was the main source of export drift.
+  const raster = await rasterizeDashboardArtboard();
   if (!raster) return null;
   URL.revokeObjectURL(raster.objectURL);
   return raster.svg;
 }
 
-async function rasterizeArtboardChrome(width, height, scale) {
-  let raster = null;
-  try {
-    raster = await rasterizeDashboardArtboard({ emptyVegaHosts: true });
-  } catch (error) {
-    console.warn("[revision-screenshot] Artboard chrome serialize failed.", error);
-    return null;
-  }
-  if (!raster) return null;
-  const { objectURL } = raster;
+async function captureDashboardPngFromSvg(svg, width, height, scale = 2) {
+  if (!svg) return null;
+  const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+  const objectURL = URL.createObjectURL(blob);
   try {
     const image = await loadExportImage(objectURL);
     const canvas = document.createElement("canvas");
-    fillCanvas(canvas, image, Math.round(width * scale), Math.round(height * scale));
-    return canvas;
-  } catch (error) {
-    console.warn("[revision-screenshot] Artboard chrome raster failed.", error);
-    return null;
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) return null;
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return canvasPngDataUrl(canvas);
   } finally {
     URL.revokeObjectURL(objectURL);
   }
 }
 
-// Screenshot the live artboard: HTML chrome (title, filters, KPIs, tile frames)
-// painted from computed layout, plus each chart from Vega's own toCanvas.
-// Drawing an SVG foreignObject onto this canvas taints it in Chromium, which
-// made getImageData / toDataURL throw and the checkpoint thumbnail disappear.
-async function captureLiveArtboardPng() {
-  const source = els.dashboardArtboard;
-  if (!source) return null;
-  const width = Math.max(1, Number(state.canvasSize?.width) || 1100);
-  const height = Math.max(1, Number(state.canvasSize?.height) || 720);
-  const scale = 2;
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(width * scale);
-  canvas.height = Math.round(height * scale);
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (!context) return null;
-  const background = getComputedStyle(source).backgroundColor;
-  context.fillStyle = background && background !== "rgba(0, 0, 0, 0)" ? background : "#ffffff";
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  paintLiveArtboardChrome(context, source, scale);
-
-  for (const tile of state.tiles || []) {
-    const host = document.getElementById(`vega-${tile.id}`);
-    const box = hostBoxOnArtboard(host, source);
-    if (!box || box.w < 1 || box.h < 1) continue;
-    const chart = await vegaTileCanvas(tile.id, scale);
-    if (!chart) continue;
-    context.drawImage(chart, box.x * scale, box.y * scale, box.w * scale, box.h * scale);
+async function settleDashboardForCapture() {
+  const views = Object.values(state.views || {}).map(vegaViewForExport).filter(Boolean);
+  await Promise.all(views.map(async (view) => {
+    if (typeof view.runAsync === "function") await view.runAsync();
+  }));
+  if (document.fonts?.ready) {
+    await Promise.race([
+      document.fonts.ready,
+      new Promise((resolve) => setTimeout(resolve, 1000)),
+    ]);
   }
-  return canvasPngDataUrl(canvas);
-}
-
-async function captureDashboardPngFromViews() {
-  const source = els.dashboardArtboard;
-  const width = Math.max(1, Number(state.canvasSize?.width) || 1100);
-  const height = Math.max(1, Number(state.canvasSize?.height) || 720);
-  const scale = 2;
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(width * scale);
-  canvas.height = Math.round(height * scale);
-  const context = canvas.getContext("2d");
-  if (!context) return null;
-  context.fillStyle = "#ffffff";
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  for (const tile of state.tiles || []) {
-    const host = document.getElementById(`vega-${tile.id}`);
-    const box = hostBoxOnArtboard(host, source);
-    if (!box || box.w < 1 || box.h < 1) continue;
-    const chart = await vegaTileCanvas(tile.id, scale);
-    if (!chart) continue;
-    context.drawImage(chart, box.x * scale, box.y * scale, box.w * scale, box.h * scale);
-  }
-  return canvasPngDataUrl(canvas);
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 }
 
 async function captureDashboardExport() {
   const width = Math.max(1, Number(state.canvasSize?.width) || 1100);
   const height = Math.max(1, Number(state.canvasSize?.height) || 720);
+  await settleDashboardForCapture();
+  const snapshot = buildDashboardCaptureSnapshot();
   let svg = null;
   try {
     // This is the visual source used by checkpoint previews. It keeps the live
@@ -2438,27 +2293,20 @@ async function captureDashboardExport() {
   }
   let png = null;
   try {
-    png = await captureLiveArtboardPng();
+    png = await captureDashboardPngFromSvg(svg, width, height);
   } catch (error) {
-    console.warn("[revision-screenshot] Live artboard capture failed.", error);
+    console.warn("[revision-screenshot] Faithful SVG-to-PNG capture failed.", error);
   }
-  if (!png) {
-    try {
-      png = await captureDashboardPngFromViews();
-    } catch (error) {
-      console.warn("[revision-screenshot] Vega-only capture failed.", error);
-    }
-  }
-  if (!png) return { screenshot: null, png: null, svg };
+  if (!png) return { screenshot: null, png: null, svg, snapshot };
   try {
     const image = await loadExportImage(png);
     const hi = document.createElement("canvas");
     fillCanvas(hi, image, image.naturalWidth || width * 2, image.naturalHeight || height * 2);
     const pair = exportPairFromCanvas(hi, width, height);
-    return { screenshot: pair?.screenshot || png, png: pair?.png || png, svg };
+    return { screenshot: pair?.screenshot || png, png: pair?.png || png, svg, snapshot };
   } catch (error) {
     console.warn("[revision-screenshot] PNG encode failed.", error);
-    return { screenshot: png, png, svg };
+    return { screenshot: png, png, svg, snapshot };
   }
 }
 
@@ -2471,6 +2319,7 @@ async function rememberDashboardExport(target) {
   if (!target) return null;
   try {
     const captured = await captureDashboardExport();
+    target.afterSnapshot = captured.snapshot || target.afterSnapshot || null;
     target.afterScreenshot = captured.screenshot || target.afterScreenshot || null;
     target.afterPng = captured.png || target.afterPng || null;
     target.afterSvg = captured.svg || target.afterSvg || null;
@@ -6085,8 +5934,9 @@ async function saveWorkingDraftCheckpoint() {
     });
     const captured = await captureDashboardExport().catch((error) => {
       console.warn("[revision-screenshot] checkpoint PNG capture failed", error);
-      return { screenshot: null, png: null, svg: null };
+      return { screenshot: null, png: null, svg: null, snapshot: null };
     });
+    checkpoint.afterSnapshot = captured.snapshot || checkpoint.afterSnapshot;
     checkpoint.afterScreenshot = captured.screenshot;
     checkpoint.afterPng = captured.png;
     checkpoint.afterSvg = captured.svg || null;
@@ -7516,6 +7366,7 @@ function readHeadingTypography() {
 // visual/narrative detectors the same way buildEngineSpecMap grounds interaction.
 function buildEngineBoardMeta() {
   return {
+    id: state.artifact?.id || "dashboard",
     title: state.dashboardTitle,
     subtitle: state.dashboardSubtitle || "",
     // Rendered heading typography (px) read straight off the live DOM. The board
@@ -7537,14 +7388,68 @@ function buildEngineBoardMeta() {
     kpiReservedHeight: state.boardKpiPresentation.reservedHeight,
     kpiReservedWidth: state.boardKpiPresentation.reservedWidth,
     filters: Array.isArray(state.dashboardFilters) ? state.dashboardFilters : [],
+    showChartSubtitles: Boolean(state.showChartSubtitles),
     canvasWidth: state.canvasSize.width,
     canvasHeight: state.canvasSize.height,
     tiles: state.tiles.map((tile) => ({
       id: tile.id,
       title: tile.v2Label || tile.label,
+      subtitle: tile.subtitle || "",
       hasSubtitle: Boolean(state.showChartSubtitles),
       bounds: renderedTileBounds(tile, state.showKpis),
     })),
+  };
+}
+
+function buildDashboardCaptureSnapshot() {
+  const preview = activeCanvasPreviewResult();
+  const board = canvasBoardState();
+  const previewTiles = new Map((board.tiles || []).map((tile) => [tile.id, tile]));
+  const tiles = state.tiles.map((tile) => {
+    const previewTile = previewTiles.get(tile.id);
+    const hasSubtitle = preview
+      ? Boolean(previewTile?.hasSubtitle)
+      : Boolean(board.showChartSubtitles);
+    return {
+      id: tile.id,
+      title: preview
+        ? (previewTile?.title || tile.v2Label || tile.label)
+        : (hasSubtitle ? tile.v2Label : tile.label),
+      subtitle: tile.subtitle || "",
+      hasSubtitle,
+      bounds: clone(previewTile?.bounds || renderedTileBounds(tile)),
+    };
+  });
+  const boardMeta = {
+    ...buildEngineBoardMeta(),
+    ...(preview?.board ? clone(preview.board) : {}),
+    id: state.artifact?.id || "dashboard",
+    title: board.title,
+    subtitle: board.subtitle || "",
+    typography: readHeadingTypography(),
+    hasKpis: Boolean(board.showKpis),
+    kpis: clone(board.kpis || []),
+    kpiStyle: board.kpiStyle || undefined,
+    kpiLayout: board.kpiLayout,
+    kpiAlignment: board.kpiAlignment,
+    kpiDensity: board.kpiDensity,
+    kpiChrome: board.kpiChrome,
+    kpiReservedHeight: board.kpiReservedHeight,
+    kpiReservedWidth: board.kpiReservedWidth,
+    filters: clone(board.filters || []),
+    showChartSubtitles: Boolean(board.showChartSubtitles),
+    canvasWidth: board.canvasWidth,
+    canvasHeight: board.canvasHeight,
+    interactionState: {
+      crossFilterEnabled: Boolean(state.crossFilterEnabled),
+      activeFilterState: Boolean(state.activeFilterState),
+      crossFilterSelection: clone(state.crossFilterSelection),
+    },
+    tiles,
+  };
+  return {
+    specMap: clone(preview?.specMap || buildEngineSpecMap()),
+    board: boardMeta,
   };
 }
 
@@ -8190,7 +8095,7 @@ function collectStudySnapshot() {
 }
 
 async function collectStudyDashboardArtifacts() {
-  let captured = { png: null, svg: null, screenshot: null };
+  let captured = { png: null, svg: null, screenshot: null, snapshot: null };
   try {
     captured = await captureDashboardExport();
   } catch (error) {
@@ -8198,10 +8103,10 @@ async function collectStudyDashboardArtifacts() {
   }
   return buildStudyDashboardArtifacts({
     versions: state.versions,
-    finalDocument: dashboardDocumentFromSnapshot({
-      specMap: buildEngineSpecMap(),
-      board: buildEngineBoardMeta(),
-    }, "final"),
+    finalDocument: dashboardDocumentFromSnapshot(
+      captured.snapshot || buildDashboardCaptureSnapshot(),
+      "final",
+    ),
     finalPng: captured.png,
     finalSvg: captured.svg,
   });
@@ -8963,45 +8868,31 @@ document.querySelector("#app").insertAdjacentHTML("beforeend", `
 
     <div class="upload-center" id="uploadCenter">
       <div class="upload-intro">
-        <span class="upload-step-label">New Review</span>
-        <h1>Start a review</h1>
-        <p>Pick a dashboard, then an optional guideline to steer the critique.</p>
+        <span class="upload-step-label">Study Setup</span>
+        <h1>Choose a material</h1>
+        <p>Select the assigned code.</p>
       </div>
 
-      <div class="upload-picker">
-        <section class="upload-col" aria-labelledby="uploadDashboardColTitle">
+      <div class="upload-picker upload-picker--bundles">
+        <section class="upload-col" aria-label="Study materials">
           <div class="upload-col-head">
-            <div class="upload-col-heading">
-              <h2 class="upload-col-title" id="uploadDashboardColTitle">Choose a dashboard</h2>
-              <p class="upload-col-sub">Pick one to put under review.</p>
-            </div>
             <button
               class="dashboard-library-refresh upload-col-refresh"
               id="onboardingDashboardLibraryRefresh"
               type="button"
               aria-label="Refresh dashboard library"
-            >↻</button>
+            ><span aria-hidden="true">↻</span><span>Refresh</span></button>
           </div>
-          <div class="upload-cards" id="onboardingDashboardCards" role="list">
-            <p class="upload-cards-empty">Loading dashboards…</p>
+          <div class="upload-cards" id="onboardingDashboardCards">
+            <p class="upload-cards-empty">Loading study materials…</p>
           </div>
           <p class="upload-col-status" id="onboardingDashboardLibraryStatus" role="status" aria-live="polite"></p>
-        </section>
-
-        <section class="upload-col" aria-labelledby="uploadGuidelineColTitle">
-          <div class="upload-col-head">
-            <div class="upload-col-heading">
-              <h2 class="upload-col-title" id="uploadGuidelineColTitle">Choose a guideline</h2>
-              <p class="upload-col-sub">Optional — a design standard to hold the critique to. A matching icon means it was built for that dashboard.</p>
-            </div>
-          </div>
-          <div class="upload-cards" id="onboardingGuidelineCards" role="list"></div>
-          <p class="upload-col-status" id="onboardingGuidelineStatus" role="status" aria-live="polite"></p>
         </section>
       </div>
 
       <div class="upload-start-row">
-        <button type="button" class="upload-start-btn" id="onboardingStartBtn" disabled>Start Review</button>
+        <p class="upload-selection-summary" id="onboardingSelectionSummary" role="status" aria-live="polite">Select a material code to continue.</p>
+        <button type="button" class="upload-start-btn" id="onboardingStartBtn" disabled>Select a material</button>
       </div>
 
       <div class="upload-preview-center" id="uploadPreviewCenter" hidden>
@@ -9157,50 +9048,91 @@ let dashboardLibraryLoadSerial = 0;
 let dashboardLibraryRefreshing = false;
 let dashboardLibraryBusy = false;
 
-// Bundled design-guideline docs, presettable without an upload (Heroku has no
-// upload step). The PDF bytes ship in public/pdfs/ and are fetched root-relative
-// (served by vite in dev, re_api from dist/pdfs/ in prod), extracted to text in
-// the browser, then parsed by /intake-constraints — the same path as an upload.
+// Study design documents are fixed assets. The PDF bytes ship beside the study
+// dashboards and travel through the same extraction path as a manual upload.
 const DESIGN_DOC_LIBRARY = [
-  { id: "bbc-gel", file: "BBC GEL _ How to design infographics.pdf", label: "BBC GEL — Infographics" },
-  { id: "tableau-best-practices", file: "Best Practices for Effective Dashboards - Tableau.pdf", label: "Tableau — Dashboard Best Practices" },
-  { id: "uswds-data-viz", file: "Data visualizations _ U.S. Web Design System (USWDS).pdf", label: "USWDS — Data Visualizations" },
+  {
+    id: "study-a",
+    file: "A_bbc-gel-infographics.pdf",
+    url: "/study-materials/pdfs/A_bbc-gel-infographics.pdf",
+    label: "A · BBC GEL — Infographics",
+  },
+  {
+    id: "study-b",
+    file: "B_tableau-dashboard-best-practices.pdf",
+    url: "/study-materials/pdfs/B_tableau-dashboard-best-practices.pdf",
+    label: "B · Tableau — Dashboard Best Practices",
+  },
 ];
-// Each themed demo dashboard defaults to the guideline doc it was built to embody;
-// the dropdown lets the user switch or clear. Unbound dashboards reset to none.
+
+// One source of truth for the four counterbalanced study materials. A and B
+// carry fixed PDFs; assessment dashboards 1 and 2 intentionally carry none.
+const STUDY_MATERIALS = [
+  {
+    code: "A",
+    dashboardId: "garden-birds-new",
+    dashboardUrl: "/study-materials/dashboards/A_garden-birds.json",
+    docId: "study-a",
+    documentLabel: "BBC GEL — Infographics",
+  },
+  {
+    code: "B",
+    dashboardId: "sales-command-center-new",
+    dashboardUrl: "/study-materials/dashboards/B_retail-sales-command-center.json",
+    docId: "study-b",
+    documentLabel: "Tableau — Dashboard Best Practices",
+  },
+  {
+    code: "1",
+    dashboardId: "air-quality-new",
+    dashboardUrl: "/study-materials/dashboards/1_air-quality.json",
+    docId: "",
+    documentLabel: "No PDF",
+  },
+  {
+    code: "2",
+    dashboardId: "ocean-life",
+    dashboardUrl: "/study-materials/dashboards/2_ocean-biodiversity.json",
+    docId: "",
+    documentLabel: "No PDF",
+  },
+];
+
+/** Route-level study runner entry. It uses the frozen public stimulus directly
+ * so a participant never sees or depends on the moderator material picker. */
+export async function openStudyMaterialForRunner(code) {
+  const material = STUDY_MATERIALS.find((candidate) => candidate.code === code);
+  if (!material) throw new Error(`Unknown study material: ${code}`);
+  document.getElementById("uploadScreen")?.setAttribute("hidden", "");
+  const response = await fetch(material.dashboardUrl);
+  if (!response.ok) throw new Error(`Could not load material ${code}: ${response.status} ${response.statusText}`);
+  const dashboard = await response.json();
+  await loadJsonDashboard(dashboard, `${code}.json`);
+  state.artifact.libraryId = material.dashboardId;
+  if (material.docId) void loadDesignDocById(material.docId);
+  else clearDesignDoc();
+  recordStudyAction("study_material_opened", `Opened study material ${code}`, {
+    materialCode: code,
+    dashboardId: material.dashboardId,
+    designDocId: material.docId || null,
+  });
+  return { ...material };
+}
+
+/** Capture the dashboard-task board so the phase save can write it immediately. */
+export async function captureStudyRunnerTaskDashboard() {
+  const artifacts = await collectStudyDashboardArtifacts();
+  stashStudyTaskCapture(collectStudySnapshot(), artifacts);
+}
+
 const DASHBOARD_DESIGN_DOC_BINDINGS = {
-  "garden-birds-new": "bbc-gel",
-  "sales-command-center-new": "tableau-best-practices",
-  "air-quality-new": "uswds-data-viz",
+  "garden-birds-new": "study-a",
+  "sales-command-center-new": "study-b",
+  "air-quality-new": "",
+  "ocean-life": "",
 };
-// The onboarding picker shows two independent card columns. A themed dashboard
-// and the guideline it was built to embody share one emoji, and both columns
-// lead with these pairs (row 1 ↔ row 1, …) so the matching icons line up across
-// the gap — a purely visual hint; selection stays independent in each column.
-const THEMED_PAIRS = [
-  { emoji: "🐦", dashboardId: "garden-birds-new", docId: "bbc-gel" },
-  { emoji: "🌤️", dashboardId: "air-quality-new", docId: "uswds-data-viz" },
-  { emoji: "📊", dashboardId: "sales-command-center-new", docId: "tableau-best-practices" },
-];
-// Every library dashboard gets a themed emoji; the paired guideline reuses the
-// dashboard's. Unmapped dashboards fall back to a neutral compass in the render.
-const DASHBOARD_CARD_ICONS = {
-  "garden-birds-new": "🐦",
-  "air-quality-new": "🌤️",
-  "sales-command-center-new": "📊",
-  "ocean-life": "🌊",
-  "sales v1": "🛒",
-  "workspace-overview": "🗂️",
-  "workspace-performance v1": "📈",
-};
-// Reverse of DASHBOARD_DESIGN_DOC_BINDINGS: docId → the dashboard it pairs with,
-// used to label a guideline card with the dashboard it was authored for.
-const GUIDELINE_DASHBOARD_PAIR = Object.fromEntries(
-  THEMED_PAIRS.map((pair) => [pair.docId, pair.dashboardId]),
-);
-// The dashboard the author has clicked in the onboarding picker but not yet
-// committed with "Start Review" ("" = nothing picked). Distinct from
-// state.artifact.libraryId, which only updates once the dashboard actually loads.
+
+// The study material selected but not yet committed with "Start Review".
 let onboardingDashboardSelection = "";
 let activeDesignDocId = "";
 let designDocLibraryBusy = false;
@@ -9246,104 +9178,125 @@ function renderDashboardLibraryControls() {
     button.classList.toggle("refreshing", dashboardLibraryRefreshing);
   });
   renderDashboardCards();
-  // Guideline cards borrow dashboard titles for their "Built for …" subtitle, so
-  // re-render them whenever the library list changes.
-  renderGuidelineCards();
 }
 
-/** Emoji for a dashboard card; neutral compass for anything unmapped. */
-function dashboardCardEmoji(id) {
-  return DASHBOARD_CARD_ICONS[id] || "🧭";
-}
-
-/** Library dashboards ordered so the themed pairs lead the column (in the same
- * order the guideline column uses), followed by the rest in API order. */
-function orderedDashboardItems() {
-  const themedIds = THEMED_PAIRS.map((pair) => pair.dashboardId);
+/** Resolve the four study codes against the live dashboard library while
+ * preserving the protocol order A, B, 1, 2. */
+function studyMaterialItems() {
   const byId = new Map(dashboardLibraryItems.map((item) => [item.id, item]));
-  const themed = themedIds.map((id) => byId.get(id)).filter(Boolean);
-  const rest = dashboardLibraryItems.filter((item) => !themedIds.includes(item.id));
-  return [...themed, ...rest];
+  return STUDY_MATERIALS.map((material) => ({
+    ...material,
+    dashboard: byId.get(material.dashboardId) || null,
+  }));
 }
 
-/** Render the onboarding dashboard column as selectable cards. Clicking one only
- * marks it selected (via onboardingDashboardSelection); the load is deferred to
- * "Start Review" so both columns can be chosen independently first. */
+function selectedStudyMaterial() {
+  return STUDY_MATERIALS.find((material) => material.dashboardId === onboardingDashboardSelection) || null;
+}
+
+/** Render one card per protocol material. Dashboard and design document are one
+ * atomic choice: the card exposes the binding instead of asking the moderator to
+ * assemble a pair correctly. */
 function renderDashboardCards() {
   const container = document.getElementById("onboardingDashboardCards");
   if (!container) return;
   if (!dashboardLibraryItems.length) {
     const loading = dashboardLibraryBusy || dashboardLibraryRefreshing;
-    container.innerHTML = `<p class="upload-cards-empty">${loading ? "Loading dashboards…" : "No dashboards found."}</p>`;
+    container.innerHTML = `<p class="upload-cards-empty">${loading ? "Loading study materials…" : "Study dashboards are unavailable."}</p>`;
     updateOnboardingStart();
     return;
   }
-  container.innerHTML = orderedDashboardItems().map((item) => {
-    const selected = item.id === onboardingDashboardSelection;
+  const renderMaterial = (material) => {
+    const { dashboard } = material;
+    const selected = material.dashboardId === onboardingDashboardSelection;
+    const activeDocument = selected && material.docId && activeDesignDocId === material.docId;
+    const docLoading = activeDocument && (designDocLibraryBusy || state.designDoc.status === "loading");
+    const docError = activeDocument && state.designDoc.status === "error";
+    const flag = docLoading
+      ? "Preparing PDF"
+      : docError
+        ? "PDF error"
+        : selected
+          ? material.docId && state.designDoc.status === "loaded" ? "PDF ready" : "Selected"
+          : "";
     return `
-      <button type="button" class="upload-card${selected ? " is-selected" : ""}" role="listitem"
-        data-dashboard-id="${escapeHTML(item.id)}" aria-pressed="${selected}"${dashboardLibraryBusy ? " disabled" : ""}>
-        <span class="upload-card-icon" aria-hidden="true">${dashboardCardEmoji(item.id)}</span>
+      <button type="button" class="upload-card upload-material-card${selected ? " is-selected" : ""}${docError ? " has-error" : ""}"
+        data-dashboard-id="${escapeHTML(material.dashboardId)}" aria-pressed="${selected}"
+        aria-busy="${Boolean(docLoading)}" ${dashboardLibraryBusy || !dashboard ? " disabled" : ""}>
+        <span class="upload-card-code" aria-label="Material ${escapeHTML(material.code)}">${escapeHTML(material.code)}</span>
         <span class="upload-card-text">
-          <span class="upload-card-title">${escapeHTML(item.title || item.id)}</span>
+          <span class="upload-card-title">${escapeHTML(dashboard?.title || "Material unavailable")}</span>
+          <span class="upload-card-sub">
+            ${dashboard
+              ? `<span>Dashboard</span><span aria-hidden="true">·</span><span>${escapeHTML(material.docId ? material.documentLabel : "No PDF assigned")}</span>`
+              : `<span>Missing dashboard: ${escapeHTML(material.dashboardId)}</span>`}
+          </span>
         </span>
-        ${selected ? '<span class="upload-card-flag">Selected</span>' : ""}
+        ${flag ? `<span class="upload-card-flag">${flag}</span>` : ""}
       </button>`;
-  }).join("");
+  };
+  const materials = studyMaterialItems();
+  const groups = [
+    {
+      id: "taskMaterials",
+      title: "Task materials",
+      detail: "Dashboard + reference PDF",
+      items: materials.filter((material) => material.docId),
+    },
+    {
+      id: "assessmentMaterials",
+      title: "Assessment materials",
+      detail: "Dashboard only",
+      items: materials.filter((material) => !material.docId),
+    },
+  ];
+  container.innerHTML = groups.map((group) => `
+    <section class="upload-material-group" aria-labelledby="${group.id}">
+      <div class="upload-material-group-head">
+        <h3 id="${group.id}">${group.title}</h3>
+        <span>${group.detail}</span>
+      </div>
+      <div class="upload-material-grid" role="group" aria-labelledby="${group.id}">
+        ${group.items.map(renderMaterial).join("")}
+      </div>
+    </section>`).join("");
   updateOnboardingStart();
 }
 
-/** Render the onboarding guideline column. Each card toggles a bundled design
- * doc on/off (loaded through the same intake path as the workspace control), and
- * reflects the live load state so the author sees "Reading…" / "Loaded". */
-function renderGuidelineCards() {
-  const container = document.getElementById("onboardingGuidelineCards");
-  if (!container) return;
-  const byId = new Map(dashboardLibraryItems.map((item) => [item.id, item]));
-  container.innerHTML = THEMED_PAIRS.map((pair) => {
-    const doc = DESIGN_DOC_LIBRARY.find((candidate) => candidate.id === pair.docId);
-    if (!doc) return "";
-    const selected = activeDesignDocId === doc.id;
-    const loading = selected && state.designDoc.status === "loading";
-    const pairTitle = byId.get(pair.dashboardId)?.title || "";
-    const sub = pairTitle ? `Built for ${escapeHTML(pairTitle)}` : "Design guideline";
-    return `
-      <button type="button" class="upload-card${selected ? " is-selected" : ""}" role="listitem"
-        data-doc-id="${escapeHTML(doc.id)}" aria-pressed="${selected}"${designDocLibraryBusy && !selected ? " disabled" : ""}>
-        <span class="upload-card-icon" aria-hidden="true">${pair.emoji}</span>
-        <span class="upload-card-text">
-          <span class="upload-card-title">${escapeHTML(doc.label)}</span>
-          <span class="upload-card-sub">${sub}</span>
-        </span>
-        ${loading ? '<span class="upload-card-flag">Reading…</span>' : selected ? '<span class="upload-card-flag">Selected</span>' : ""}
-      </button>`;
-  }).join("");
-  const status = document.getElementById("onboardingGuidelineStatus");
-  if (status) {
-    const { status: docStatus, error } = state.designDoc;
-    if (activeDesignDocId && docStatus === "loading") {
-      status.textContent = "Reading the guideline…";
-      status.dataset.state = "active";
-    } else if (activeDesignDocId && docStatus === "loaded") {
-      const count = state.constraintSet?.constraints?.length || 0;
-      status.textContent = count ? `${count} rule${count === 1 ? "" : "s"} ready to review.` : "Guideline loaded.";
-      status.dataset.state = "active";
-    } else if (activeDesignDocId && docStatus === "error") {
-      status.textContent = error || "Could not read that guideline.";
-      status.dataset.state = "error";
-    } else {
-      status.textContent = "";
-      status.dataset.state = "";
-    }
-  }
-}
-
-/** Enable "Start Review" only once a dashboard is picked, and freeze it while a
- * load is already in flight. */
+/** A material selection is enough to enter the workspace. The dashboard load
+ * blocks duplicate submits, while its bound PDF continues processing in the
+ * background and becomes available as soon as extraction finishes. */
 function updateOnboardingStart() {
   const startBtn = document.getElementById("onboardingStartBtn");
   if (!startBtn) return;
-  startBtn.disabled = !onboardingDashboardSelection || dashboardLibraryBusy;
+  const material = selectedStudyMaterial();
+  const summary = document.getElementById("onboardingSelectionSummary");
+  startBtn.disabled = !material || dashboardLibraryBusy;
+  startBtn.textContent = dashboardLibraryBusy
+    ? `Opening ${material?.code || "material"}…`
+    : material
+      ? `Open Material ${material.code}`
+      : "Select a material";
+  if (!summary) return;
+  if (!material) {
+    summary.textContent = "Select a material code to continue.";
+    summary.dataset.state = "idle";
+    return;
+  }
+  const prefix = `Material ${material.code} selected.`;
+  if (!material.docId) {
+    summary.textContent = `${prefix} Dashboard only; no PDF is assigned.`;
+    summary.dataset.state = "ready";
+  } else if (state.designDoc.status === "error" && activeDesignDocId === material.docId) {
+    summary.textContent = `${prefix} The dashboard can open; review the PDF error in the workspace.`;
+    summary.dataset.state = "error";
+  } else if (state.designDoc.status === "loaded" && activeDesignDocId === material.docId) {
+    summary.textContent = `${prefix} Dashboard and PDF are ready.`;
+    summary.dataset.state = "ready";
+  } else {
+    summary.textContent = `${prefix} The dashboard opens now; the PDF will finish in the workspace.`;
+    summary.dataset.state = "loading";
+  }
 }
 
 async function refreshDashboardLibrary({ announce = true } = {}) {
@@ -9395,10 +9348,9 @@ async function loadDashboardLibrarySelection(id, { applyBinding = true } = {}) {
     const item = dashboardLibraryItems.find((candidate) => candidate.id === id);
     setDashboardLibraryStatus(`Opened ${item?.title || id}.`);
     // Preset this dashboard's bound design-guideline doc (or clear, if unbound).
-    // Skip the re-extract when the bound doc is already active. The onboarding
-    // picker opts out (applyBinding=false): its two columns are chosen
-    // independently, so a picked guideline must survive and an unpicked one must
-    // not be force-loaded by the dashboard choice.
+    // Skip the re-extract when the bound doc is already active. Study onboarding
+    // opts out because its atomic material card has already established the
+    // exact dashboard + PDF pair before the dashboard is opened.
     if (applyBinding) {
       const boundDocId = DASHBOARD_DESIGN_DOC_BINDINGS[id] || "";
       if (boundDocId !== activeDesignDocId) void loadDesignDocById(boundDocId);
@@ -9644,9 +9596,8 @@ function renderDesignDocStatus() {
   // must be blocked while the document is being read). The workspace controls
   // exist even during onboarding, so this is safe to call unconditionally.
   updateContextWorkflowControls();
-  // The onboarding guideline column mirrors the same state through cards; no-op
-  // once onboarding has dissolved (the container is gone).
-  renderGuidelineCards();
+  // The selected material card mirrors the PDF load state during onboarding.
+  renderDashboardCards();
 }
 
 function clearDesignDoc() {
@@ -9679,8 +9630,7 @@ function renderDesignDocLibraryControl() {
 }
 
 /** Load a bundled design-guideline doc by library id and run it through the same
- * intake path as an upload. "" clears the design document. Fetches the PDF bytes
- * root-relative and wraps them as a File so handleDesignDoc is reused verbatim. */
+ * intake path as an upload. "" clears the design document. */
 async function loadDesignDocById(docId) {
   const serial = ++designDocLoadSerial;
   if (!docId) {
@@ -9692,8 +9642,9 @@ async function loadDesignDocById(docId) {
   activeDesignDocId = docId;
   designDocLibraryBusy = true;
   renderDesignDocLibraryControl();
+  renderDashboardCards();
   try {
-    const res = await fetch(`/pdfs/${encodeURIComponent(doc.file)}`);
+    const res = await fetch(doc.url || `/pdfs/${encodeURIComponent(doc.file)}`);
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
     const blob = await res.blob();
     if (serial !== designDocLoadSerial) return; // a newer selection superseded this
@@ -9716,6 +9667,7 @@ async function loadDesignDocById(docId) {
     if (serial === designDocLoadSerial) {
       designDocLibraryBusy = false;
       renderDesignDocLibraryControl();
+      renderDashboardCards();
     }
   }
 }
@@ -10138,9 +10090,16 @@ async function loadJsonDashboard(data, fileName = "dashboard.json") {
   // usermeta.crossFilter.role === "source"). Enable the runtime on load so the
   // baked-in "click a source mark → filter the related tiles" behavior is live
   // immediately — mirrors the post-apply enable in commitAppliedCritiques.
-  state.crossFilterEnabled = state.tiles.some((tile) => tile.spec?.usermeta?.crossFilter?.role === "source");
-  state.activeFilterState = state.tiles.some((tile) => tile.spec?.usermeta?.activeFilterState);
-  state.crossFilterSelection = null;
+  const restoredInteraction = normalized.dashboard.interactionState || {};
+  state.crossFilterEnabled = typeof restoredInteraction.crossFilterEnabled === "boolean"
+    ? restoredInteraction.crossFilterEnabled
+    : state.tiles.some((tile) => tile.spec?.usermeta?.crossFilter?.role === "source");
+  state.activeFilterState = typeof restoredInteraction.activeFilterState === "boolean"
+    ? restoredInteraction.activeFilterState
+    : state.tiles.some((tile) => tile.spec?.usermeta?.activeFilterState);
+  state.crossFilterSelection = restoredInteraction.crossFilterSelection
+    ? clone(restoredInteraction.crossFilterSelection)
+    : null;
   state.interactionObservations.clear();
   resetInteractionMemory();
   // Re-selecting a dashboard must fully refresh the workspace — no view state
@@ -10320,10 +10279,9 @@ function enterWorkspace() {
   requestAnimationFrame(fitCanvas);
 }
 
-// Two independent card columns replace the old dropzone + dashboard dropdown.
-// Dashboard cards only mark a selection; the load is deferred to "Start Review".
-// Guideline cards toggle a bundled design doc immediately, so its rules can
-// extract while the author is still choosing a dashboard.
+// Study cards are atomic dashboard + PDF bundles. Selecting one begins loading
+// its bound design document immediately, but never blocks entry: Start Review
+// opens the dashboard while PDF extraction continues in the workspace.
 const onboardingDashboardCards = document.getElementById("onboardingDashboardCards");
 if (onboardingDashboardCards) {
   onboardingDashboardCards.addEventListener("click", (e) => {
@@ -10331,26 +10289,19 @@ if (onboardingDashboardCards) {
     if (!card || card.disabled) return;
     onboardingDashboardSelection = card.dataset.dashboardId || "";
     renderDashboardCards();
-  });
-}
-const onboardingGuidelineCards = document.getElementById("onboardingGuidelineCards");
-if (onboardingGuidelineCards) {
-  onboardingGuidelineCards.addEventListener("click", (e) => {
-    const card = e.target.closest(".upload-card[data-doc-id]");
-    if (!card || card.disabled) return;
-    const docId = card.dataset.docId || "";
-    // A second click on the active guideline clears it — an independent toggle
-    // that never touches the dashboard selection.
-    void loadDesignDocById(docId === activeDesignDocId ? "" : docId);
+    const material = selectedStudyMaterial();
+    if (!material) return;
+    const documentAlreadyReady = material.docId
+      && material.docId === activeDesignDocId
+      && state.designDoc.status === "loaded";
+    if (!documentAlreadyReady) void loadDesignDocById(material.docId);
   });
 }
 const onboardingStartBtn = document.getElementById("onboardingStartBtn");
 if (onboardingStartBtn) {
   onboardingStartBtn.addEventListener("click", () => {
     if (!onboardingDashboardSelection) return;
-    // Independent columns: pass applyBinding:false so the dashboard's default
-    // guideline binding never overrides the author's own guideline choice
-    // (including a deliberate "none").
+    // The card already established the exact protocol binding.
     void loadDashboardLibrarySelection(onboardingDashboardSelection, { applyBinding: false });
   });
 }

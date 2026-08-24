@@ -1,0 +1,320 @@
+{
+  "dashboard": {
+    "id": "sales-command-center",
+    "title": "Retail Sales Command Center",
+    "subtitle": "Trailing six months (Apr–Sep 2026) across regions · use the controls or click a region bar",
+    "hasKpis": false,
+    "filters": [
+      {
+        "id": "region-filter",
+        "label": "Region",
+        "kind": "category",
+        "field": "region",
+        "targets": ["region-performance", "revenue-trend", "category-mix"],
+        "options": ["West", "North", "Central", "South", "East"],
+        "value": null,
+        "wired": true,
+        "variant": "chips",
+        "placement": "top-row",
+        "container": "ruled",
+        "tone": "accent",
+        "accent": "#2563eb"
+      },
+      {
+        "id": "revenue-threshold",
+        "label": "Maximum revenue",
+        "kind": "range",
+        "field": "revenue",
+        "targets": ["region-performance"],
+        "min": 0,
+        "max": 1200000,
+        "step": 100000,
+        "value": 1200000,
+        "wired": true,
+        "variant": "slider",
+        "placement": "floating",
+        "container": "plain",
+        "tone": "neutral",
+        "accent": "#2563eb",
+        "position": { "x": 748, "y": 91, "w": 294 }
+      }
+    ]
+  },
+  "tiles": [
+    {
+      "id": "kpi-revenue",
+      "label": "Total Revenue",
+      "bounds": { "x": 28, "y": 144, "w": 336, "h": 120 },
+      "spec": {
+        "width": 300,
+        "height": 64,
+        "background": null,
+        "config": { "font": "Georgia, 'Times New Roman', serif", "view": { "stroke": null } },
+        "data": { "values": [{ "x": 0 }] },
+        "layer": [
+          {
+            "mark": { "type": "text", "fontSize": 40, "fontWeight": "bold", "color": "#0f172a", "align": "center", "baseline": "middle", "dy": -8 },
+            "encoding": { "text": { "value": "$4.28M" } }
+          },
+          {
+            "mark": { "type": "text", "fontSize": 13, "fontWeight": "bold", "color": "#2563eb", "align": "center", "baseline": "middle", "dy": 22 },
+            "encoding": { "text": { "value": "▲ 12% YoY" } }
+          }
+        ]
+      }
+    },
+    {
+      "id": "kpi-orders",
+      "label": "Orders",
+      "bounds": { "x": 380, "y": 144, "w": 336, "h": 120 },
+      "spec": {
+        "width": 300,
+        "height": 64,
+        "background": null,
+        "config": { "font": "'Trebuchet MS', Arial, sans-serif", "view": { "stroke": null } },
+        "data": { "values": [{ "x": 0 }] },
+        "layer": [
+          {
+            "mark": { "type": "text", "fontSize": 40, "fontWeight": "bold", "color": "#0f172a", "align": "center", "baseline": "middle", "dy": -8 },
+            "encoding": { "text": { "value": "18,420" } }
+          },
+          {
+            "mark": { "type": "text", "fontSize": 13, "fontWeight": "bold", "color": "#2563eb", "align": "center", "baseline": "middle", "dy": 22 },
+            "encoding": { "text": { "value": "▲ 6% YoY" } }
+          }
+        ]
+      }
+    },
+    {
+      "id": "kpi-aov",
+      "label": "Avg Order Value",
+      "bounds": { "x": 732, "y": 144, "w": 340, "h": 120 },
+      "spec": {
+        "width": 300,
+        "height": 64,
+        "background": null,
+        "config": { "font": "'SF Mono', Menlo, Consolas, 'Roboto Mono', monospace", "view": { "stroke": null } },
+        "data": { "values": [{ "x": 0 }] },
+        "layer": [
+          {
+            "mark": { "type": "text", "fontSize": 40, "fontWeight": "bold", "color": "#0f172a", "align": "center", "baseline": "middle", "dy": -8 },
+            "encoding": { "text": { "value": "$232" } }
+          },
+          {
+            "mark": { "type": "text", "fontSize": 13, "fontWeight": "bold", "color": "#2563eb", "align": "center", "baseline": "middle", "dy": 22 },
+            "encoding": { "text": { "value": "▲ 4% YoY" } }
+          }
+        ]
+      }
+    },
+    {
+      "id": "region-performance",
+      "label": "Revenue by Region",
+      "subtitle": "Click a region to filter the trend and category views · double-click to clear",
+      "bounds": { "x": 28, "y": 288, "w": 610, "h": 456 },
+      "spec": {
+        "width": 570,
+        "height": 416,
+        "background": null,
+        "config": {
+          "font": "'SF Mono', Menlo, Consolas, 'Roboto Mono', monospace",
+          "view": { "stroke": null },
+          "axis": {
+            "labelColor": "#475569",
+            "titleColor": "#64748b",
+            "gridColor": "#eef2f7",
+            "domain": false,
+            "tickSize": 0,
+            "labelFontSize": 13,
+            "titleFontSize": 12
+          }
+        },
+        "data": {
+          "values": [
+            { "region": "West", "revenue": 1180000 },
+            { "region": "North", "revenue": 980000 },
+            { "region": "Central", "revenue": 868000 },
+            { "region": "South", "revenue": 720000 },
+            { "region": "East", "revenue": 530000 }
+          ]
+        },
+        "params": [
+          { "name": "region_select", "select": { "type": "point", "fields": ["region"], "on": "click", "clear": "dblclick" } }
+        ],
+        "mark": { "type": "bar", "cornerRadius": 2, "cursor": "pointer", "color": "#2563eb" },
+        "encoding": {
+          "y": {
+            "field": "region",
+            "type": "nominal",
+            "sort": { "field": "revenue", "order": "descending" },
+            "axis": { "title": null, "labelFontSize": 14 }
+          },
+          "x": {
+            "field": "revenue",
+            "type": "quantitative",
+            "axis": { "title": "Revenue", "format": "$.2s", "grid": true }
+          },
+          "opacity": { "condition": { "param": "region_select", "value": 1 }, "value": 0.4 },
+          "tooltip": [
+            { "field": "region", "type": "nominal", "title": "Region" },
+            { "field": "revenue", "type": "quantitative", "format": "$,", "title": "Revenue" }
+          ]
+        },
+        "usermeta": {
+          "crossFilter": {
+            "role": "source",
+            "param": "region_select",
+            "field": "region",
+            "source": "region-performance",
+            "targets": ["revenue-trend", "category-mix"]
+          }
+        }
+      }
+    },
+    {
+      "id": "revenue-trend",
+      "label": "Monthly Revenue",
+      "subtitle": "All regions — or the region you select",
+      "bounds": { "x": 662, "y": 288, "w": 410, "h": 222 },
+      "spec": {
+        "width": 370,
+        "height": 182,
+        "background": null,
+        "config": {
+          "font": "'SF Mono', Menlo, Consolas, 'Roboto Mono', monospace",
+          "view": { "stroke": null },
+          "axis": {
+            "labelColor": "#475569",
+            "titleColor": "#64748b",
+            "gridColor": "#eef2f7",
+            "domain": false,
+            "tickSize": 0,
+            "labelFontSize": 11,
+            "titleFontSize": 11
+          }
+        },
+        "data": {
+          "values": [
+            { "month": "Apr", "region": "West", "revenue": 175000 },
+            { "month": "May", "region": "West", "revenue": 185000 },
+            { "month": "Jun", "region": "West", "revenue": 195000 },
+            { "month": "Jul", "region": "West", "revenue": 205000 },
+            { "month": "Aug", "region": "West", "revenue": 200000 },
+            { "month": "Sep", "region": "West", "revenue": 220000 },
+            { "month": "Apr", "region": "North", "revenue": 150000 },
+            { "month": "May", "region": "North", "revenue": 158000 },
+            { "month": "Jun", "region": "North", "revenue": 162000 },
+            { "month": "Jul", "region": "North", "revenue": 168000 },
+            { "month": "Aug", "region": "North", "revenue": 165000 },
+            { "month": "Sep", "region": "North", "revenue": 177000 },
+            { "month": "Apr", "region": "Central", "revenue": 132000 },
+            { "month": "May", "region": "Central", "revenue": 140000 },
+            { "month": "Jun", "region": "Central", "revenue": 145000 },
+            { "month": "Jul", "region": "Central", "revenue": 150000 },
+            { "month": "Aug", "region": "Central", "revenue": 148000 },
+            { "month": "Sep", "region": "Central", "revenue": 153000 },
+            { "month": "Apr", "region": "South", "revenue": 105000 },
+            { "month": "May", "region": "South", "revenue": 112000 },
+            { "month": "Jun", "region": "South", "revenue": 118000 },
+            { "month": "Jul", "region": "South", "revenue": 122000 },
+            { "month": "Aug", "region": "South", "revenue": 120000 },
+            { "month": "Sep", "region": "South", "revenue": 143000 },
+            { "month": "Apr", "region": "East", "revenue": 78000 },
+            { "month": "May", "region": "East", "revenue": 82000 },
+            { "month": "Jun", "region": "East", "revenue": 86000 },
+            { "month": "Jul", "region": "East", "revenue": 90000 },
+            { "month": "Aug", "region": "East", "revenue": 92000 },
+            { "month": "Sep", "region": "East", "revenue": 102000 }
+          ]
+        },
+        "mark": { "type": "line", "point": false, "strokeWidth": 2.6, "color": "#0ea5e9" },
+        "encoding": {
+          "x": {
+            "field": "month",
+            "type": "ordinal",
+            "sort": ["Apr", "May", "Jun", "Jul", "Aug", "Sep"],
+            "axis": { "title": null, "labelAngle": 0 }
+          },
+          "y": {
+            "field": "revenue",
+            "type": "quantitative",
+            "aggregate": "sum",
+            "axis": { "title": "Revenue", "format": "$.2s", "grid": true }
+          }
+        }
+      }
+    },
+    {
+      "id": "category-mix",
+      "label": "Revenue by Category",
+      "subtitle": "All regions — or the region you select",
+      "bounds": { "x": 662, "y": 534, "w": 410, "h": 210 },
+      "spec": {
+        "width": 370,
+        "height": 170,
+        "background": null,
+        "config": {
+          "font": "'SF Mono', Menlo, Consolas, 'Roboto Mono', monospace",
+          "view": { "stroke": null },
+          "axis": {
+            "labelColor": "#475569",
+            "titleColor": "#64748b",
+            "gridColor": "#eef2f7",
+            "domain": false,
+            "tickSize": 0,
+            "labelFontSize": 11,
+            "titleFontSize": 11
+          }
+        },
+        "data": {
+          "values": [
+            { "category": "Electronics", "region": "West", "revenue": 380000 },
+            { "category": "Electronics", "region": "North", "revenue": 300000 },
+            { "category": "Electronics", "region": "Central", "revenue": 250000 },
+            { "category": "Electronics", "region": "South", "revenue": 210000 },
+            { "category": "Electronics", "region": "East", "revenue": 150000 },
+            { "category": "Apparel", "region": "West", "revenue": 260000 },
+            { "category": "Apparel", "region": "North", "revenue": 220000 },
+            { "category": "Apparel", "region": "Central", "revenue": 190000 },
+            { "category": "Apparel", "region": "South", "revenue": 160000 },
+            { "category": "Apparel", "region": "East", "revenue": 120000 },
+            { "category": "Home", "region": "West", "revenue": 230000 },
+            { "category": "Home", "region": "North", "revenue": 200000 },
+            { "category": "Home", "region": "Central", "revenue": 180000 },
+            { "category": "Home", "region": "South", "revenue": 150000 },
+            { "category": "Home", "region": "East", "revenue": 110000 },
+            { "category": "Grocery", "region": "West", "revenue": 190000 },
+            { "category": "Grocery", "region": "North", "revenue": 170000 },
+            { "category": "Grocery", "region": "Central", "revenue": 150000 },
+            { "category": "Grocery", "region": "South", "revenue": 130000 },
+            { "category": "Grocery", "region": "East", "revenue": 90000 },
+            { "category": "Beauty", "region": "West", "revenue": 120000 },
+            { "category": "Beauty", "region": "North", "revenue": 90000 },
+            { "category": "Beauty", "region": "Central", "revenue": 98000 },
+            { "category": "Beauty", "region": "South", "revenue": 70000 },
+            { "category": "Beauty", "region": "East", "revenue": 58000 }
+          ]
+        },
+        "mark": { "type": "bar", "cornerRadius": 2, "color": "#14b8a6" },
+        "encoding": {
+          "x": {
+            "field": "category",
+            "type": "nominal",
+            "sort": "-y",
+            "axis": { "title": null, "labelAngle": 0, "labelFontSize": 11 }
+          },
+          "y": {
+            "field": "revenue",
+            "type": "quantitative",
+            "aggregate": "sum",
+            "axis": { "title": "Revenue", "format": "$.2s", "grid": true }
+          },
+          "tooltip": [
+            { "field": "category", "type": "nominal", "title": "Category" },
+            { "field": "revenue", "aggregate": "sum", "type": "quantitative", "format": "$,", "title": "Revenue" }
+          ]
+        }
+      }
+    }
+  ]
+}

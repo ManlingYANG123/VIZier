@@ -113,7 +113,7 @@ test("artifact-only review uses the unified LLM path and returns diagnostic prov
   // dimension is the prescribed recommendation leaf's branch.
   assert.equal(res.critiques[0].dimension, "text");
   assert.equal(res.critiques[0].judgmentBasis?.[0], "dashboard evidence");
-  assert.match(res.registryVersion, /^diagnostic-knowledge-v3/);
+  assert.match(res.registryVersion, /^diagnostic-knowledge-v4/);
   // The run reports the diagnosis outcomes, not legacy criterion evaluations.
   assert.ok(res.diagnoses.some((diagnosis) =>
     diagnosis.object === "text" && diagnosis.outcome === "evaluated_issue"

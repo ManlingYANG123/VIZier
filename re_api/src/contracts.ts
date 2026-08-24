@@ -48,7 +48,7 @@ export type ProposalKind =
 
 /**
  * A recommendation branch. In v2 this is the top-level grouping of the leaf
- * recommendation codebook (recommendation_new.csv); a finding/critique carries
+ * recommendation codebook (recommendation_v3_examples.csv); a finding/critique carries
  * the branch of its prescribed recommendation. Branch is a display/grouping
  * label only — DIAGNOSING (object×problem) does not gate which branch a
  * prescription may come from.
@@ -64,7 +64,7 @@ export type ProposalKind =
  * carries when it was admitted on merit (grounded, specific, actionable) but no
  * catalog leaf matched its prescribed fix. It marks an uncatalogued
  * recommendation: kept as guidance, never routed to an executable branch, and
- * its rate is a coverage signal for where recommendation_new.csv is missing a
+ * its rate is a coverage signal for where recommendation_v3_examples.csv is missing a
  * leaf. It deliberately sits outside the branch lockstep.
  */
 export type Dimension =

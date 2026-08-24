@@ -15,6 +15,7 @@ test("saveStudySession writes the event log plus dashboard PNG and JSON files", 
     const result = await saveStudySession({
       participantId: "P01",
       sessionId: "sess-1",
+      fileName: "03-dashboard-task-2026-08-21T17-00-00Z.json",
       savedAt: "2026-08-21T17:00:00.000Z",
       events: [{ kind: "session_started" }],
       artifacts: [
@@ -38,6 +39,7 @@ test("saveStudySession writes the event log plus dashboard PNG and JSON files", 
     });
     assert.equal(result.stored, "local");
     assert.equal(result.files.length, 4);
+    assert.equal(result.key, "studies/P01/sess-1/03-dashboard-task-2026-08-21T17-00-00Z.json");
     const session = JSON.parse(await readFile(join(dir, result.key), "utf8"));
     assert.equal(session.participantId, "P01");
     assert.deepEqual(session.artifactFiles, [

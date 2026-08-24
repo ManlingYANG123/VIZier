@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "study": "VIZier user evaluation",
+  "materials": {
+    "A": {
+      "dashboardFile": "dashboards/A_garden-birds.json",
+      "title": "Britain's Garden Birds",
+      "role": "vizier-counterbalanced",
+      "designPdf": "pdfs/A_bbc-gel-infographics.pdf"
+    },
+    "B": {
+      "dashboardFile": "dashboards/B_retail-sales-command-center.json",
+      "title": "Retail Sales Command Center",
+      "role": "vizier-counterbalanced",
+      "designPdf": "pdfs/B_tableau-dashboard-best-practices.pdf"
+    },
+    "1": {
+      "dashboardFile": "dashboards/1_air-quality.json",
+      "title": "Air Quality Where You Live",
+      "role": "assessment-counterbalanced",
+      "designPdf": null
+    },
+    "2": {
+      "dashboardFile": "dashboards/2_ocean-biodiversity.json",
+      "title": "Ocean Biodiversity Atlas",
+      "role": "assessment-counterbalanced",
+      "designPdf": null
+    }
+  },
+  "sequences": [
+    {
+      "id": "group-1",
+      "pre": "1",
+      "training": "A",
+      "controlledTask": "B",
+      "post": "2"
+    },
+    {
+      "id": "group-2",
+      "pre": "2",
+      "training": "B",
+      "controlledTask": "A",
+      "post": "1"
+    }
+  ]
+}

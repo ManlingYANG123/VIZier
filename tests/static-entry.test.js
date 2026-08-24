@@ -6,7 +6,7 @@ test("Vite entry does not contain an unevaluated server-side cache token", async
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
 
   assert.doesNotMatch(html, /<\?=/);
-  assert.match(html, /<script type="module" src="\/src\/app\.js"><\/script>/);
+  assert.match(html, /<script type="module" src="\/src\/bootstrap\.js"><\/script>/);
 });
 
 test("frontend sends review scope instead of context-dependent generation modes", async () => {
@@ -166,6 +166,71 @@ test("first-run onboarding has no demo-dashboard escape hatch", async () => {
 
   assert.doesNotMatch(source, /Use Demo Dashboard|skipUploadBtn|skipDemo|demoBoardPreview|obShowSplit/);
   assert.doesNotMatch(styles, /upload-skip-btn|demo-board-preview|demo-kpi-strip|demo-chart-grid/);
+});
+
+test("study onboarding binds each assigned dashboard to its protocol PDF", async () => {
+  const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+
+  assert.match(source, /Choose a material/);
+  assert.match(source, /const STUDY_MATERIALS = \[/);
+  assert.match(source, /code: "A",\s+dashboardId: "garden-birds-new",[\s\S]*?docId: "study-a"/);
+  assert.match(source, /code: "B",\s+dashboardId: "sales-command-center-new",[\s\S]*?docId: "study-b"/);
+  assert.match(source, /code: "1",\s+dashboardId: "air-quality-new",[\s\S]*?docId: ""/);
+  assert.match(source, /code: "2",\s+dashboardId: "ocean-life",[\s\S]*?docId: ""/);
+  assert.match(source, /\/study-materials\/pdfs\/A_bbc-gel-infographics\.pdf/);
+  assert.match(source, /\/study-materials\/pdfs\/B_tableau-dashboard-best-practices\.pdf/);
+  assert.doesNotMatch(source, /id="onboardingGuidelineCards"/);
+  assert.match(source, /startBtn\.disabled = !material \|\| dashboardLibraryBusy;/);
+  assert.match(source, /`Open Material \$\{material\.code\}`/);
+  assert.doesNotMatch(source, /startBtn\.disabled = [^;]*designDocLibraryBusy/);
+  assert.match(source, /Select the assigned code\./);
+  assert.doesNotMatch(source, /Dashboard and PDF settings are applied together/);
+  assert.match(source, /Task materials/);
+  assert.match(source, /Assessment materials/);
+  assert.match(source, /id="onboardingSelectionSummary"/);
+  assert.match(styles, /\.upload-card-code/);
+  assert.match(styles, /\.upload-picker--bundles/);
+});
+
+test("group study routes boot the neutral runner before VIZier", async () => {
+  const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
+  const bootstrap = await readFile(new URL("../src/bootstrap.js", import.meta.url), "utf8");
+  const runner = await readFile(new URL("../src/study-runner.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+
+  assert.match(html, /src="\/src\/bootstrap\.js"/);
+  assert.match(bootstrap, /studyGroupIdFromPath/);
+  assert.match(bootstrap, /bootStudyRunner/);
+  assert.match(runner, /Review the dashboard/);
+  assert.match(runner, /Add area note/);
+  assert.match(runner, /Continue to questions/);
+  assert.match(runner, /id="studyZoomOut"/);
+  assert.match(runner, /id="studyZoomIn"/);
+  assert.match(runner, /id="studyZoomFit"/);
+  assert.match(runner, /assessment_canvas_zoomed/);
+  assert.match(runner, /assessment_canvas_panned/);
+  assert.match(runner, /study_phase_intro_viewed/);
+  assert.match(runner, /study_phase_intro_completed/);
+  assert.match(runner, /renderPhaseIntro/);
+  assert.match(runner, /study-phase-axis/);
+  assert.match(runner, /aria-current="step"/);
+  assert.match(runner, /Select one response for every statement/);
+  assert.match(runner, /scale_response_recorded/);
+  assert.match(runner, /scaleResponses: serializeScaleResponses/);
+  assert.doesNotMatch(runner, /<textarea name="q/);
+  assert.match(runner, /openStudyMaterialForRunner/);
+  assert.match(styles, /\.study-assessment-layout/);
+  assert.match(styles, /\.study-dashboard-world/);
+  assert.match(styles, /\.study-dashboard-zoom-controls/);
+  assert.match(styles, /\.study-dashboard-stage\.is-panning/);
+  assert.match(styles, /\.study-phase-intro/);
+  assert.match(styles, /\.study-phase-axis/);
+  assert.match(styles, /\.study-runner-shell\.is-questionnaire[\s\S]*?overflow-y:\s*auto/);
+  assert.match(styles, /\.study-scale-question legend\s*\{[^}]*float:\s*left/);
+  assert.doesNotMatch(styles, /\.study-scale-question legend\s*\{[^}]*max-width:\s*70ch/);
+  assert.doesNotMatch(styles, /\.study-questionnaire-page form > footer\s*\{[^}]*position:\s*sticky/);
+  assert.match(styles, /\.study-workspace-progress/);
 });
 
 test("focused critique details render before preview hydration", async () => {
@@ -778,21 +843,26 @@ test("session end archives high-resolution PNG and reloadable JSON for checkpoin
   const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
 
   assert.match(source, /async function captureDashboardExport\(\)/);
-  assert.match(source, /async function captureLiveArtboardPng\(\)/);
   assert.match(source, /async function captureDashboardDisplaySvg\(\)/);
-  assert.match(source, /async function vegaTileCanvas\(/);
-  assert.match(source, /function paintLiveArtboardChrome\(/);
-  assert.match(source, /layoutBoxOnArtboard\(/);
-  assert.match(source, /emptyVegaHosts: true/);
-  assert.match(source, /view\.toCanvas/);
+  assert.match(source, /async function captureDashboardPngFromSvg\(/);
+  assert.match(source, /async function settleDashboardForCapture\(/);
+  assert.match(source, /function buildDashboardCaptureSnapshot\(/);
+  assert.match(source, /copyLiveControlState\(source, snapshot\)/);
+  assert.match(source, /rasterizeDashboardArtboard\(\)/);
   assert.match(source, /toDataURL\("image\/png"\)/);
   assert.match(source, /toDataURL\("image\/webp", \.84\)/);
+  const captureExport = source.match(/async function captureDashboardExport\(\)[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(captureExport, /const snapshot = buildDashboardCaptureSnapshot\(\)/);
+  assert.match(captureExport, /captureDashboardPngFromSvg\(svg, width, height\)/);
+  assert.doesNotMatch(captureExport, /captureLiveArtboardPng\(\)|captureDashboardPngFromViews\(\)/);
+  assert.doesNotMatch(source, /function paintLiveArtboardChrome\(|async function captureLiveArtboardPng\(/);
   assert.match(source, /target\.afterPng = captured\.png/);
   assert.match(source, /target\.afterSvg = captured\.svg/);
+  assert.match(source, /target\.afterSnapshot = captured\.snapshot/);
   assert.match(source, /const full = version\.afterPng \|\| thumbnail/);
   assert.match(source, /full: faithful \|\| full/);
   assert.match(source, /async function collectStudyDashboardArtifacts\(\)/);
-  assert.match(source, /dashboardDocumentFromSnapshot\(\{/);
+  assert.match(source, /captured\.snapshot \|\| buildDashboardCaptureSnapshot\(\)/);
   assert.match(source, /exportStudyDashboardsZip\(out\.artifacts, out\.bundle\)/);
   assert.match(source, /saveStudyBundle\("end"\)/);
 });

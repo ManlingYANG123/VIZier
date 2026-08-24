@@ -28,7 +28,17 @@ import { dashboardDocumentFromSnapshot } from "./vega-dashboard-adapter.js";
 export const STUDY_STORAGE_KEY = "vizierStudySession";
 export const STUDY_SCHEMA_VERSION = 2;
 export const STUDY_APP_VERSION = "0.2.0";
-export const STUDY_PHASES = ["practice", "brief_reading", "timed_task", "post_session"];
+export const STUDY_PHASES = [
+  "pre_assessment",
+  "training",
+  "practice",
+  "brief_reading",
+  "timed_task",
+  "dashboard_task",
+  "post_assessment",
+  "post_session",
+  "complete",
+];
 export const RESEARCHER_ANNOTATION_KINDS = [
   "assistance",
   "interruption",
@@ -41,6 +51,7 @@ let session = null; // active/complete session metadata, or null
 let events = []; // uncapped, ordered event log for the session
 let nextLogId = 1; // monotonic per-session Log ID
 let persistScheduled = false;
+let taskCapture = { snapshot: null, artifacts: [] };
 let dashboardContextFn = null;
 let notingLoggingStatus = false;
 
@@ -103,7 +114,7 @@ function persistNow() {
       localStorage.removeItem(STUDY_STORAGE_KEY);
       return true;
     }
-    localStorage.setItem(STUDY_STORAGE_KEY, JSON.stringify({ session, events, nextLogId }));
+    localStorage.setItem(STUDY_STORAGE_KEY, JSON.stringify({ session, events, nextLogId, taskCapture }));
     return true;
   } catch {
     return false;
@@ -167,6 +178,11 @@ export function restoreStudySession() {
     session = parsed.session;
     events = Array.isArray(parsed.events) ? parsed.events : [];
     nextLogId = Number(parsed.nextLogId) || events.length + 1;
+    const captured = parsed.taskCapture && typeof parsed.taskCapture === "object" ? parsed.taskCapture : null;
+    taskCapture = {
+      snapshot: captured?.snapshot && typeof captured.snapshot === "object" ? captured.snapshot : null,
+      artifacts: Array.isArray(captured?.artifacts) ? captured.artifacts : [],
+    };
     return studySessionInfo();
   } catch {
     return null;
@@ -177,6 +193,7 @@ export function startStudySession(info = {}) {
   session = {
     active: true,
     participantId: String(info.participantId || "").trim() || `anon-${uuid().slice(0, 8)}`,
+    groupId: String(info.groupId || "").trim() || null,
     notes: String(info.notes || "").trim(),
     sessionId: uuid(),
     startedAt: nowIso(),
@@ -196,8 +213,11 @@ export function startStudySession(info = {}) {
   };
   events = [];
   nextLogId = 1;
+  taskCapture = { snapshot: null, artifacts: [] };
   persistNow();
-  recordStudyAction("session_started", `Study session started for ${session.participantId}`);
+  recordStudyAction("session_started", `Study session started for ${session.participantId}`, {
+    groupId: session.groupId,
+  });
   recordStudyAction("logging_status_changed", "Study logging started", { status: "started" });
   return studySessionInfo();
 }
@@ -224,6 +244,7 @@ export function recordStudyEvent(event, extra = null) {
       tRelMs: Date.now() - session.startedAtMs,
       logId,
       sequenceNumber: logId,
+      studyPhase: session.studyPhase || null,
       dashboardId: dash.dashboardId,
       dashboardVersion: dash.dashboardVersion,
       appVersion: STUDY_APP_VERSION,
@@ -486,17 +507,62 @@ function safeDownloadName(value) {
   return String(value || "na").replace(/[^A-Za-z0-9._-]+/g, "-");
 }
 
-export function buildStudyBundle(snapshot = null, reason = "manual") {
+const PHASE_FILE_SLUGS = {
+  pre_assessment: "01-pre-assessment",
+  training: "02-training",
+  dashboard_task: "03-dashboard-task",
+  timed_task: "03-dashboard-task",
+  post_assessment: "04-post-assessment",
+  complete: "05-session-complete",
+};
+
+/** Filesystem-safe UTC stamp: 2026-08-23T22-21-41Z */
+export function studyFileStamp(iso = nowIso()) {
+  const text = String(iso || nowIso());
+  const date = new Date(text);
+  const source = Number.isNaN(date.getTime()) ? text : date.toISOString();
+  return source.replace(/\.\d{3}Z$/, "Z").replace(/:/g, "-");
+}
+
+export function studyRecordFileName({
+  recordKind = "phase-log",
+  phase = "",
+  assessment = "",
+  savedAt,
+} = {}) {
+  const stamp = studyFileStamp(savedAt);
+  if (recordKind === "scale") {
+    const which = String(assessment || phase).includes("post") ? "post" : "pre";
+    return `scale-${which}-${stamp}.json`;
+  }
+  const slug = PHASE_FILE_SLUGS[phase]
+    || `00-${String(recordKind || "record").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "record"}`;
+  return `${slug}-${stamp}.json`;
+}
+
+export function buildStudyBundle(snapshot = null, reason = "manual", options = {}) {
   const savedAt = nowIso();
+  const recordKind = options.recordKind || "phase-log";
+  const phase = options.phase ?? (session ? session.studyPhase : null);
+  const eventList = Array.isArray(options.events) ? options.events.slice() : events.slice();
   return {
     schema: "vizier-study-session/2",
     schemaVersion: STUDY_SCHEMA_VERSION,
     appVersion: STUDY_APP_VERSION,
-    studyPhase: session ? session.studyPhase : null,
+    recordKind,
+    studyPhase: phase,
+    phase,
     loggingStatus: session ? session.loggingStatus : null,
     bundleId: `${session ? session.sessionId : "no-session"}-${savedAt}`,
+    fileName: options.fileName || studyRecordFileName({
+      recordKind,
+      phase,
+      assessment: options.assessment,
+      savedAt,
+    }),
     reason,
     participantId: session ? session.participantId : null,
+    groupId: session ? session.groupId : null,
     sessionId: session ? session.sessionId : null,
     notes: session ? session.notes : null,
     startedAt: session ? session.startedAt : null,
@@ -504,9 +570,37 @@ export function buildStudyBundle(snapshot = null, reason = "manual") {
     savedAt,
     userAgent: session ? session.userAgent : null,
     viewport: session ? session.viewport : null,
-    eventCount: events.length,
-    events: events.slice(),
-    dashboard: prepareStudySnapshot(snapshot),
+    eventCount: eventList.length,
+    events: eventList,
+    dashboard: recordKind === "scale" ? null : prepareStudySnapshot(snapshot),
+  };
+}
+
+export function buildStudyScaleRecord({
+  assessment,
+  phase,
+  scaleResponses = [],
+  questionsPresented = [],
+  submittedAt = null,
+} = {}) {
+  const savedAt = nowIso();
+  const which = String(assessment || "").includes("post") ? "post" : "pre";
+  return {
+    schema: "vizier-study-scale/1",
+    schemaVersion: 1,
+    appVersion: STUDY_APP_VERSION,
+    recordKind: "scale",
+    assessment: which,
+    phase: phase || (which === "post" ? "post_assessment" : "pre_assessment"),
+    participantId: session ? session.participantId : null,
+    groupId: session ? session.groupId : null,
+    sessionId: session ? session.sessionId : null,
+    submittedAt: submittedAt || savedAt,
+    savedAt,
+    instrumentVersion: "vizier-study-scales-v1",
+    questionsPresented: Array.isArray(questionsPresented) ? questionsPresented : [],
+    scaleResponses: Array.isArray(scaleResponses) ? scaleResponses : [],
+    fileName: studyRecordFileName({ recordKind: "scale", assessment: which, savedAt }),
   };
 }
 
@@ -530,7 +624,7 @@ export function exportStudyBundleLocal(bundle) {
     const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
     downloadBlob(
       blob,
-      `vizier-study-${safeDownloadName(bundle.participantId)}-${safeDownloadName(bundle.sessionId)}-${safeDownloadName(bundle.savedAt)}.json`,
+      `vizier-study-${safeDownloadName(bundle.fileName || `${bundle.participantId}-${bundle.sessionId}-${bundle.savedAt}`)}`.replace(/\.json$/i, "") + ".json",
     );
     return true;
   } catch {
@@ -585,5 +679,28 @@ export function discardStudySession() {
   session = null;
   events = [];
   nextLogId = 1;
+  taskCapture = { snapshot: null, artifacts: [] };
   persistNow();
+}
+
+/** Keep the dashboard-task snapshot across the post-assessment reload so the
+ * session writes one JSON file at the end, not a mid-task file. */
+export function stashStudyTaskCapture(snapshot, artifacts = []) {
+  const next = {
+    snapshot: snapshot && typeof snapshot === "object" ? snapshot : null,
+    artifacts: Array.isArray(artifacts) ? artifacts : [],
+  };
+  taskCapture = next;
+  if (persistNow()) return;
+  // Snapshot without PNG payloads may still fit when the full capture does not.
+  taskCapture = { snapshot: next.snapshot, artifacts: [] };
+  persistNow();
+  taskCapture = next;
+}
+
+export function studyTaskCapture() {
+  return {
+    snapshot: taskCapture.snapshot,
+    artifacts: Array.isArray(taskCapture.artifacts) ? taskCapture.artifacts.slice() : [],
+  };
 }

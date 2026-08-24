@@ -2,11 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildStudyBundle,
+  buildStudyScaleRecord,
   buildStudyDashboardArtifacts,
   buildUncompressedZip,
   endStudySession,
   recordStudyAction,
   startStudySession,
+  stashStudyTaskCapture,
+  studyFileStamp,
+  studyRecordFileName,
+  studyTaskCapture,
   stripVersionMedia,
   takeStudyRequestLink,
 } from "../src/study-session.js";
@@ -103,13 +108,14 @@ test("buildStudyDashboardArtifacts falls back to SVG when PNG capture is missing
 });
 
 test("a study bundle keeps the event log and omits screenshot payloads", () => {
-  startStudySession({ participantId: "P01" });
+  startStudySession({ participantId: "P01", groupId: "group-1" });
   const bundle = buildStudyBundle({
     dashboardTitle: "Workspace",
     versions: [version(1, "initial", "data:image/png;base64,aaa")],
   }, "end");
   assert.equal(bundle.participantId, "P01");
   assert.equal(bundle.reason, "end");
+  assert.equal(bundle.groupId, "group-1");
   assert.equal(bundle.dashboard.versions[0].afterScreenshot, undefined);
   assert.equal(bundle.dashboard.versions[0].afterPng, undefined);
   assert.equal(bundle.dashboard.versions[0].afterSvg, undefined);
@@ -131,6 +137,37 @@ test("study events carry schema v2 envelope fields and request parent links", ()
   assert.equal(linkA.requestId, "req-a");
   assert.equal(linkB.requestId, "req-b");
   assert.equal(linkB.parentRequestId, "req-a");
+});
+
+test("study records use readable phase and scale file names", () => {
+  startStudySession({ participantId: "P03" });
+  assert.equal(
+    studyRecordFileName({ phase: "pre_assessment", savedAt: "2026-08-23T22:21:41.333Z" }),
+    "01-pre-assessment-2026-08-23T22-21-41Z.json",
+  );
+  assert.equal(
+    studyRecordFileName({ recordKind: "scale", assessment: "post", savedAt: "2026-08-23T22:22:12.000Z" }),
+    "scale-post-2026-08-23T22-22-12Z.json",
+  );
+  const bundle = buildStudyBundle(null, "pre-assessment-complete", { recordKind: "phase-log", phase: "pre_assessment" });
+  assert.equal(bundle.recordKind, "phase-log");
+  assert.match(bundle.fileName, /^01-pre-assessment-/);
+  const scale = buildStudyScaleRecord({ assessment: "pre", scaleResponses: [{ itemId: "a", value: 7 }] });
+  assert.equal(scale.recordKind, "scale");
+  assert.equal(scale.assessment, "pre");
+  assert.match(scale.fileName, /^scale-pre-/);
+  assert.equal(studyFileStamp("2026-08-23T22:21:41.333Z"), "2026-08-23T22-21-41Z");
+});
+
+test("the task dashboard can be reused when writing the dashboard-task record", () => {
+  startStudySession({ participantId: "P03" });
+  stashStudyTaskCapture({ dashboardTitle: "Task board" }, [{ path: "dashboards/final.json", text: "{}" }]);
+  const capture = studyTaskCapture();
+  assert.equal(capture.snapshot.dashboardTitle, "Task board");
+  assert.equal(capture.artifacts.length, 1);
+  const bundle = buildStudyBundle(capture.snapshot, "runner-complete");
+  assert.equal(bundle.reason, "runner-complete");
+  assert.equal(bundle.dashboard.dashboardTitle, "Task board");
 });
 
 test("ending a session records session_ended then stops logging", () => {

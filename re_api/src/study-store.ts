@@ -47,6 +47,15 @@ function safeSegment(value: unknown, fallback: string): string {
   return (cleaned || fallback).slice(0, 120);
 }
 
+function jsonFileName(record: Record<string, unknown>): string {
+  const raw = String(record.fileName || "").replace(/\\/g, "/").split("/").pop() || "";
+  const stem = safeSegment(raw.replace(/\.json$/i, ""), "");
+  if (stem) return `${stem}.json`;
+  const stamp = safeSegment(String(record.savedAt || record.endedAt || "snapshot").replace(/:/g, "-"), "snapshot");
+  const phase = safeSegment(record.phase || record.reason || "record", "record");
+  return `${phase}-${stamp}.json`;
+}
+
 function localDataDir(): string {
   const override = process.env.STUDY_DATA_DIR?.trim();
   return override ? resolve(override) : DEFAULT_LOCAL_DATA_DIR;
@@ -133,9 +142,6 @@ export async function saveStudySession(bundle: unknown): Promise<StudySaveResult
   const record = bundle && typeof bundle === "object" ? { ...(bundle as Record<string, unknown>) } : {};
   const participant = safeSegment(record.participantId, "unknown-participant");
   const session = safeSegment(record.sessionId, "unknown-session");
-  // A unique-per-save object name so repeated Save now clicks within one
-  // session do not overwrite each other — the log is append-only on disk.
-  const stamp = safeSegment(record.savedAt ?? record.endedAt ?? record.bundleId, "snapshot");
   const artifacts = Array.isArray(record.artifacts) ? record.artifacts as StudyArtifact[] : [];
   if (artifacts.length > MAX_ARTIFACTS) {
     throw new Error("INVALID_BUNDLE: too many study artifacts");
@@ -153,7 +159,7 @@ export async function saveStudySession(bundle: unknown): Promise<StudySaveResult
   }
   record.artifactFiles = prepared.map((item) => item.relative);
 
-  const key = `studies/${participant}/${session}/${stamp}.json`;
+  const key = `studies/${participant}/${session}/${jsonFileName(record)}`;
   const json = JSON.stringify(record);
   const bytes = Buffer.byteLength(json, "utf8");
   const files = [key];

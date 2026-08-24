@@ -244,6 +244,8 @@ export function normalizeDashboardDocument(data, fileName = "Dashboard") {
       kpiReservedWidth: Math.max(0, Number(dashboard.kpiReservedWidth) || 0),
       filters,
       showChartSubtitles: Boolean(dashboard.showChartSubtitles),
+      typography: object(dashboard.typography) ? clone(dashboard.typography) : undefined,
+      interactionState: object(dashboard.interactionState) ? clone(dashboard.interactionState) : null,
       canvasWidth: Math.max(1100, Number(dashboard.canvasWidth || dashboard.width) || 0, contentWidth + 28),
       canvasHeight: Math.max(720, Number(dashboard.canvasHeight || dashboard.height) || 0, contentHeight + 28),
     },
@@ -267,6 +269,7 @@ export function dashboardDocumentFromSnapshot(snapshot = {}, fileName = "dashboa
     return [{
       id,
       label: meta.title || id,
+      ...(typeof meta.subtitle === "string" && meta.subtitle ? { subtitle: meta.subtitle } : {}),
       ...(object(meta.bounds) ? { bounds: clone(meta.bounds) } : {}),
       spec: clone(spec),
     }];
@@ -288,7 +291,11 @@ export function dashboardDocumentFromSnapshot(snapshot = {}, fileName = "dashboa
       kpiReservedHeight: Math.max(0, Number(board.kpiReservedHeight) || 0),
       kpiReservedWidth: Math.max(0, Number(board.kpiReservedWidth) || 0),
       filters: Array.isArray(board.filters) ? clone(board.filters) : [],
-      showChartSubtitles: boardTiles.some((tile) => tile?.hasSubtitle),
+      showChartSubtitles: typeof board.showChartSubtitles === "boolean"
+        ? board.showChartSubtitles
+        : boardTiles.some((tile) => tile?.hasSubtitle),
+      ...(object(board.typography) ? { typography: clone(board.typography) } : {}),
+      ...(object(board.interactionState) ? { interactionState: clone(board.interactionState) } : {}),
       canvasWidth: Number(board.canvasWidth) || undefined,
       canvasHeight: Number(board.canvasHeight) || undefined,
     },

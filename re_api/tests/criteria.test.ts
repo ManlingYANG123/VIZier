@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { dashboardBoard, dashboardSpecMap } from "../fixtures/specs.ts";
 import {
   buildContextSnapshot,
@@ -20,6 +21,7 @@ import {
   RECOMMENDATION_BRANCHES,
   RECOMMENDATION_LEAVES,
   isRecommendationLeafId,
+  parseRecommendationCsv,
 } from "../src/generate/recommendations.ts";
 import { DASHBOARD_REVIEW_SYSTEM, dashboardReviewUser } from "../src/generate/prompts.ts";
 
@@ -52,6 +54,8 @@ test("the review prompt frames DIAGNOSING, PRESENTING, and uniform grounding", (
   assert.match(DASHBOARD_REVIEW_SYSTEM, /GROUNDING/);
   assert.match(DASHBOARD_REVIEW_SYSTEM, /comprehensive coding system, not a checklist/);
   assert.match(DASHBOARD_REVIEW_SYSTEM, /EMPIRICAL SCAFFOLD/);
+  assert.match(DASHBOARD_REVIEW_SYSTEM, /FEW-SHOT MAPPING EXAMPLES/);
+  assert.match(DASHBOARD_REVIEW_SYSTEM, /Never copy an example's tile names/);
   assert.match(DASHBOARD_REVIEW_SYSTEM, /not a checklist/i);
   assert.match(DASHBOARD_REVIEW_SYSTEM, /no default VIZier look/i);
   assert.match(DASHBOARD_REVIEW_SYSTEM, /any branch: the recommendation branch is a grouping label/i);
@@ -98,6 +102,30 @@ test("the diagnostic knowledge prompt carries objects, problems, grounding, and 
   for (const leaf of RECOMMENDATION_LEAVES) {
     assert.ok(prompt.includes(leaf.id), leaf.id);
   }
+  assert.match(prompt, /Empirical feedback examples \(few-shot mapping cues\)/);
+});
+
+test("recommendation CSV examples feed the catalog without a color dependency", () => {
+  const sourceHeader = readFileSync(
+    new URL("../../slack_codebook/recommendation_v3_examples.csv", import.meta.url),
+    "utf8",
+  ).split(/\r?\n/, 1)[0];
+  assert.equal(sourceHeader, "code,definition,Example 1,Example 2,Example 3");
+  const parsed = parseRecommendationCsv([
+    "code,definition,Example 1,Example 2,Example 3",
+    'Interaction:support coordinated views,"coordinate linked views","Filter one view.","Update the others.","Keep state visible."',
+  ].join("\n"));
+  assert.deepEqual(parsed, [{
+    id: "interaction:support coordinated views",
+    branch: "interaction",
+    leaf: "support coordinated views",
+    definition: "coordinate linked views",
+    examples: ["Filter one view.", "Update the others.", "Keep state visible."],
+  }]);
+  assert.ok(RECOMMENDATION_LEAVES.some((leaf) => leaf.examples.length > 0));
+  assert.ok(RECOMMENDATION_LEAVES.some((leaf) => leaf.examples.length === 3));
+  assert.ok(RECOMMENDATION_LEAVES.every((leaf) => !("color" in leaf)));
+  assert.ok(isRecommendationLeafId("interaction:support coordinated views"));
 });
 
 test("recommendation leaves are validated by exact id across all branches", () => {
