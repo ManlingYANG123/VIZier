@@ -5015,13 +5015,11 @@ function renderCritiques() {
     const allDecided = state.filters.status === "all"
       && !actionable.length
       && state.critiques.some(isDecidedCritique);
-    els.critiqueList.innerHTML = state.version > 1 && !actionable.length
-      ? `<div class="completion-state"><strong>Nicely done — this draft is looking strong.</strong><span>No open recommendations remain. Want to push it further? Run another review round to surface finer refinements.</span></div>`
-      : allDecided
-        ? `<div class="empty-state">All recommendations decided — open Critique History to review them.</div>`
-        : `<div class="empty-state">${state.critiques.length
-          ? "No critiques match the current filters."
-          : "No critiques yet."}</div>`;
+    els.critiqueList.innerHTML = allDecided
+      ? `<div class="empty-state">All recommendations decided — open Critique History to review them.</div>`
+      : `<div class="empty-state">${state.critiques.length
+        ? "No critiques match the current filters."
+        : "No critiques yet."}</div>`;
     renderBatchApplyBar();
     renderCritiqueHistory();
     renderStatusBar();
@@ -7130,10 +7128,6 @@ async function renderInspector() {
             : `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7"/></svg>`}
           <span>${canAcceptGuidance ? "Mark as Considered" : "Accept Change"}</span>
         </button>
-        <button class="focus-action defer" id="focusDefer" type="button" ${actionable ? "" : "disabled"}>
-          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.2l2 1.3"/></svg>
-          <span>Defer</span>
-        </button>
         <button class="focus-action reject" id="focusReject" type="button" ${actionable ? "" : "disabled"}>
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7M11.5 4.5l-7 7"/></svg>
           <span>Reject</span>
@@ -7259,30 +7253,6 @@ async function renderInspector() {
     renderMarkers();
     await renderInspector();
     document.getElementById("guidanceAcceptedNotice")?.focus();
-  });
-  document.getElementById("focusDefer")?.addEventListener("click", async () => {
-    if (!actionable) return;
-    critique.status = "deferred";
-    critique.lifecycle = "deferred";
-    critique.lastEvaluatedVersion = state.version;
-    appendInteractionEvent({
-      kind: "recommendation_deferred",
-      summary: `Deferred recommendation: ${critique.title}`,
-      detail: critique.suggestion,
-      critiqueId: critique.id,
-      dimension: critique.dimension,
-      proposalKind: critique.proposal?.kind,
-      data: {
-        target: critique.tileId || "dashboard",
-        decision: "defer",
-        critiqueRevisionId: critique.revision || null,
-        dashboardVersion: Number(state.version) || 1,
-        reason: latestRationaleText(critique.id),
-      },
-    });
-    renderCritiques();
-    renderMarkers();
-    await renderInspector();
   });
   document.getElementById("focusReject").addEventListener("click", async () => {
     critique.status = "rejected";

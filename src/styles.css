@@ -4499,11 +4499,6 @@ body.revision-dock-resizing .revision-dock.version-history {
   background: #2c2c2e;
   color: #fff;
 }
-.focus-action.defer:hover:not(:disabled) {
-  border-color: #c7c7cc;
-  background: #f5f5f7;
-  color: #1d1d1f;
-}
 .focus-action.reject:hover { border-color: #efb6ba; color: #b4232f; background: #fff6f6; }
 /* Guidance's primary action is a decision, not a canvas apply — so it reads as a
  * warm-tinted acknowledgement, distinct from the dark commit pill. Full-width in
@@ -10559,6 +10554,17 @@ body.panel-resizing * {
 .study-scale-na:hover > span { border-color: #9d9da3; background: #f0f0f2; transform: translateY(-1px); }
 .study-scale-na input:checked + span { border-color: #2c2c2e; background: #2c2c2e; color: #fff; }
 .study-scale-na input:focus-visible + span { outline: 2px solid #525257; outline-offset: 2px; }
+.study-scale-interview-question {
+  clear: both;
+  max-width: 70ch;
+  margin: 20px 0 2px 30px;
+  padding-top: 18px;
+  border-top: 1px solid #e2e2e6;
+  color: #2c2c2e;
+  font-size: 15px;
+  font-weight: 610;
+  line-height: 1.5;
+}
 
 .study-interview-prompts { padding-top: 4px; border-top: 1px solid #d2d2d7; }
 .study-interview-prompts summary { width: fit-content; cursor: pointer; color: #2c2c2e; font-size: 13px; font-weight: 680; }
@@ -10591,6 +10597,9 @@ body.panel-resizing * {
 .study-workspace-progress { display: inline-flex; align-items: baseline; gap: 9px; margin-left: 14px; padding-left: 14px; border-left: 1px solid #d2d2d7; }
 .study-workspace-progress span { color: #77777c; font-size: 10px; }
 .study-workspace-progress strong { color: #3a3a3c; font-size: 11px; font-weight: 670; }
+.study-workspace-pdf { min-height: 32px; padding: 6px 11px; border: 1px solid #c7c7cc; border-radius: 7px; background: #fff; color: #2c2c2e; font: inherit; font-size: 10.5px; font-weight: 650; cursor: pointer; }
+.study-workspace-pdf:hover { border-color: #8e8e93; background: #f5f5f7; }
+.study-workspace-pdf:focus-visible { outline: 2px solid #2c2c2e; outline-offset: 2px; }
 .study-workspace-finish { min-height: 32px; padding: 6px 11px; border: 1px solid #2c2c2e; border-radius: 7px; background: #2c2c2e; color: #fff; font: inherit; font-size: 10.5px; font-weight: 650; cursor: pointer; }
 .study-workspace-finish:hover { background: #424245; }
 .study-workspace-finish:disabled { opacity: .58; cursor: wait; }
@@ -10643,6 +10652,7 @@ body.panel-resizing * {
   .study-scale-anchors strong { display: block; font-size: 9px; }
   .study-scale-na { grid-template-columns: 42px auto; width: fit-content; min-height: 42px; padding: 14px 0 0; border-top: 1px solid #e2e2e6; border-left: 0; }
   .study-scale-na > span { width: 42px; height: 42px; }
+  .study-scale-interview-question { margin-left: 0; font-size: 14px; }
   .study-questionnaire-page form > footer { align-items: stretch; flex-direction: column; }
   .study-questionnaire-page form > footer button { width: 100%; }
   .study-workspace-progress { display: none; }

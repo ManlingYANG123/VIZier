@@ -1,9 +1,9 @@
 /*
-THESIS: One quiet study path reveals only the tool needed now; it refuses a material chooser and refuses to frame neutral assessment as VIZier.
+THESIS: One quiet study path reveals only the tool needed now, moving from practice to formal use to the final questionnaire and interview.
 OWN-WORLD: The incumbent VIZier grayscale system, firm rules, compact controls, and one dark primary action continue across a wider research canvas.
-STORY: A participant enters an anonymous ID, reviews a dashboard, practices, completes the task, reviews a second dashboard, and finishes without seeing counterbalancing codes.
-FIRST VIEWPORT: A restrained study header and single participant-ID field lead directly to Begin; assessment phases devote the viewport to the real dashboard and a narrow notes rail.
-FORM: Operate mode, staged as a four-part session runner with a persistent progress line and phase-specific workspace.
+STORY: A participant enters an anonymous ID, practices with guidance, uses VIZier formally, and completes the final questionnaire and interview.
+FIRST VIEWPORT: A restrained study header and single participant-ID field lead directly to Begin.
+FORM: Operate mode, staged as a three-part session runner with a persistent progress line and phase-specific workspace.
 */
 import embed from "vega-embed";
 import "./styles.css";
@@ -23,7 +23,6 @@ import {
 } from "./study-session.js";
 import {
   POST_QUESTIONS,
-  PRE_QUESTIONS,
   scaleSectionsForAssessment,
   serializeScaleResponses,
   STUDY_GROUPS,
@@ -35,6 +34,7 @@ import {
   makeAnnotation,
   materialForPhase,
   nextStudyPhase,
+  normalizeStudyPhase,
   studyPhaseLabel,
   studyPhaseNumber,
   studyRunnerStorageKey,
@@ -71,7 +71,10 @@ function runnerKey() {
 function loadRunnerState() {
   try {
     const parsed = JSON.parse(localStorage.getItem(runnerKey()) || "null");
-    return isStudyRunnerState(parsed, runnerGroup.id) ? parsed : null;
+    if (!isStudyRunnerState(parsed, runnerGroup.id)) return null;
+    parsed.phase = normalizeStudyPhase(parsed.phase);
+    if (parsed.phase === "post_assessment") parsed.assessmentStep = "questionnaire";
+    return parsed;
   } catch {
     return null;
   }
@@ -97,10 +100,10 @@ function progressMarkup() {
   const part = studyPhaseNumber(runnerState.phase);
   const label = studyPhaseLabel(runnerState.phase);
   return `
-    <div class="study-runner-progress" aria-label="Study progress: part ${part} of 4">
-      <span>Part ${part} of 4</span>
+    <div class="study-runner-progress" aria-label="Study progress: part ${part} of 3">
+      <span>Part ${part} of 3</span>
       <strong>${escapeHTML(label)}</strong>
-      <span class="study-runner-progress-track" aria-hidden="true"><span style="width:${part * 25}%"></span></span>
+      <span class="study-runner-progress-track" aria-hidden="true"><span style="width:${part * (100 / 3)}%"></span></span>
     </div>`;
 }
 
@@ -148,7 +151,7 @@ function renderWelcome() {
       <div class="study-runner-welcome-copy">
         <span>Dashboard review study</span>
         <h1>Welcome</h1>
-        <p>This session has four parts. You may pause or stop at any time.</p>
+        <p>This session has three stages: practice, formal use, and a questionnaire with interview prompts. You may pause or stop at any time.</p>
       </div>
       <form class="study-runner-start-form" id="studyRunnerStartForm">
         <label for="studyRunnerParticipant">Participant ID</label>
@@ -714,7 +717,7 @@ async function renderAssessmentReview() {
     <main class="study-assessment-layout">
       <section class="study-assessment-main" aria-labelledby="studyAssessmentTitle">
         <header class="study-assessment-instructions">
-          <div><h1 id="studyAssessmentTitle">Review the dashboard</h1><p>Add notes for anything you would comment on. You may add as many or as few as you like.</p></div>
+          <div><h1 id="studyAssessmentTitle">Dashboard notes</h1><p>Add notes for anything you would comment on. You may add as many or as few as you like.</p></div>
           <p>Please think aloud as you work.</p>
         </header>
         <div class="study-dashboard-loading" id="studyDashboardMount" role="status">Loading dashboard…</div>
@@ -782,6 +785,7 @@ function scaleFieldMarkup(item, value, itemIndex) {
       </div>
       <label class="study-scale-na"><input type="radio" name="${escapeHTML(name)}" data-scale-id="${escapeHTML(item.id)}" value="NA" aria-label="N/A — Not applicable"${selected === "NA" ? " checked" : ""}><span>N/A</span><small>Not applicable</small></label>
     </div>
+    ${item.interviewQuestion ? `<p class="study-scale-interview-question">${escapeHTML(item.interviewQuestion)}</p>` : ""}
   </fieldset>`;
 }
 
@@ -794,25 +798,18 @@ function scaleSectionMarkup(section, responseMap) {
 
 function renderQuestionnaire() {
   cleanupAssessmentViews();
-  const key = assessmentKeyForPhase(runnerState.phase);
+  const key = "post";
   const assessment = ensureAssessmentState(key);
-  const questions = key === "pre" ? PRE_QUESTIONS : POST_QUESTIONS;
+  const questions = POST_QUESTIONS;
   const scaleSections = scaleSectionsForAssessment(key);
   const scaleItems = scaleSections.flatMap((section) => section.items);
   neutralShell(`
     <main class="study-questionnaire-page">
-      <header><span>${key === "pre" ? "Before guided practice" : "After the dashboard task"}</span><h1>Questionnaire</h1><p>Select one response for every statement.</p></header>
+      <header><span>Stage 3 of 3</span><h1>Questionnaire & interview</h1><p>Select one response for every statement, then answer the interview question in the same item aloud.</p></header>
       <form id="studyQuestionnaireForm">
         <div class="study-scale-progress" aria-live="polite"><div><strong id="studyScaleProgress">0 of ${scaleItems.length} answered</strong><span>Your selections save automatically.</span></div><span class="study-scale-progress-track" aria-hidden="true"><span id="studyScaleProgressFill"></span></span></div>
         ${scaleSections.map((section) => scaleSectionMarkup(section, assessment.scales)).join("")}
-        <details class="study-interview-prompts">
-          <summary>Discussion prompts</summary>
-          <p>Please answer these questions aloud.</p>
-          <ol class="study-question-list" aria-label="Reflection questions">
-            ${questions.map((question) => questionFieldMarkup(question)).join("")}
-          </ol>
-        </details>
-        <footer><button type="submit">${key === "pre" ? "Continue to guided practice" : "Complete study"}</button></footer>
+        <footer><button type="submit">Complete study</button></footer>
       </form>
     </main>`, { className: "is-questionnaire" });
   document.querySelector(".study-runner-shell.is-questionnaire")?.scrollTo({ top: 0 });
@@ -852,11 +849,10 @@ function renderQuestionnaire() {
     assessment.submittedAt = new Date().toISOString();
     recordStudyAction("assessment_questionnaire_submitted", `Submitted ${key}-session questionnaire`, {
       phase: runnerState.phase,
-      instrumentVersion: "vizier-study-scales-v1",
+      instrumentVersion: "vizier-study-scales-v2",
       questionsPresented: clone(questions),
       scaleResponses: serializeScaleResponses(scaleSections, assessment.scales),
     });
-    runnerState.assessmentStep = "review";
     runnerState.phase = nextStudyPhase(runnerState.phase);
     persistRunnerState();
     if (runnerState.phase === "complete") {
@@ -871,9 +867,6 @@ function renderQuestionnaire() {
 async function completeRunnerSession() {
   recordStudyAction("study_runner_completed", "Completed all study runner phases", {
     groupId: runnerGroup.id,
-    preAnnotationCount: ensureAssessmentState("pre").annotations.length,
-    postAnnotationCount: ensureAssessmentState("post").annotations.length,
-    preScaleResponses: serializeScaleResponses(scaleSectionsForAssessment("pre"), ensureAssessmentState("pre").scales),
     postScaleResponses: serializeScaleResponses(scaleSectionsForAssessment("post"), ensureAssessmentState("post").scales),
   });
   endStudySession({ reason: "runner-complete" });
@@ -937,18 +930,32 @@ async function mountVizierPhase() {
   const part = studyPhaseNumber(runnerState.phase);
   const progress = document.createElement("div");
   progress.className = "study-workspace-progress";
-  progress.innerHTML = `<span>Part ${part} of 4</span><strong>${escapeHTML(title)}</strong>`;
+  progress.innerHTML = `<span>Part ${part} of 3</span><strong>${escapeHTML(title)}</strong>`;
   topbar?.querySelector(".brand-title")?.insertAdjacentElement("afterend", progress);
+  const pdfButton = document.createElement("button");
+  pdfButton.type = "button";
+  pdfButton.className = "study-workspace-pdf";
+  pdfButton.textContent = "Preview PDF";
+  pdfButton.setAttribute("aria-label", "Preview the assigned design document PDF in a new tab");
+  pdfButton.addEventListener("click", () => {
+    window.open(material.pdfUrl, "_blank", "noopener,noreferrer");
+    recordStudyAction("design_document_previewed", "Previewed assigned design document", {
+      phase: runnerState.phase,
+      materialCode: material.code,
+      pdfUrl: material.pdfUrl,
+    });
+  });
+  document.querySelector(".top-actions")?.prepend(pdfButton);
   const button = document.createElement("button");
   button.type = "button";
   button.className = "study-workspace-finish";
   button.textContent = runnerState.phase === "training" ? "Finish practice" : "Finish task";
   document.querySelector(".top-actions")?.prepend(button);
   button.addEventListener("click", async () => {
-    const isTask = runnerState.phase === "timed_task";
+    const isTask = ["dashboard_task", "timed_task"].includes(runnerState.phase);
     const confirmed = window.confirm(isTask
-      ? "Finish the dashboard task and continue to the final assessment?"
-      : "Finish guided practice and continue to the dashboard task?");
+      ? "Finish formal use and continue to the questionnaire and interview?"
+      : "Finish practice and continue to formal use?");
     if (!confirmed) return;
     button.disabled = true;
     button.textContent = isTask ? "Saving task…" : "Opening task…";
@@ -958,7 +965,7 @@ async function mountVizierPhase() {
     });
     if (isTask) await app.saveStudyRunnerTaskBundle("task-complete");
     runnerState.phase = nextStudyPhase(runnerState.phase);
-    runnerState.assessmentStep = "review";
+    runnerState.assessmentStep = "questionnaire";
     persistRunnerState();
     location.reload();
   });
@@ -978,12 +985,11 @@ async function renderCurrentPhase() {
     renderPhaseIntro();
     return;
   }
-  if (runnerState.phase === "training" || runnerState.phase === "timed_task") {
+  if (["training", "dashboard_task", "timed_task"].includes(runnerState.phase)) {
     await mountVizierPhase();
     return;
   }
-  if (runnerState.assessmentStep === "questionnaire") renderQuestionnaire();
-  else await renderAssessmentReview();
+  renderQuestionnaire();
 }
 
 export async function bootStudyRunner(groupId) {

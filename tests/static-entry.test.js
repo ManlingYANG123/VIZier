@@ -202,9 +202,7 @@ test("group study routes boot the neutral runner before VIZier", async () => {
   assert.match(html, /src="\/src\/bootstrap\.js"/);
   assert.match(bootstrap, /studyGroupIdFromPath/);
   assert.match(bootstrap, /bootStudyRunner/);
-  assert.match(runner, /Review the dashboard/);
-  assert.match(runner, /Add area note/);
-  assert.match(runner, /Continue to questions/);
+  assert.doesNotMatch(runner, /Review the dashboard/);
   assert.match(runner, /id="studyZoomOut"/);
   assert.match(runner, /id="studyZoomIn"/);
   assert.match(runner, /id="studyZoomFit"/);
@@ -216,6 +214,12 @@ test("group study routes boot the neutral runner before VIZier", async () => {
   assert.match(runner, /study-phase-axis/);
   assert.match(runner, /aria-current="step"/);
   assert.match(runner, /Select one response for every statement/);
+  assert.match(runner, /study-scale-interview-question/);
+  assert.match(runner, /Questionnaire & interview/);
+  assert.match(runner, /Part \$\{part\} of 3/);
+  assert.match(runner, /Preview PDF/);
+  assert.match(runner, /design_document_previewed/);
+  assert.match(runner, /vizier-study-scales-v2/);
   assert.match(runner, /scale_response_recorded/);
   assert.match(runner, /scaleResponses: serializeScaleResponses/);
   assert.doesNotMatch(runner, /<textarea name="q/);
@@ -231,6 +235,15 @@ test("group study routes boot the neutral runner before VIZier", async () => {
   assert.doesNotMatch(styles, /\.study-scale-question legend\s*\{[^}]*max-width:\s*70ch/);
   assert.doesNotMatch(styles, /\.study-questionnaire-page form > footer\s*\{[^}]*position:\s*sticky/);
   assert.match(styles, /\.study-workspace-progress/);
+  assert.match(styles, /\.study-workspace-pdf/);
+});
+
+test("the public app removes basic auth, completion cheerleading, and Defer", async () => {
+  const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
+  const server = await readFile(new URL("../re_api/src/server.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(server, /BASIC_AUTH|requireBasicAuth|WWW-Authenticate|timingSafeEqual/);
+  assert.doesNotMatch(source, /Nicely done — this draft is looking strong|No open recommendations remain/);
+  assert.doesNotMatch(source, /id="focusDefer"|decision: "defer"/);
 });
 
 test("focused critique details render before preview hydration", async () => {
@@ -885,10 +898,8 @@ test("study telemetry pairs review requests with displayed or failed, and checkp
   assert.match(source, /endStudySession\(\{ reason: "end" \}\)/);
   assert.match(source, /final_state_captured/);
   assert.match(source, /decision: "apply"/);
-  assert.match(source, /recommendation_deferred/);
   assert.match(source, /critiques_unresolved/);
   assert.match(source, /dwellMs/);
-  assert.match(source, /decision: "defer"/);
   assert.match(source, /critique_request_failed/);
   assert.match(source, /const recommendationIds = \[\.\.\.\(state\.workingDraft\.applicationOrder \|\| \[\]\)\];/);
   assert.match(source, /const committedIds = Array\.isArray\(result\.applicationOrder\)/);

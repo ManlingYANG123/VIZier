@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   STUDY_GROUPS,
   STUDY_PHASE_INTROS,
+  POST_EXPERIENCE_SCALE_ITEMS,
+  POST_QUESTIONS,
   createStudyRunnerState,
   isStudyRunnerState,
   makeAnnotation,
@@ -22,38 +24,38 @@ test("only the two fixed group routes start the study runner", () => {
   assert.equal(studyGroupIdFromPath("/study/group-3"), null);
 });
 
-test("group routes preserve the counterbalanced four-part assignment", () => {
+test("group routes preserve the counterbalanced three-stage assignment", () => {
   assert.deepEqual(STUDY_GROUPS["group-1"], {
-    id: "group-1", pre: "1", training: "A", task: "B", post: "2",
+    id: "group-1", training: "A", task: "B",
   });
   assert.deepEqual(STUDY_GROUPS["group-2"], {
-    id: "group-2", pre: "2", training: "B", task: "A", post: "1",
+    id: "group-2", training: "B", task: "A",
   });
-  assert.equal(materialForPhase("group-1", "pre_assessment").code, "1");
   assert.equal(materialForPhase("group-1", "training").code, "A");
   assert.equal(materialForPhase("group-1", "dashboard_task").code, "B");
   assert.equal(materialForPhase("group-1", "timed_task").code, "B");
-  assert.equal(materialForPhase("group-1", "post_assessment").code, "2");
+  assert.match(materialForPhase("group-1", "training").pdfUrl, /\.pdf$/);
+  assert.equal(materialForPhase("group-1", "post_assessment"), null);
 });
 
-test("a participant state starts at the neutral pre assessment and advances in order", () => {
+test("a participant starts in practice and advances through three stages", () => {
   const state = createStudyRunnerState("group-2", "P014");
   assert.equal(isStudyRunnerState(state, "group-2"), true);
-  assert.equal(state.phase, "pre_assessment");
-  assert.equal(state.assessmentStep, "review");
+  assert.equal(state.phase, "training");
+  assert.equal(state.assessmentStep, "questionnaire");
   assert.deepEqual(state.phaseIntros, {});
-  assert.equal(nextStudyPhase("pre_assessment"), "training");
   assert.equal(nextStudyPhase("training"), "dashboard_task");
   assert.equal(nextStudyPhase("dashboard_task"), "post_assessment");
   assert.equal(nextStudyPhase("timed_task"), "post_assessment");
+  assert.equal(normalizeStudyPhase("pre_assessment"), "training");
   assert.equal(normalizeStudyPhase("timed_task"), "dashboard_task");
   assert.equal(nextStudyPhase("post_assessment"), "complete");
-  assert.equal(studyPhaseNumber("post_assessment"), 4);
+  assert.equal(studyPhaseNumber("post_assessment"), 3);
 });
 
 test("every active study phase has one concise transition page", () => {
   assert.deepEqual(Object.keys(STUDY_PHASE_INTROS), [
-    "pre_assessment", "training", "dashboard_task", "post_assessment",
+    "training", "dashboard_task", "post_assessment",
   ]);
   Object.values(STUDY_PHASE_INTROS).forEach((intro) => {
     assert.ok(intro.description.length > 0);
@@ -73,23 +75,32 @@ test("annotations retain normalized optional regions", () => {
   assert.throws(() => makeAnnotation({ text: "   " }), /required/);
 });
 
-test("pre and post expose paired scale IDs for direct comparison", () => {
+test("the final questionnaire keeps eight scale and interview questions paired by theme", () => {
   const pre = scaleSectionsForAssessment("pre");
   const post = scaleSectionsForAssessment("post");
-  assert.deepEqual(pre[0].items.map((item) => item.id), post[0].items.map((item) => item.id));
-  assert.equal(pre.length, 1);
-  assert.equal(post.length, 2);
+  assert.equal(pre.length, 0);
+  assert.equal(post.length, 1);
+  assert.equal(post[0].items.length, 8);
+  assert.equal(POST_EXPERIENCE_SCALE_ITEMS.length, 8);
+  assert.deepEqual(
+    POST_QUESTIONS,
+    post[0].items.map((item) => item.interviewQuestion),
+  );
+  post[0].items.forEach((item) => {
+    assert.ok(item.statement.length > 0);
+    assert.ok(item.interviewQuestion.length > 0);
+  });
 });
 
 test("scale telemetry serializes numeric, N/A, and missing responses explicitly", () => {
-  const sections = scaleSectionsForAssessment("pre");
+  const sections = scaleSectionsForAssessment("post");
   const responses = serializeScaleResponses(sections, {
-    review_awareness: "6",
-    review_explanation: "NA",
+    vizier_final_dashboard_confidence: "6",
+    vizier_comfort: "NA",
   });
   assert.deepEqual(responses[0], {
-    instrument: "dashboard-review-confidence",
-    itemId: "review_awareness",
+    instrument: "vizier-experience",
+    itemId: "vizier_final_dashboard_confidence",
     statement: sections[0].items[0].statement,
     value: 6,
     notApplicable: false,

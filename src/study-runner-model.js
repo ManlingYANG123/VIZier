@@ -8,6 +8,7 @@ export const STUDY_MATERIAL_MAP = Object.freeze({
     dashboardId: "garden-birds-new",
     dashboardUrl: "/study-materials/dashboards/A_garden-birds.json",
     docId: "study-a",
+    pdfUrl: "/study-materials/pdfs/A_bbc-gel-infographics.pdf",
   }),
   B: Object.freeze({
     code: "B",
@@ -15,6 +16,7 @@ export const STUDY_MATERIAL_MAP = Object.freeze({
     dashboardId: "sales-command-center-new",
     dashboardUrl: "/study-materials/dashboards/B_retail-sales-command-center.json",
     docId: "study-b",
+    pdfUrl: "/study-materials/pdfs/B_tableau-dashboard-best-practices.pdf",
   }),
   1: Object.freeze({
     code: "1",
@@ -35,101 +37,98 @@ export const STUDY_MATERIAL_MAP = Object.freeze({
 export const STUDY_GROUPS = Object.freeze({
   "group-1": Object.freeze({
     id: "group-1",
-    pre: "1",
     training: "A",
     task: "B",
-    post: "2",
   }),
   "group-2": Object.freeze({
     id: "group-2",
-    pre: "2",
     training: "B",
     task: "A",
-    post: "1",
   }),
 });
 
 export const STUDY_RUNNER_PHASES = Object.freeze([
-  "pre_assessment",
   "training",
   "dashboard_task",
   "post_assessment",
   "complete",
 ]);
 
-/** Older sessions stored this phase as `timed_task`; the app does not time it. */
+/** Migrate older four-stage sessions into the current three-stage flow. */
 export function normalizeStudyPhase(phase) {
+  if (phase === "pre_assessment") return "training";
   return phase === "timed_task" ? "dashboard_task" : phase;
 }
 
 export const STUDY_PHASE_INTROS = Object.freeze({
-  pre_assessment: Object.freeze({
-    description: "Review a dashboard and share what you notice.",
-    action: "Begin assessment",
-  }),
   training: Object.freeze({
     description: "Explore VIZier with guidance from the facilitator.",
     action: "Begin guided practice",
   }),
   dashboard_task: Object.freeze({
-    description: "Use VIZier to complete the dashboard task independently. The facilitator will tell you when to finish.",
-    action: "Begin dashboard task",
+    description: "Use VIZier independently for the formal evaluation. The facilitator will tell you when to finish.",
+    action: "Begin formal use",
   }),
   post_assessment: Object.freeze({
-    description: "Review a second dashboard and complete the final questionnaire.",
-    action: "Begin final assessment",
+    description: "Complete the questionnaire, then discuss each interview prompt with the facilitator.",
+    action: "Begin questionnaire",
   }),
 });
 
-export const PRE_QUESTIONS = Object.freeze([
-  "What dashboard-design principles or best practices guide your work?",
-  "When reviewing a dashboard, what do you typically look for when deciding whether it should be revised?",
-  "How do you normally decide what kind of feedback to request about a dashboard?",
-]);
-
-export const POST_QUESTIONS = Object.freeze([
-  "What dashboard-design principles or best practices guide your work?",
-  "Did working with VIZier change your awareness or understanding of any dashboard-design principles? If so, which ones, and how?",
-  "Did working with VIZier change how you would approach reviewing or revising a dashboard?",
-  "Did the experience change how you would ask another person or system for feedback about a dashboard? If so, how?",
-  "Was anything presented by VIZier familiar, new, surprising, questionable, or inconsistent with your existing practice?",
-  "Do you expect to apply anything from this experience to a future dashboard-design task? Why or why not?",
-  "How confident are you in the final dashboard, and what would you still change with more time?",
-  "Where in your real workflow would VIZier be most useful and least useful?",
-  "What were the best and worst parts of the experience? What should change?",
-]);
-
 const freezeScaleItems = (items) => Object.freeze(items.map((item) => Object.freeze(item)));
 
-/** Identical before/after items support a direct paired comparison without
- * changing the wording between measurements. */
-export const PAIRED_SCALE_ITEMS = freezeScaleItems([
-  { id: "review_awareness", statement: "I notice dashboard-design considerations that might otherwise be overlooked." },
-  { id: "review_explanation", statement: "I can explain why particular dashboard-design choices may be effective or ineffective." },
-  { id: "revision_ideas", statement: "I can generate concrete ideas for revising a dashboard." },
-  { id: "systematic_review", statement: "I can systematically review a dashboard." },
-  { id: "feedback_request", statement: "I can formulate a useful request for dashboard-design feedback." },
-  { id: "guidance_familiarity", statement: "Most dashboard-design guidance is already familiar to me." },
+export const POST_EXPERIENCE_SCALE_ITEMS = freezeScaleItems([
+  {
+    id: "vizier_final_dashboard_confidence",
+    statement: "I’m confident in the final dashboard I arrived at with VIZier.",
+    interviewQuestion: "What else would you still change given more time and capabilities?",
+  },
+  {
+    id: "vizier_comfort",
+    statement: "I felt confident and comfortable using VIZier.",
+    interviewQuestion: "What were the best and worst parts of the experience? What should change?",
+  },
+  {
+    id: "vizier_awareness",
+    statement: "VIZier made me more aware of dashboard design considerations that I might otherwise overlook.",
+    interviewQuestion: "Any examples? Please explain.",
+  },
+  {
+    id: "vizier_understanding",
+    statement: "VIZier helped me understand why particular dashboard-design choices may be effective or ineffective.",
+    interviewQuestion: "Please explain.",
+  },
+  {
+    id: "vizier_systematic_review",
+    statement: "After using VIZier, I feel better equipped to systematically review a dashboard.",
+    interviewQuestion: "Why or why not? If yes, what, and in what ways?",
+  },
+  {
+    id: "vizier_feedback_request",
+    statement: "After using VIZier, I feel better able to formulate a useful request for dashboard-design feedback.",
+    interviewQuestion: "Please explain any changes to how you might ask another person or system for feedback.",
+  },
+  {
+    id: "vizier_control",
+    statement: "I felt in control of the design decisions and process when using VIZier.",
+    interviewQuestion: "Please explain what helped you feel more in control and what didn’t?",
+  },
+  {
+    id: "vizier_future_use",
+    statement: "I expect to apply something from this session to future dashboard-design work.",
+    interviewQuestion: "How would you envision VIZier fitting into your existing workflows?",
+  },
 ]);
 
-export const POST_EXPERIENCE_SCALE_ITEMS = freezeScaleItems([
-  { id: "vizier_awareness", statement: "VIZier made me more aware of dashboard-design considerations that I might otherwise overlook." },
-  { id: "vizier_understanding", statement: "VIZier helped me understand why particular dashboard-design choices may be effective or ineffective." },
-  { id: "vizier_revision_ideas", statement: "VIZier gave me new ideas for how to revise a dashboard." },
-  { id: "vizier_systematic_review", statement: "After using VIZier, I feel better able to systematically review a dashboard." },
-  { id: "vizier_feedback_request", statement: "After using VIZier, I feel better able to formulate a useful request for dashboard-design feedback." },
-  { id: "vizier_future_use", statement: "I expect to apply something from this session to future dashboard-design work." },
-  { id: "vizier_guidance_familiarity", statement: "Most of the design guidance provided by VIZier was already familiar to me." },
-]);
+/** The final interview follows the same eight themes as the scale. Keeping the
+ * prompts on their scale items prevents the two study routes from drifting. */
+export const POST_QUESTIONS = Object.freeze(
+  POST_EXPERIENCE_SCALE_ITEMS.map((item) => item.interviewQuestion),
+);
 
 export function scaleSectionsForAssessment(key) {
-  const paired = {
-    id: "dashboard-review-confidence",
-    title: key === "pre" ? "Before using VIZier" : "After using VIZier",
-    items: PAIRED_SCALE_ITEMS,
-  };
-  if (key !== "post") return [paired];
-  return [paired, {
+  if (key !== "post") return [];
+  return [{
     id: "vizier-experience",
     title: "Experience with VIZier",
     items: POST_EXPERIENCE_SCALE_ITEMS,
@@ -169,13 +168,12 @@ export function createStudyRunnerState(groupId, participantId) {
     schemaVersion: STUDY_RUNNER_SCHEMA_VERSION,
     groupId,
     participantId: id,
-    phase: "pre_assessment",
-    assessmentStep: "review",
+    phase: "training",
+    assessmentStep: "questionnaire",
     phaseIntros: {},
     startedAt: now,
     updatedAt: now,
     assessments: {
-      pre: { annotations: [], answers: {}, scales: {}, submittedAt: null },
       post: { annotations: [], answers: {}, scales: {}, submittedAt: null },
     },
   };
@@ -196,16 +194,15 @@ export function isStudyRunnerState(value, groupId = null) {
 
 export function studyPhaseNumber(phase) {
   const index = STUDY_RUNNER_PHASES.indexOf(normalizeStudyPhase(phase));
-  return index < 0 ? 1 : Math.min(4, index + 1);
+  return index < 0 ? 1 : Math.min(3, index + 1);
 }
 
 export function studyPhaseLabel(phase) {
   return {
-    pre_assessment: "Initial assessment",
-    training: "Guided practice",
-    dashboard_task: "Dashboard task",
-    timed_task: "Dashboard task",
-    post_assessment: "Final assessment",
+    training: "Practice",
+    dashboard_task: "Formal use",
+    timed_task: "Formal use",
+    post_assessment: "Questionnaire & interview",
     complete: "Session complete",
   }[phase] || "Study session";
 }
@@ -214,22 +211,19 @@ export function materialForPhase(groupId, phase) {
   const group = STUDY_GROUPS[groupId];
   if (!group) return null;
   const code = {
-    pre_assessment: group.pre,
     training: group.training,
     dashboard_task: group.task,
     timed_task: group.task,
-    post_assessment: group.post,
   }[phase];
   return code ? STUDY_MATERIAL_MAP[code] : null;
 }
 
 export function assessmentKeyForPhase(phase) {
-  return phase === "pre_assessment" ? "pre" : phase === "post_assessment" ? "post" : null;
+  return phase === "post_assessment" ? "post" : null;
 }
 
 export function nextStudyPhase(phase) {
   return {
-    pre_assessment: "training",
     training: "dashboard_task",
     dashboard_task: "post_assessment",
     timed_task: "post_assessment",

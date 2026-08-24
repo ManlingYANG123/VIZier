@@ -13,7 +13,6 @@
  * including generation tokens, so the API's work is visible.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { timingSafeEqual } from "node:crypto";
 import { createReadStream, statSync } from "node:fs";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -74,51 +73,6 @@ const ALLOWED_ORIGINS = new Set(
     .map((origin) => origin.trim())
     .filter(Boolean),
 );
-
-function safeEqual(actual: string, expected: string): boolean {
-  const actualBytes = Buffer.from(actual);
-  const expectedBytes = Buffer.from(expected);
-  return actualBytes.length === expectedBytes.length && timingSafeEqual(actualBytes, expectedBytes);
-}
-
-function requireBasicAuth(req: IncomingMessage, res: ServerResponse): boolean {
-  const expectedUser = process.env.BASIC_AUTH_USER;
-  const expectedPassword = process.env.BASIC_AUTH_PASSWORD;
-  if (!expectedUser && !expectedPassword) return true;
-
-  let user = "";
-  let password = "";
-  const authorization = req.headers.authorization;
-  if (authorization?.startsWith("Basic ")) {
-    try {
-      const decoded = Buffer.from(authorization.slice(6), "base64").toString("utf8");
-      const separator = decoded.indexOf(":");
-      if (separator >= 0) {
-        user = decoded.slice(0, separator);
-        password = decoded.slice(separator + 1);
-      }
-    } catch {
-      // Invalid credentials are handled by the shared 401 response below.
-    }
-  }
-
-  if (
-    expectedUser &&
-    expectedPassword &&
-    safeEqual(user, expectedUser) &&
-    safeEqual(password, expectedPassword)
-  ) {
-    return true;
-  }
-
-  res.writeHead(401, {
-    "Content-Type": "application/json",
-    "Cache-Control": "no-store",
-    "WWW-Authenticate": 'Basic realm="VIZier", charset="UTF-8"',
-  });
-  res.end(JSON.stringify({ error: "authentication required" }));
-  return false;
-}
 
 function makeClient(): LLMClient | undefined {
   if (process.env.RE_API_DISABLE_LLM === "1") return undefined;
@@ -434,7 +388,6 @@ const server = createServer((req, res) => {
     return;
   }
   cors(req, res);
-  if (!requireBasicAuth(req, res)) return;
   if (req.method === "GET") {
     if (pathname === "/api/dashboards" || pathname.startsWith("/api/dashboards/")) {
       void handleDashboardLibrary(req, res, pathname);
