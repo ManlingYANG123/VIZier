@@ -212,6 +212,10 @@ test("group study routes boot the neutral runner before VIZier", async () => {
   assert.match(runner, /assessment_canvas_panned/);
   assert.match(runner, /study_phase_intro_viewed/);
   assert.match(runner, /study_phase_intro_completed/);
+  assert.match(runner, /study_phase_timer_started/);
+  assert.match(runner, /study_phase_timer_completed/);
+  assert.match(runner, /id="studyStageTimer"/);
+  assert.match(runner, /starts when you begin/);
   assert.match(runner, /renderPhaseIntro/);
   assert.match(runner, /study-phase-axis/);
   assert.match(runner, /aria-current="step"/);

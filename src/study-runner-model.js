@@ -57,7 +57,8 @@ export const STUDY_RUNNER_PHASES = Object.freeze([
   "complete",
 ]);
 
-/** Older sessions stored this phase as `timed_task`; the app does not time it. */
+/** Older sessions stored this phase as `timed_task`; normalize it to the
+ * current phase name before routing, timing, or persistence. */
 export function normalizeStudyPhase(phase) {
   return phase === "timed_task" ? "dashboard_task" : phase;
 }
@@ -178,6 +179,7 @@ export function createStudyRunnerState(groupId, participantId) {
     phase: "pre_assessment",
     assessmentStep: "review",
     phaseIntros: {},
+    phaseTimers: {},
     startedAt: now,
     updatedAt: now,
     assessments: {
@@ -241,6 +243,24 @@ export function nextStudyPhase(phase) {
     timed_task: "post_assessment",
     post_assessment: "complete",
   }[phase] || "complete";
+}
+
+export function studyPhaseTimerElapsedMs(timer, now = Date.now()) {
+  const startedAt = Date.parse(String(timer?.startedAt || ""));
+  if (!Number.isFinite(startedAt)) return 0;
+  const completedAt = timer?.completedAt ? Date.parse(String(timer.completedAt)) : Number(now);
+  if (!Number.isFinite(completedAt)) return 0;
+  return Math.max(0, completedAt - startedAt);
+}
+
+export function formatStudyPhaseTimer(elapsedMs) {
+  const totalSeconds = Math.max(0, Math.floor(Number(elapsedMs) / 1000) || 0);
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+  const two = (value) => String(value).padStart(2, "0");
+  return hours > 0 ? `${hours}:${two(minutes)}:${two(seconds)}` : `${two(minutes)}:${two(seconds)}`;
 }
 
 export function makeAnnotation({ id, text = "", region = null, createdAt = null } = {}) {

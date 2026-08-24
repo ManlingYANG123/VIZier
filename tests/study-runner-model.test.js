@@ -7,6 +7,7 @@ import {
   POST_QUESTIONS,
   PRE_QUESTIONS,
   createStudyRunnerState,
+  formatStudyPhaseTimer,
   isDashboardTaskPhase,
   isStudyRunnerState,
   makeAnnotation,
@@ -18,6 +19,7 @@ import {
   serializeScaleResponses,
   studyGroupIdFromPath,
   studyPhaseNumber,
+  studyPhaseTimerElapsedMs,
   studyPhaseUsesVizier,
 } from "../src/study-runner-model.js";
 
@@ -48,6 +50,7 @@ test("a participant state starts at the neutral pre assessment and advances in o
   assert.equal(state.phase, "pre_assessment");
   assert.equal(state.assessmentStep, "review");
   assert.deepEqual(state.phaseIntros, {});
+  assert.deepEqual(state.phaseTimers, {});
   assert.equal(nextStudyPhase("pre_assessment"), "training");
   assert.equal(nextStudyPhase("training"), "dashboard_task");
   assert.equal(nextStudyPhase("dashboard_task"), "post_assessment");
@@ -55,6 +58,21 @@ test("a participant state starts at the neutral pre assessment and advances in o
   assert.equal(normalizeStudyPhase("timed_task"), "dashboard_task");
   assert.equal(nextStudyPhase("post_assessment"), "complete");
   assert.equal(studyPhaseNumber("post_assessment"), 4);
+});
+
+test("stage timers format and preserve elapsed time across refreshes", () => {
+  assert.equal(formatStudyPhaseTimer(0), "00:00");
+  assert.equal(formatStudyPhaseTimer(65_000), "01:05");
+  assert.equal(formatStudyPhaseTimer(3_661_000), "1:01:01");
+  assert.equal(studyPhaseTimerElapsedMs(
+    { startedAt: "2026-08-24T10:00:00.000Z" },
+    Date.parse("2026-08-24T10:02:03.000Z"),
+  ), 123_000);
+  assert.equal(studyPhaseTimerElapsedMs({
+    startedAt: "2026-08-24T10:00:00.000Z",
+    completedAt: "2026-08-24T10:04:00.000Z",
+  }), 240_000);
+  assert.equal(studyPhaseTimerElapsedMs({ startedAt: "invalid" }), 0);
 });
 
 test("only guided practice and the dashboard task use the full VIZier workspace", () => {

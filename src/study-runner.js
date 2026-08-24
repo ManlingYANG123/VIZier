@@ -33,6 +33,7 @@ import {
   STUDY_RUNNER_PHASES,
   assessmentKeyForPhase,
   createStudyRunnerState,
+  formatStudyPhaseTimer,
   isDashboardTaskPhase,
   isStudyRunnerState,
   makeAnnotation,
@@ -41,6 +42,7 @@ import {
   normalizeStudyPhase,
   studyPhaseLabel,
   studyPhaseNumber,
+  studyPhaseTimerElapsedMs,
   studyPhaseUsesVizier,
   studyRunnerStorageKey,
 } from "./study-runner-model.js";
@@ -55,6 +57,7 @@ let assessmentViews = [];
 let assessmentCanvas = null;
 let assessmentCanvasAbortController = null;
 let assessmentCanvasTelemetryTimer = null;
+let stageTimerInterval = null;
 
 function escapeHTML(value) {
   return String(value ?? "")
@@ -100,6 +103,79 @@ function ensureAssessmentState(key) {
   return runnerState.assessments[key];
 }
 
+function ensurePhaseTimers() {
+  runnerState.phaseTimers ||= {};
+  return runnerState.phaseTimers;
+}
+
+function activePhaseTimer() {
+  if (!runnerState || runnerState.phase === "complete") return null;
+  return ensurePhaseTimers()[normalizeStudyPhase(runnerState.phase)] || null;
+}
+
+function clearStageTimerTicker() {
+  if (stageTimerInterval !== null) clearInterval(stageTimerInterval);
+  stageTimerInterval = null;
+}
+
+function updateStageTimerDisplay() {
+  const output = document.getElementById("studyStageTimer");
+  const timer = activePhaseTimer();
+  if (!output || !timer?.startedAt) return;
+  output.textContent = formatStudyPhaseTimer(studyPhaseTimerElapsedMs(timer));
+}
+
+function startStageTimerTicker() {
+  clearStageTimerTicker();
+  if (!document.getElementById("studyStageTimer") || !activePhaseTimer()?.startedAt) return;
+  updateStageTimerDisplay();
+  stageTimerInterval = setInterval(updateStageTimerDisplay, 1000);
+}
+
+function stageTimerMarkup(className = "") {
+  const timer = activePhaseTimer();
+  if (!timer?.startedAt) return "";
+  return `<div class="study-stage-timer ${escapeHTML(className)}" aria-label="Elapsed time in ${escapeHTML(studyPhaseLabel(runnerState.phase))}">
+    <span>Stage time</span><time id="studyStageTimer">${formatStudyPhaseTimer(studyPhaseTimerElapsedMs(timer))}</time>
+  </div>`;
+}
+
+function startPhaseTimer(phase, startedAt = new Date().toISOString(), source = "participant") {
+  const normalized = normalizeStudyPhase(phase);
+  const timers = ensurePhaseTimers();
+  if (timers[normalized]?.startedAt) return timers[normalized];
+  const timer = { startedAt, completedAt: null, durationMs: null };
+  timers[normalized] = timer;
+  persistRunnerState();
+  recordStudyAction("study_phase_timer_started", `Started timer for ${studyPhaseLabel(normalized)}`, {
+    phase: normalized,
+    part: studyPhaseNumber(normalized),
+    startedAt,
+    source,
+  });
+  return timer;
+}
+
+function stopPhaseTimer(phase, completedAt = new Date().toISOString()) {
+  const normalized = normalizeStudyPhase(phase);
+  const timer = ensurePhaseTimers()[normalized];
+  if (!timer?.startedAt || timer.completedAt) return timer || null;
+  const durationMs = studyPhaseTimerElapsedMs({ ...timer, completedAt });
+  const completed = { ...timer, completedAt, durationMs };
+  runnerState.phaseTimers[normalized] = completed;
+  persistRunnerState();
+  clearStageTimerTicker();
+  recordStudyAction("study_phase_timer_completed", `Completed timer for ${studyPhaseLabel(normalized)}`, {
+    phase: normalized,
+    part: studyPhaseNumber(normalized),
+    startedAt: completed.startedAt,
+    completedAt,
+    durationMs,
+    durationSeconds: Math.round(durationMs / 1000),
+  });
+  return completed;
+}
+
 function progressMarkup() {
   const part = studyPhaseNumber(runnerState.phase);
   const label = studyPhaseLabel(runnerState.phase);
@@ -112,16 +188,18 @@ function progressMarkup() {
 }
 
 function neutralShell(content, { className = "" } = {}) {
+  clearStageTimerTicker();
   document.title = `${studyPhaseLabel(runnerState?.phase)} · VIZier Study`;
   document.querySelector("#app").innerHTML = `
     <div class="study-runner-shell ${className}">
       <header class="study-runner-topbar">
         <div class="study-runner-brand"><span aria-hidden="true">▦</span><strong>VIZier Study</strong></div>
         ${runnerState ? progressMarkup() : ""}
-        <span class="study-runner-save-state">Progress saves automatically</span>
+        <div class="study-runner-status">${runnerState ? stageTimerMarkup() : ""}<span class="study-runner-save-state">Progress saves automatically</span></div>
       </header>
       ${content}
     </div>`;
+  startStageTimerTicker();
 }
 
 function telemetryPhase(phase) {
@@ -214,13 +292,15 @@ function renderPhaseIntro() {
         <div class="study-phase-intro-content">
           <h1>${escapeHTML(studyPhaseLabel(phase))}</h1>
           <p>${escapeHTML(intro.description)}</p>
-          <button type="button" id="studyBeginPhase">${escapeHTML(intro.action)}</button>
+          <div class="study-phase-intro-action"><button type="button" id="studyBeginPhase">${escapeHTML(intro.action)}</button><span><strong>00:00</strong> starts when you begin.</span></div>
         </div>
       </div>
     </main>`, { className: "is-phase-intro" });
   document.getElementById("studyBeginPhase").addEventListener("click", () => {
     const completedAt = new Date().toISOString();
     runnerState.phaseIntros[phase] = { ...existing, completedAt };
+    telemetryPhase(phase);
+    startPhaseTimer(phase, completedAt);
     persistRunnerState();
     recordStudyAction("study_phase_intro_completed", "Continued from study phase introduction", {
       phase,
@@ -229,7 +309,6 @@ function renderPhaseIntro() {
       completedAt,
       groupId: runnerGroup.id,
     });
-    telemetryPhase(phase);
     void renderCurrentPhase();
   });
   return true;
@@ -893,6 +972,7 @@ function renderQuestionnaire() {
     event.preventDefault();
     saveDraft();
     assessment.submittedAt = new Date().toISOString();
+    stopPhaseTimer(runnerState.phase, assessment.submittedAt);
     recordStudyAction("assessment_questionnaire_submitted", `Submitted ${key}-session questionnaire`, {
       phase: runnerState.phase,
       instrumentVersion: "vizier-study-protocol-v1",
@@ -920,6 +1000,7 @@ async function completeRunnerSession() {
     postAnnotationCount: ensureAssessmentState("post").annotations.length,
     preScaleResponses: serializeScaleResponses(scaleSectionsForAssessment("pre"), ensureAssessmentState("pre").scales),
     postScaleResponses: serializeScaleResponses(scaleSectionsForAssessment("post"), ensureAssessmentState("post").scales),
+    phaseTimers: clone(runnerState.phaseTimers || {}),
   });
   endStudySession({ reason: "runner-complete" });
   runnerState.completedAt = new Date().toISOString();
@@ -1006,6 +1087,7 @@ function renderComplete() {
 }
 
 async function mountVizierPhase() {
+  clearStageTimerTicker();
   cleanupAssessmentViews();
   document.body.classList.add("study-workspace-booting");
   const app = await import("./app.js");
@@ -1029,11 +1111,16 @@ async function mountVizierPhase() {
   progress.className = "study-workspace-progress";
   progress.innerHTML = `<span>Part ${part} of 4</span><strong>${escapeHTML(title)}</strong>`;
   topbar?.querySelector(".brand-title")?.insertAdjacentElement("afterend", progress);
+  const timerHost = document.createElement("div");
+  timerHost.innerHTML = stageTimerMarkup("study-workspace-timer");
+  const timerElement = timerHost.firstElementChild;
   const button = document.createElement("button");
   button.type = "button";
   button.className = "study-workspace-finish";
   button.textContent = runnerState.phase === "training" ? "Finish practice" : "Finish task";
-  document.querySelector(".top-actions")?.prepend(button);
+  const topActions = document.querySelector(".top-actions");
+  topActions?.prepend(...[timerElement, button].filter(Boolean));
+  startStageTimerTicker();
   button.addEventListener("click", async () => {
     const isTask = isDashboardTaskPhase(runnerState.phase);
     const confirmed = window.confirm(isTask
@@ -1042,6 +1129,10 @@ async function mountVizierPhase() {
     if (!confirmed) return;
     button.disabled = true;
     button.textContent = isTask ? "Saving task…" : "Opening task…";
+    const completedAt = new Date().toISOString();
+    clearStageTimerTicker();
+    const timerOutput = document.getElementById("studyStageTimer");
+    if (timerOutput) timerOutput.textContent = formatStudyPhaseTimer(studyPhaseTimerElapsedMs({ ...activePhaseTimer(), completedAt }));
     recordStudyAction(isTask ? "controlled_task_finished" : "training_finished", isTask ? "Finished controlled task" : "Finished guided practice", {
       groupId: runnerGroup.id,
       materialCode: material.code,
@@ -1052,6 +1143,7 @@ async function mountVizierPhase() {
       } catch (error) {
         button.disabled = false;
         button.textContent = "Retry finish task";
+        startStageTimerTicker();
         recordStudyAction("task_backup_failed", "Could not capture the dashboard task backup", {
           groupId: runnerGroup.id,
           materialCode: material.code,
@@ -1061,6 +1153,7 @@ async function mountVizierPhase() {
         return;
       }
     }
+    stopPhaseTimer(runnerState.phase, completedAt);
     runnerState.phase = nextStudyPhase(runnerState.phase);
     runnerState.assessmentStep = "review";
     persistRunnerState();
@@ -1069,6 +1162,7 @@ async function mountVizierPhase() {
 }
 
 async function renderCurrentPhase() {
+  clearStageTimerTicker();
   document.body.classList.remove("study-workspace-booting", "study-workspace-phase");
   if (!runnerState) {
     renderWelcome();
@@ -1081,6 +1175,9 @@ async function renderCurrentPhase() {
   if (!runnerState.phaseIntros?.[runnerState.phase]?.completedAt) {
     renderPhaseIntro();
     return;
+  }
+  if (!activePhaseTimer()?.startedAt) {
+    startPhaseTimer(runnerState.phase, runnerState.phaseIntros[runnerState.phase].completedAt, "recovered");
   }
   if (studyPhaseUsesVizier(runnerState.phase)) {
     await mountVizierPhase();
