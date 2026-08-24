@@ -54,6 +54,14 @@ let persistScheduled = false;
 let taskCapture = { snapshot: null, artifacts: [] };
 let dashboardContextFn = null;
 let notingLoggingStatus = false;
+let telemetrySyncTimer = null;
+let telemetrySyncPromise = null;
+let telemetrySyncQueued = false;
+let telemetryLastSyncedSequence = 0;
+
+const TELEMETRY_SYNC_DELAY_MS = 5_000;
+const TELEMETRY_RETRY_DELAY_MS = 15_000;
+const LIVE_TELEMETRY_FILE = "00-telemetry-live.json";
 
 function nowIso() {
   return new Date().toISOString();
@@ -153,6 +161,29 @@ function schedulePersist() {
   else Promise.resolve().then(flush);
 }
 
+function latestStudySequence() {
+  return Number(events.at(-1)?.sequenceNumber) || 0;
+}
+
+function clearTelemetrySyncTimer() {
+  if (telemetrySyncTimer === null) return;
+  clearTimeout(telemetrySyncTimer);
+  telemetrySyncTimer = null;
+}
+
+/** Upload a rolling, lightweight event-log checkpoint while the study runs.
+ * The stable filename intentionally overwrites the previous S3 object so a
+ * long session does not create hundreds of small checkpoint files. */
+export function scheduleStudyTelemetrySync(delayMs = TELEMETRY_SYNC_DELAY_MS) {
+  if (typeof window === "undefined" || typeof fetch !== "function" || !isStudyActive()) return false;
+  if (telemetrySyncTimer !== null) return true;
+  telemetrySyncTimer = setTimeout(() => {
+    telemetrySyncTimer = null;
+    void flushStudyTelemetryToServer();
+  }, Math.max(0, Number(delayMs) || 0));
+  return true;
+}
+
 export function isStudyActive() {
   return !!(session && session.active);
 }
@@ -183,6 +214,7 @@ export function restoreStudySession() {
       snapshot: captured?.snapshot && typeof captured.snapshot === "object" ? captured.snapshot : null,
       artifacts: Array.isArray(captured?.artifacts) ? captured.artifacts : [],
     };
+    if (session.active) scheduleStudyTelemetrySync(1_000);
     return studySessionInfo();
   } catch {
     return null;
@@ -190,6 +222,9 @@ export function restoreStudySession() {
 }
 
 export function startStudySession(info = {}) {
+  clearTelemetrySyncTimer();
+  telemetrySyncQueued = false;
+  telemetryLastSyncedSequence = 0;
   session = {
     active: true,
     participantId: String(info.participantId || "").trim() || `anon-${uuid().slice(0, 8)}`,
@@ -251,6 +286,7 @@ export function recordStudyEvent(event, extra = null) {
     };
     events.push(record);
     schedulePersist();
+    scheduleStudyTelemetrySync();
     return record;
   } catch {
     return null;
@@ -576,6 +612,15 @@ export function buildStudyBundle(snapshot = null, reason = "manual", options = {
   };
 }
 
+/** A cumulative event-only checkpoint used for near-real-time S3 telemetry. */
+export function buildStudyLiveTelemetryBundle(reason = "telemetry-autosave") {
+  return buildStudyBundle(null, reason, {
+    recordKind: "telemetry-live",
+    phase: session ? session.studyPhase : null,
+    fileName: LIVE_TELEMETRY_FILE,
+  });
+}
+
 export function buildStudyScaleRecord({
   assessment,
   phase,
@@ -608,6 +653,54 @@ export async function saveStudySessionToServer(bundle) {
   return saveStudyData(bundle);
 }
 
+/** Serialize rolling uploads so an older response cannot overwrite a newer
+ * event set. Failures remain best-effort and retry without interrupting VIZier. */
+export async function flushStudyTelemetryToServer(reason = "telemetry-autosave") {
+  if (!session || !events.length) return null;
+  if (telemetrySyncPromise) {
+    telemetrySyncQueued = true;
+    return telemetrySyncPromise;
+  }
+  clearTelemetrySyncTimer();
+  const sequence = latestStudySequence();
+  const bundle = buildStudyLiveTelemetryBundle(reason);
+  telemetrySyncPromise = saveStudySessionToServer(bundle)
+    .then((result) => {
+      telemetryLastSyncedSequence = Math.max(telemetryLastSyncedSequence, sequence);
+      if (session) {
+        session.telemetrySync = {
+          status: "saved",
+          lastSuccessAt: nowIso(),
+          lastSequence: telemetryLastSyncedSequence,
+          location: result?.location || null,
+          error: null,
+        };
+        persistNow();
+      }
+      return result;
+    })
+    .catch((error) => {
+      if (session) {
+        session.telemetrySync = {
+          ...(session.telemetrySync || {}),
+          status: "retrying",
+          lastAttemptAt: nowIso(),
+          error: error?.message || String(error),
+        };
+        persistNow();
+      }
+      scheduleStudyTelemetrySync(TELEMETRY_RETRY_DELAY_MS);
+      return null;
+    })
+    .finally(() => {
+      telemetrySyncPromise = null;
+      const needsAnotherPass = telemetrySyncQueued || latestStudySequence() > sequence;
+      telemetrySyncQueued = false;
+      if (needsAnotherPass && isStudyActive()) scheduleStudyTelemetrySync(1_000);
+    });
+  return telemetrySyncPromise;
+}
+
 /** Best-effort save that survives page unload (sendBeacon cannot be awaited). */
 export function beaconSaveStudySession(bundle) {
   try {
@@ -617,6 +710,13 @@ export function beaconSaveStudySession(bundle) {
   } catch {
     return false;
   }
+}
+
+/** Last-chance rolling checkpoint for reloads, tab closes, and backgrounding. */
+export function beaconStudyTelemetry(reason = "telemetry-pagehide") {
+  if (!session || !events.length || !isStudyActive()) return false;
+  persistNow();
+  return beaconSaveStudySession(buildStudyLiveTelemetryBundle(reason));
 }
 
 export function exportStudyBundleLocal(bundle) {
@@ -680,12 +780,16 @@ export function endStudySession({ reason = "end", recordEvent = true } = {}) {
   }
   session.active = false;
   session.endedAt = nowIso();
+  clearTelemetrySyncTimer();
   persistNow();
   return studySessionInfo();
 }
 
 /** Permanently drop the local session (used when abandoning a run). */
 export function discardStudySession() {
+  clearTelemetrySyncTimer();
+  telemetrySyncQueued = false;
+  telemetryLastSyncedSequence = 0;
   session = null;
   events = [];
   nextLogId = 1;
@@ -713,4 +817,15 @@ export function studyTaskCapture() {
     snapshot: taskCapture.snapshot,
     artifacts: Array.isArray(taskCapture.artifacts) ? taskCapture.artifacts.slice() : [],
   };
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", () => {
+    beaconStudyTelemetry("telemetry-pagehide");
+  });
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") beaconStudyTelemetry("telemetry-hidden");
+    });
+  }
 }

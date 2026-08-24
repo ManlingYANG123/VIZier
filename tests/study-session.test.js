@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildStudyLiveTelemetryBundle,
   buildStudyBundle,
   buildStudyBackupFiles,
   buildStudyScaleRecord,
@@ -158,6 +159,19 @@ test("study records use readable phase and scale file names", () => {
   assert.equal(scale.assessment, "pre");
   assert.match(scale.fileName, /^scale-pre-/);
   assert.equal(studyFileStamp("2026-08-23T22:21:41.333Z"), "2026-08-23T22-21-41Z");
+});
+
+test("live telemetry uses one stable cumulative checkpoint file", () => {
+  startStudySession({ participantId: "P-live", groupId: "group-1" });
+  recordStudyAction("assessment_opened", "Opened initial assessment");
+  const bundle = buildStudyLiveTelemetryBundle();
+  assert.equal(bundle.fileName, "00-telemetry-live.json");
+  assert.equal(bundle.recordKind, "telemetry-live");
+  assert.equal(bundle.reason, "telemetry-autosave");
+  assert.equal(bundle.participantId, "P-live");
+  assert.ok(bundle.events.length >= 3);
+  assert.equal(bundle.dashboard, null);
+  endStudySession({ reason: "test-complete" });
 });
 
 test("the task dashboard can be reused when writing the dashboard-task record", () => {
