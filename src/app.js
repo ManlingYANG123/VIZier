@@ -45,8 +45,7 @@ import {
   buildStudyDashboardArtifacts,
   discardStudySession,
   endStudySession,
-  exportStudyBundleLocal,
-  exportStudyDashboardsZip,
+  exportStudyBackupZip,
   isStudyActive,
   bumpStudyContextVersion,
   newStudyId,
@@ -8328,9 +8327,8 @@ function mountStudyUI() {
         say("Preparing backup…");
         const artifacts = await collectStudyDashboardArtifacts();
         const bundle = buildStudyBundle(collectStudySnapshot(), "manual-download");
-        exportStudyBundleLocal(bundle);
-        exportStudyDashboardsZip(artifacts, bundle);
-        say("Backup downloaded (log + dashboards zip).");
+        exportStudyBackupZip(artifacts, bundle);
+        say("Complete backup downloaded.");
       });
       body.querySelector("#studyDiscard").addEventListener("click", () => {
         if (!window.confirm("Discard this session without saving? This cannot be undone.")) return;
@@ -8341,8 +8339,7 @@ function mountStudyUI() {
       body.querySelector("#studyEnd").addEventListener("click", async () => {
         say("Saving dashboards and session…");
         const out = await saveStudyBundle("end");
-        exportStudyBundleLocal(out.bundle);
-        exportStudyDashboardsZip(out.artifacts, out.bundle);
+        exportStudyBackupZip(out.artifacts, out.bundle);
         endStudySession({ recordEvent: false });
         refreshButton();
         renderBody();

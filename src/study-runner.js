@@ -12,7 +12,7 @@ import {
   buildStudyBundle,
   discardStudySession,
   endStudySession,
-  exportStudyBundleLocal,
+  exportStudyBackupZip,
   isStudyActive,
   recordStudyAction,
   restoreStudySession,
@@ -20,6 +20,7 @@ import {
   setStudyPhase,
   startStudySession,
   studySessionInfo,
+  studyTaskCapture,
 } from "./study-session.js";
 import {
   POST_QUESTIONS,
@@ -882,12 +883,13 @@ async function completeRunnerSession() {
     postScaleResponses: serializeScaleResponses(scaleSectionsForAssessment("post"), ensureAssessmentState("post").scales),
   });
   endStudySession({ reason: "runner-complete" });
-  const bundle = buildStudyBundle(null, "runner-complete");
   runnerState.completedAt = new Date().toISOString();
   runnerState.saveStatus = "saving";
   persistRunnerState();
+  const backup = buildRunnerBackup();
+  const bundle = buildStudyBundle(backup.snapshot, "runner-complete");
   try {
-    const result = await saveStudySessionToServer(bundle);
+    const result = await saveStudySessionToServer({ ...bundle, artifacts: backup.artifacts });
     runnerState.saveStatus = "saved";
     runnerState.saveLocation = result.location || "";
   } catch (error) {
@@ -895,6 +897,42 @@ async function completeRunnerSession() {
     runnerState.saveError = error?.message || String(error);
   }
   persistRunnerState();
+}
+
+function questionnaireBackupArtifact(key) {
+  const assessment = ensureAssessmentState(key);
+  const questions = key === "pre" ? PRE_QUESTIONS : POST_QUESTIONS;
+  const sections = scaleSectionsForAssessment(key);
+  return {
+    path: `questionnaires/${key}.json`,
+    contentType: "application/json",
+    text: JSON.stringify({
+      schema: "vizier-study-questionnaire/1",
+      assessment: key,
+      submittedAt: assessment.submittedAt,
+      questionsPresented: questions,
+      scaleResponses: serializeScaleResponses(sections, assessment.scales),
+      annotations: assessment.annotations,
+      dashboardFilters: assessment.filters,
+    }, null, 2),
+  };
+}
+
+function buildRunnerBackup() {
+  const capture = studyTaskCapture();
+  return {
+    snapshot: capture.snapshot,
+    artifacts: [
+      ...capture.artifacts,
+      {
+        path: "study-runner-state.json",
+        contentType: "application/json",
+        text: JSON.stringify(runnerState, null, 2),
+      },
+      questionnaireBackupArtifact("pre"),
+      questionnaireBackupArtifact("post"),
+    ],
+  };
 }
 
 function renderComplete() {
@@ -909,8 +947,14 @@ function renderComplete() {
       <div><button type="button" id="studyDownloadFinal">Download backup</button><button type="button" id="studyStartAnother">Start another participant</button></div>
     </main>`, { className: "is-complete" });
   document.getElementById("studyDownloadFinal").addEventListener("click", () => {
-    const bundle = buildStudyBundle(null, "manual-download");
-    exportStudyBundleLocal(bundle);
+    const button = document.getElementById("studyDownloadFinal");
+    button.disabled = true;
+    button.textContent = "Preparing backup…";
+    const backup = buildRunnerBackup();
+    const bundle = buildStudyBundle(backup.snapshot, "manual-download");
+    const downloaded = exportStudyBackupZip(backup.artifacts, bundle);
+    button.disabled = false;
+    button.textContent = downloaded ? "Download backup again" : "Retry download";
   });
   document.getElementById("studyStartAnother").addEventListener("click", () => {
     if (!window.confirm("Clear this completed session from this browser and return to the start page?")) return;
@@ -961,7 +1005,21 @@ async function mountVizierPhase() {
       groupId: runnerGroup.id,
       materialCode: material.code,
     });
-    if (isTask) await app.saveStudyRunnerTaskBundle("task-complete");
+    if (isTask) {
+      try {
+        await app.captureStudyRunnerTaskDashboard();
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = "Retry finish task";
+        recordStudyAction("task_backup_failed", "Could not capture the dashboard task backup", {
+          groupId: runnerGroup.id,
+          materialCode: material.code,
+          error: error?.message || String(error),
+        });
+        window.alert("The task backup could not be prepared. Your work is still open; please try again.");
+        return;
+      }
+    }
     runnerState.phase = nextStudyPhase(runnerState.phase);
     runnerState.assessmentStep = "review";
     persistRunnerState();

@@ -873,7 +873,7 @@ test("session end archives high-resolution PNG and reloadable JSON for checkpoin
   assert.match(source, /full: faithful \|\| full/);
   assert.match(source, /async function collectStudyDashboardArtifacts\(\)/);
   assert.match(source, /captured\.snapshot \|\| buildDashboardCaptureSnapshot\(\)/);
-  assert.match(source, /exportStudyDashboardsZip\(out\.artifacts, out\.bundle\)/);
+  assert.match(source, /exportStudyBackupZip\(out\.artifacts, out\.bundle\)/);
   assert.match(source, /saveStudyBundle\("end"\)/);
 });
 

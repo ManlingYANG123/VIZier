@@ -632,24 +632,34 @@ export function exportStudyBundleLocal(bundle) {
   }
 }
 
-export function exportStudyDashboardsZip(artifacts = [], bundle = {}) {
+export function buildStudyBackupFiles(artifacts = [], bundle = {}) {
+  const files = [];
+  const names = new Set();
+  if (bundle && typeof bundle === "object") {
+    files.push({
+      name: "session.json",
+      bytes: new TextEncoder().encode(JSON.stringify(bundle, null, 2)),
+    });
+    names.add("session.json");
+  }
+  for (const artifact of artifacts || []) {
+    const parts = String(artifact?.path || "").replace(/^\/+/, "").split("/");
+    if (!parts.length || parts.some((part) => !part || part === "." || part === "..")) continue;
+    const name = parts.join("/");
+    if (names.has(name)) continue;
+    names.add(name);
+    files.push({ name, bytes: artifactBytes(artifact) });
+  }
+  return files;
+}
+
+export function exportStudyBackupZip(artifacts = [], bundle = {}) {
   try {
-    const files = [];
-    if (bundle && typeof bundle === "object") {
-      files.push({
-        name: "session.json",
-        bytes: new TextEncoder().encode(JSON.stringify(bundle, null, 2)),
-      });
-    }
-    for (const artifact of artifacts || []) {
-      const name = String(artifact.path || "").replace(/^\/+/, "");
-      if (!name) continue;
-      files.push({ name, bytes: artifactBytes(artifact) });
-    }
+    const files = buildStudyBackupFiles(artifacts, bundle);
     if (!files.length) return false;
     downloadBlob(
       new Blob([buildUncompressedZip(files)], { type: "application/zip" }),
-      `vizier-study-${safeDownloadName(bundle.participantId)}-${safeDownloadName(bundle.sessionId)}-dashboards.zip`,
+      `vizier-study-${safeDownloadName(bundle.participantId)}-${safeDownloadName(bundle.sessionId)}-backup.zip`,
     );
     return true;
   } catch {
