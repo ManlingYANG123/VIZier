@@ -496,6 +496,10 @@ const state = {
   // an unresolved conflict blocks Apply until one of the pair is unchecked.
   batchMode: false,
   batchSelection: new Set(),
+  // A combined revision is still an author decision, not an automatic
+  // recommendation. Each included critique must be opened and explicitly
+  // accepted before the merged Apply action becomes available.
+  batchReviewedIds: new Set(),
   // Applying is permitted only when the exact current selection has produced a
   // valid combined preview. A full review also records how many recommendations
   // the automatic safe-subset pass had to leave out.
@@ -769,32 +773,31 @@ document.querySelector("#app").innerHTML = `
              the single-critique Apply flow the list view is hidden, so the
              module falls back to the panel top (see traceHost() in api-client). -->
         <div class="engine-trace-host" id="reApiTraceHost"></div>
-        <p class="critique-readiness-note" id="critiqueReadinessNote" role="status" aria-live="polite">Confirm the context in the left panel to begin.</p>
         <section class="ask-answer" id="askAnswer" aria-live="polite" hidden></section>
         <section class="critique-distribution" id="critiqueDistribution" aria-label="Critique Category Distribution" style="margin-top:8px" hidden></section>
         <div class="critique-list" id="critiqueList">
           <div class="empty-state">No critiques yet.</div>
         </div>
         <div class="batch-apply-bar" id="batchApplyBar" role="group" aria-label="Apply selected recommendations" hidden>
-          <button class="batch-enter-button" id="batchSelectToggle" type="button" aria-label="Select multiple recommendations to apply together">
+          <button class="batch-enter-button" id="batchSelectToggle" type="button" aria-label="Review recommendations as one combined revision">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><path d="m14.5 17 2 2 4-4.5"/></svg>
-            <span>Select multiple</span>
+            <span>Review combined changes</span>
           </button>
           <div class="batch-apply-active">
             <div class="batch-apply-head">
               <strong id="batchApplyCount">0 selected</strong>
-              <button class="button ghost small" id="batchExitButton" type="button" aria-label="Done selecting">Done</button>
+              <button class="button ghost small" id="batchExitButton" type="button" aria-label="Exit combined revision preview">Exit preview</button>
             </div>
             <span id="batchApplyNote"></span>
             <span class="batch-preview-status" id="batchPreviewStatus" aria-live="polite" hidden>
               <span class="batch-preview-spinner" aria-hidden="true"></span>Building combined preview…
             </span>
             <div class="batch-apply-actions">
-              <button class="button ghost small" id="batchSelectAllButton" type="button">Select all</button>
-              <button class="button ghost small" id="batchClearButton" type="button">Clear all</button>
+              <button class="button ghost small" id="batchSelectAllButton" type="button">Include all</button>
+              <button class="button ghost small" id="batchClearButton" type="button">Remove all</button>
               <button class="button primary small" id="batchApplyButton" type="button" disabled>
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7"/></svg>
-                <span>Apply previewed</span>
+                <span>Review next</span>
               </button>
             </div>
           </div>
@@ -1053,7 +1056,6 @@ function syncReviewReadiness() {
   // already confirmed before the upload.
   const docProcessing = designDocIsProcessing();
   const ready = contextReadyForReview() && !docProcessing;
-  const staleResults = ready && !reviewResultsMatchContext();
   // One review at a time: full, focused, and selected-region share the engine
   // and the critique list, so a second ask would race the first (and drop its
   // critiques_displayed event).
@@ -1064,7 +1066,6 @@ function syncReviewReadiness() {
     || els.aiAssistButton.classList.contains("ai-running"),
   );
   const actionTitle = els.aiAssistButton.querySelector(".ai-action-title");
-  const note = document.getElementById("critiqueReadinessNote");
   els.aiAssistButton.disabled = !ready || running;
   const focusedSend = document.getElementById("runFocusedReviewBtn");
   const focusedInput = document.getElementById("focusedReviewInput");
@@ -1075,20 +1076,6 @@ function syncReviewReadiness() {
   if (!ready && !running) actionTitle.textContent = docProcessing ? "Reading Document…" : "Confirm Context First";
   if (ready && !running) {
     actionTitle.textContent = state.critiques.length ? "Regenerate Critiques" : "Generate Critiques";
-  }
-  if (note) {
-    note.hidden = ready && !staleResults;
-    if (staleResults) {
-      note.textContent = "These critiques use the previous context. Regenerate them before previewing or applying changes.";
-    } else if (!ready) {
-      note.textContent = docProcessing
-        ? "Reading the design document — the review starts once it finishes."
-        : state.contextWorkflow.status === CONTEXT_WORKFLOW_STATUS.GENERATING
-          ? "Context is being generated in the left panel."
-          : state.contextWorkflow.status === CONTEXT_WORKFLOW_STATUS.ERROR
-            ? "Resolve context setup in the left panel before generating critiques."
-            : "Review and confirm context in the left panel before generating critiques.";
-    }
   }
   els.aiAssistButton.setAttribute("aria-label", ready
     ? actionTitle.textContent
@@ -4982,17 +4969,42 @@ function groupCritiquesWithStrengths(critiqueItems, strengthItems) {
   });
 }
 
+function batchExclusionReason(critiqueId) {
+  return state.batchAutoSummary?.exclusionReasons?.[critiqueId]
+    || "Its current solution could not be combined safely with this revision.";
+}
+
+function batchReviewMarkup(critique) {
+  if (!state.batchMode) return { className: "", badge: "", reason: "" };
+  const included = state.batchSelection.has(critique.id);
+  const reviewed = included && state.batchReviewedIds.has(critique.id);
+  const excluded = state.batchAutoSummary?.excludedIds?.includes(critique.id);
+  if (reviewed) {
+    return {
+      className: " revision-reviewed",
+      badge: '<span class="revision-state reviewed"><span aria-hidden="true">✓</span> Reviewed</span>',
+      reason: "",
+    };
+  }
+  if (included) {
+    return {
+      className: " revision-needs-review",
+      badge: '<span class="revision-state needs-review"><span aria-hidden="true">○</span> Review</span>',
+      reason: "",
+    };
+  }
+  if (excluded) {
+    return {
+      className: " revision-excluded",
+      badge: '<span class="revision-state excluded"><span aria-hidden="true">!</span> Not in this revision</span>',
+      reason: `<span class="revision-exclusion-reason">${escapeHTML(batchExclusionReason(critique.id))}</span>`,
+    };
+  }
+  return { className: " revision-outside", badge: "", reason: "" };
+}
+
 function critiqueCardMarkup(critique, directAnswer = false) {
-  const batchEligible = state.batchMode && critiqueBatchEligible(critique);
-  const batchChecked = state.batchMode && state.batchSelection.has(critique.id);
-  const batchClass = state.batchMode
-    ? ` batch-mode${batchEligible ? "" : " batch-ineligible"}${batchChecked ? " batch-checked" : ""}`
-    : "";
-  const checkboxMarkup = state.batchMode
-    ? `<span class="critique-checkbox" aria-hidden="true">${batchEligible
-        ? `<svg viewBox="0 0 16 16"><path d="m3.5 8.5 3 3 6-7"/></svg>`
-        : ""}</span>`
-    : "";
+  const revision = batchReviewMarkup(critique);
   // Guidance-only cards still read as a distinct kind — a warm surface and a
   // lighter title — but the fix/guidance distinction is now named explicitly by a
   // capsule chip (icon + "Fixable"/"Guidance") on both kinds, rather than a
@@ -5004,22 +5016,43 @@ function critiqueCardMarkup(critique, directAnswer = false) {
   // here so the wrapper is omitted entirely when empty — no stray gap.
   const summaryChips = [
     critiqueFixBadgeMarkup(critique),
+    revision.badge,
     directAnswer ? `<span class="request-match-label">Direct Answer</span>` : "",
     ["critical", "high"].includes(critique.priority)
       ? `<span class="priority-label priority-${escapeHTML(critique.priority)}">${escapeHTML(critiquePriorityShort(critique))}</span>`
       : "",
   ].join("");
   return `
-    <button class="critique-card priority-${escapeHTML(critique.priority || "normal")} ${directAnswer ? "direct-answer-card" : ""} ${guidance ? "guidance" : ""} ${state.selectedCritiqueId === critique.id ? "selected" : ""} ${critique.status}${batchClass}" data-critique-id="${escapeHTML(critique.id)}"${state.batchMode ? ` role="checkbox" aria-checked="${batchChecked}"${batchEligible ? "" : " aria-disabled=\"true\""}` : ""}>
-      ${checkboxMarkup}
+    <button class="critique-card priority-${escapeHTML(critique.priority || "normal")} ${directAnswer ? "direct-answer-card" : ""} ${guidance ? "guidance" : ""} ${state.selectedCritiqueId === critique.id ? "selected" : ""} ${critique.status}${state.batchMode ? ` revision-mode${revision.className}` : ""}" data-critique-id="${escapeHTML(critique.id)}">
       <span class="diagnostic-body">
         <span class="critique-title">${escapeHTML(critique.title)}</span>
         ${summaryChips ? `<span class="critique-summary">${summaryChips}</span>` : ""}
+        ${revision.reason}
         <span class="visually-hidden">${["critical", "high", "medium", "low"].includes(critique.priority)
           ? escapeHTML(critiquePriorityLabel(critique)) + ". " : ""}${escapeHTML(critiqueTargetLabel(critique))}. ${escapeHTML(critique.status)}. Open critique details.</span>
       </span>
       ${critiqueCardAffordance(critique)}
     </button>`;
+}
+
+async function openCritiqueDetail(critique) {
+  if (!critique) return;
+  state.selectedCritiqueId = critique.id;
+  state.selectedTileId = critique.tileId || null;
+  appendInteractionEvent({
+    kind: "critique_opened",
+    summary: `Opened critique: ${critique.title}`,
+    critiqueId: critique.id,
+    dimension: critique.dimension,
+    proposalKind: critique.proposal?.kind,
+    data: { dwellFromMs: Date.now() },
+  });
+  markCritiqueInspected(critique.id);
+  await renderTiles();
+  renderCritiques();
+  renderMarkers();
+  await renderInspector();
+  emitPracticeAction("critique:opened", { critiqueId: critique.id });
 }
 
 function renderCritiques() {
@@ -5036,6 +5069,9 @@ function renderCritiques() {
         !critiqueMatchesFilters(critique)
       ) state.batchSelection.delete(id);
     }
+    state.batchReviewedIds = new Set(
+      [...state.batchReviewedIds].filter((id) => state.batchSelection.has(id)),
+    );
   }
   renderAskAnswer();
   renderCritiqueDistribution();
@@ -5126,39 +5162,10 @@ function renderCritiques() {
     node.addEventListener("click", async () => {
       const critique = critiqueById(node.dataset.critiqueId);
       if (!critique) return;
-      // In batch mode a card click toggles selection rather than opening focus.
-      // Ineligible cards (guidance / already decided) are inert.
-      if (state.batchMode) {
-        if (!critiqueBatchEligible(critique)) return;
-        state.batchAutoPreviewToken += 1;
-        state.batchAutoSummary = null;
-        if (state.batchSelection.has(critique.id)) state.batchSelection.delete(critique.id);
-        else state.batchSelection.add(critique.id);
-        renderCritiques();
-        await refreshBatchPreview();
-        emitPracticeAction("batch:selected", {
-          critiqueId: critique.id,
-          selectedIds: [...state.batchSelection],
-          count: state.batchSelection.size,
-        });
-        return;
-      }
-      state.selectedCritiqueId = critique.id;
-      state.selectedTileId = critique.tileId || null;
-      appendInteractionEvent({
-        kind: "critique_opened",
-        summary: `Opened critique: ${critique.title}`,
-        critiqueId: critique.id,
-        dimension: critique.dimension,
-        proposalKind: critique.proposal?.kind,
-        data: { dwellFromMs: Date.now() },
-      });
-      markCritiqueInspected(critique.id);
-      await renderTiles();
-      renderCritiques();
-      renderMarkers();
-      await renderInspector();
-      emitPracticeAction("critique:opened", { critiqueId: critique.id });
+      // A revision proposal must still be understood one critique at a time.
+      // Cards always open their diagnosis/evidence/solution detail; they never
+      // act as opaque recommendation checkboxes.
+      await openCritiqueDetail(critique);
     });
   });
   renderBatchApplyBar();
@@ -5195,6 +5202,7 @@ function syncBatchToggle() {
 function resetBatchState() {
   state.batchMode = false;
   state.batchSelection = new Set();
+  state.batchReviewedIds = new Set();
   state.batchPreviewValidated = false;
   state.batchPreviewFailure = null;
   state.batchAutoSummary = null;
@@ -5223,6 +5231,7 @@ async function setBatchMode(on) {
   if (on) {
     state.batchMode = true;
     state.batchSelection = new Set();
+    state.batchReviewedIds = new Set();
     state.batchPreviewValidated = false;
     state.batchPreviewFailure = null;
     state.batchAutoSummary = null;
@@ -5450,6 +5459,26 @@ async function refreshBatchPreview() {
     : { ...outcome, ok: false, reason: state.batchPreviewFailure };
 }
 
+function explainRevisionExclusion(reason = "") {
+  const message = String(reason || "").toLowerCase();
+  if (message.includes("heading") && message.includes("kpi")) {
+    return "Its current fix makes the heading compete with the KPI area and would damage the page hierarchy.";
+  }
+  if (message.includes("clip") || message.includes("outside its chart frame")) {
+    return "Its current fix clips chart content when combined with the other changes.";
+  }
+  if (message.includes("overlap")) {
+    return "Its current fix overlaps another dashboard element in the combined layout.";
+  }
+  if (message.includes("conflict")) {
+    return "Its current fix conflicts with another change in this revision.";
+  }
+  if (message.includes("render") || message.includes("visible data")) {
+    return "Its current fix leaves part of the dashboard unreadable in the combined preview.";
+  }
+  return "Its current fix could not be combined safely with the other changes in this revision.";
+}
+
 // Full reviews open directly into the broadest combined result that passes the
 // same transaction and whole-dashboard quality gate as Apply. Try the complete
 // structurally compatible set first; only when that fails, rebuild greedily in
@@ -5467,12 +5496,23 @@ async function startAutomaticCombinedPreview() {
   state.batchPreviewValidated = false;
   state.batchPreviewFailure = null;
   state.batchAutoSummary = null;
+  state.batchReviewedIds = new Set();
 
   const structurallySafe = [];
+  const exclusionReasons = {};
   for (const critique of candidates) {
     const trialIds = [...structurallySafe, critique.id];
     const plan = buildApplicationPlan(trialIds, state.critiques);
-    if (!plan.canApply || batchPlanGuidanceBlock(plan)) continue;
+    if (!plan.canApply || batchPlanGuidanceBlock(plan)) {
+      const conflict = plan.unresolvedConflicts?.find((item) =>
+        item.recommendationIds?.includes(critique.id));
+      const otherId = conflict?.recommendationIds?.find((id) => id !== critique.id);
+      const other = critiqueById(otherId);
+      exclusionReasons[critique.id] = other
+        ? `Its current fix conflicts with “${other.title}”; both cannot be applied in the same revision.`
+        : explainRevisionExclusion(plan.cyclic ? "dependency conflict" : "conflict");
+      continue;
+    }
     structurallySafe.push(critique.id);
   }
   state.batchSelection = new Set(structurallySafe);
@@ -5510,6 +5550,9 @@ async function startAutomaticCombinedPreview() {
       if (trial.ok) {
         safeIds = trialIds;
         finalOutcome = trial;
+        delete exclusionReasons[critiqueId];
+      } else {
+        exclusionReasons[critiqueId] = explainRevisionExclusion(trial.reason);
       }
     }
     // A layout fix can be unsafe in isolation yet become balanced once a
@@ -5524,6 +5567,9 @@ async function startAutomaticCombinedPreview() {
       if (trial.ok) {
         safeIds = trialIds;
         finalOutcome = trial;
+        delete exclusionReasons[critiqueId];
+      } else {
+        exclusionReasons[critiqueId] = explainRevisionExclusion(trial.reason);
       }
     }
   }
@@ -5532,11 +5578,17 @@ async function startAutomaticCombinedPreview() {
   const finalExcludedIds = candidates
     .map((critique) => critique.id)
     .filter((id) => !safeIds.includes(id));
+  finalExcludedIds.forEach((id) => {
+    if (!exclusionReasons[id]) exclusionReasons[id] = explainRevisionExclusion();
+  });
   state.batchSelection = new Set(safeIds);
+  state.batchReviewedIds = new Set();
   state.batchAutoSummary = {
     requested: candidates.length,
     included: safeIds.length,
     excluded: finalExcludedIds.length,
+    excludedIds: finalExcludedIds,
+    exclusionReasons,
   };
   renderCritiques();
   if (finalOutcome?.ok && safeIds.length) {
@@ -5599,17 +5651,28 @@ function renderBatchApplyBar(plan = null) {
   const applyButton = document.getElementById("batchApplyButton");
   const clearButton = document.getElementById("batchClearButton");
   const selectAllButton = document.getElementById("batchSelectAllButton");
-  if (countEl) countEl.textContent = `${count} in preview`;
-  if (clearButton) clearButton.disabled = count === 0;
+  const includedIds = [...state.batchSelection];
+  const reviewedIds = includedIds.filter((id) => state.batchReviewedIds.has(id));
+  const unreviewedIds = includedIds.filter((id) => !state.batchReviewedIds.has(id));
+  const isCuratedRevision = Boolean(state.batchAutoSummary);
+  if (countEl) countEl.textContent = `${reviewedIds.length} of ${count} reviewed`;
+  // Once the system has built and quality-checked a revision, it is no longer
+  // an arbitrary checkbox set. Keep the author in the critique-review loop so
+  // excluded fixes cannot be silently reintroduced without their explanation.
+  if (clearButton) {
+    clearButton.hidden = isCuratedRevision;
+    clearButton.disabled = count === 0;
+  }
   // "Select all" adds every batch-eligible critique; disable it once nothing new
   // remains to add (no eligible critiques, or all of them are already selected).
   if (selectAllButton) {
+    selectAllButton.hidden = isCuratedRevision;
     const eligibleIds = filteredCritiques().filter(critiqueBatchEligible).map((c) => c.id);
     selectAllButton.disabled = !eligibleIds.length || eligibleIds.every((id) => state.batchSelection.has(id));
   }
   const resolvedPlan = plan || (count ? buildApplicationPlan([...state.batchSelection], state.critiques) : null);
   const autoIncluded = resolvedPlan ? resolvedPlan.order.length - resolvedPlan.requested.length : 0;
-  let note = "Choose suggestions to preview together. Nothing is applied yet.";
+  let note = "Build a combined preview, then review every included critique before applying it.";
   if (count === 0) {
     note = state.batchPreviewFailure
       ? `${state.batchPreviewFailure} Nothing was applied.`
@@ -5625,7 +5688,7 @@ function renderBatchApplyBar(plan = null) {
     } else if (state.batchPreviewFailure) {
       note = `${state.batchPreviewFailure} Nothing was applied.`;
     } else if (resolvedPlan?.unresolvedConflicts.length) {
-      note = `Deselect ${resolvedPlan.unresolvedConflicts.length === 1 ? "a conflicting pair" : `${resolvedPlan.unresolvedConflicts.length} conflicting pairs`} to apply.`;
+      note = `${resolvedPlan.unresolvedConflicts.length === 1 ? "One current fix conflicts" : `${resolvedPlan.unresolvedConflicts.length} current fixes conflict`} with this revision. Open the marked critique to refine it.`;
     } else if (resolvedPlan?.cyclic) {
       note = "These fixes depend on each other — narrow the selection.";
     } else if (resolvedPlan && batchPlanGuidanceBlock(resolvedPlan)) {
@@ -5633,15 +5696,34 @@ function renderBatchApplyBar(plan = null) {
     } else if (resolvedPlan?.canApply && state.batchPreviewValidated) {
       const excluded = state.batchAutoSummary?.excluded || 0;
       note = autoIncluded > 0
-        ? `Previewing ${resolvedPlan.order.length} safely combined suggestions (+${autoIncluded} prerequisite). Nothing applied.`
-        : `Previewing ${resolvedPlan.order.length} safely combined ${resolvedPlan.order.length === 1 ? "suggestion" : "suggestions"}. Nothing applied.`;
-      if (excluded) note += ` ${excluded} ${excluded === 1 ? "suggestion was" : "suggestions were"} excluded by conflict or quality checks.`;
-      canApply = true;
+        ? `This revision combines ${resolvedPlan.order.length} changes, including ${autoIncluded} prerequisite. Nothing is applied yet.`
+        : `The canvas shows the complete effect of ${resolvedPlan.order.length} combined ${resolvedPlan.order.length === 1 ? "change" : "changes"}. Nothing is applied yet.`;
+      if (excluded) {
+        note += ` ${excluded} valid ${excluded === 1 ? "issue is" : "issues are"} marked “Not in this revision” with an explanation.`;
+      }
+      if (unreviewedIds.length) {
+        note += ` Review ${unreviewedIds.length} ${unreviewedIds.length === 1 ? "critique" : "critiques"} before applying.`;
+      } else {
+        note += " Every included critique has been reviewed.";
+        canApply = true;
+      }
     }
   }
   if (noteEl) noteEl.textContent = note;
-  if (applyButton) applyButton.disabled = !canApply;
+  if (applyButton) {
+    const canReview = unreviewedIds.length > 0 && reviewResultsMatchContext();
+    applyButton.dataset.action = canReview ? "review" : "apply";
+    applyButton.dataset.nextCritiqueId = unreviewedIds[0] || "";
+    const label = applyButton.querySelector("span");
+    if (label) {
+      label.textContent = canReview
+        ? `Review next (${reviewedIds.length}/${count})`
+        : `Apply ${count} reviewed ${count === 1 ? "change" : "changes"}`;
+    }
+    applyButton.disabled = canReview ? false : !canApply;
+  }
   bar.classList.toggle("ready", canApply);
+  bar.classList.toggle("reviewing", unreviewedIds.length > 0);
 }
 
 function proposedSpecFor(critique, preview = null) {
@@ -7126,6 +7208,7 @@ async function setCanvasPreviewPhase(phase) {
 }
 
 async function closeCritiqueFocus() {
+  const restoreCombinedRevision = state.batchMode && state.batchSelection.size > 0;
   state.selectedCritiqueId = null;
   state.selectedTileId = null;
   state.critiqueRefreshNotice = null;
@@ -7139,6 +7222,14 @@ async function closeCritiqueFocus() {
   renderCritiques();
   await renderInspector();
   renderMarkers();
+
+  // A focused critique temporarily owns the canvas preview. Returning to the
+  // revision list must restore the exact combined after-state so the author can
+  // see how their individual decisions accumulate before the final Apply.
+  if (restoreCombinedRevision) {
+    await refreshBatchPreview();
+    return;
+  }
 
   try {
     await renderTiles();
@@ -7270,6 +7361,12 @@ async function renderInspector() {
   const canAcceptGuidance = actionable
     && (critique.proposal?.mode === "guidance_only" || critique.proposal?.kind === "manual");
   const canAcceptIndividually = canApplyIndividually || canAcceptGuidance;
+  const includedInRevision = state.batchMode && state.batchSelection.has(critique.id);
+  const reviewedForRevision = includedInRevision && state.batchReviewedIds.has(critique.id);
+  const excludedFromRevision = state.batchMode
+    && state.batchAutoSummary?.excludedIds?.includes(critique.id);
+  const canAcceptForRevision = includedInRevision && actionable && critiqueIsExecutable(critique);
+  const acceptEnabled = state.batchMode ? canAcceptForRevision && !reviewedForRevision : canAcceptIndividually;
   const canvasWasShowingProposal = Boolean(activeCanvasPreviewResult());
   configureCanvasPreview(critique, descriptor);
   const runtimeReport = state.interactionObservations.get(critique.id);
@@ -7416,6 +7513,20 @@ async function renderInspector() {
           <span aria-hidden="true">!</span>
           <div><strong>Cannot safely apply this recommendation</strong><p>${escapeHTML(descriptor.previewFailure)}</p></div>
         </section>` : ""}
+      ${excludedFromRevision ? `
+        <section class="focus-decision-notice revision-exclusion" role="status">
+          <span aria-hidden="true">!</span>
+          <div>
+            <strong>Not included in this revision</strong>
+            <p>The issue is still valid. ${escapeHTML(batchExclusionReason(critique.id))}</p>
+            <p>Add rationale and refine the solution if you want VIZier to try a compatible fix.</p>
+          </div>
+        </section>` : ""}
+      ${reviewedForRevision ? `
+        <section class="focus-decision-notice revision-reviewed-notice" role="status">
+          <span aria-hidden="true">✓</span>
+          <div><strong>Reviewed for this revision</strong><p>This critique is included in the combined preview. It will be applied only with the other reviewed changes.</p></div>
+        </section>` : ""}
       ${actionable && descriptor.executable && resultsMatchContext && !recommendationMatchesDashboard ? `
         <section class="focus-decision-notice needs-regenerate" role="status">
           <span aria-hidden="true">↻</span>
@@ -7451,11 +7562,13 @@ async function renderInspector() {
         </section>` : ""}
       ${renderRevisions(critique)}
       <footer class="focus-actions">
-        <button class="focus-action ${canAcceptGuidance ? "consider" : "accept"}" id="focusAccept" type="button" ${canAcceptIndividually ? "" : "disabled"}>
+        <button class="focus-action ${canAcceptGuidance && !state.batchMode ? "consider" : "accept"}" id="focusAccept" type="button" ${acceptEnabled ? "" : "disabled"}>
           ${canAcceptGuidance
             ? `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.4a3.8 3.8 0 0 0-2.3 6.8c.4.3.6.7.6 1.1v.4h3.4v-.4c0-.4.2-.8.6-1.1A3.8 3.8 0 0 0 8 2.4Z"/><path d="M6.6 12.4h2.8M7 13.7h2"/></svg>`
             : `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7"/></svg>`}
-          <span>${canAcceptGuidance ? "Mark as Considered" : "Accept Change"}</span>
+          <span>${state.batchMode
+            ? reviewedForRevision ? "Reviewed" : includedInRevision ? "Accept for Revision" : "Not in Revision"
+            : canAcceptGuidance ? "Mark as Considered" : "Accept Change"}</span>
         </button>
         ${critiqueIsExecutable(critique) ? `
         <button class="focus-action refine" id="focusRefineSolution" type="button" aria-haspopup="dialog" ${actionable ? "" : "disabled"}>
@@ -7554,6 +7667,31 @@ async function renderInspector() {
     playInteractionRuntime(critique);
   });
   document.getElementById("focusAccept").addEventListener("click", async () => {
+    if (state.batchMode) {
+      if (!canAcceptForRevision || reviewedForRevision) return;
+      state.batchReviewedIds.add(critique.id);
+      appendInteractionEvent({
+        kind: "recommendation_reviewed",
+        summary: `Reviewed recommendation for combined revision: ${critique.title}`,
+        detail: critique.suggestion,
+        critiqueId: critique.id,
+        dimension: critique.dimension,
+        proposalKind: critique.proposal?.kind,
+        data: {
+          decision: "accept_for_revision",
+          committed: false,
+          dashboardVersion: Number(state.version) || 1,
+        },
+      });
+      recordStudyAction("critique_reviewed_for_revision", `Accepted for revision: ${critique.title}`, {
+        critiqueId: critique.id,
+        dimension: critique.dimension,
+        reviewedCount: state.batchReviewedIds.size,
+        includedCount: state.batchSelection.size,
+      });
+      await closeCritiqueFocus();
+      return;
+    }
     if (canApplyIndividually) {
       const applied = await applyRecommendationSelection([critique.id], {}, { via: "single" });
       if (!applied.ok) {
@@ -7590,6 +7728,15 @@ async function renderInspector() {
     document.getElementById("guidanceAcceptedNotice")?.focus();
   });
   document.getElementById("focusReject").addEventListener("click", async () => {
+    if (state.batchMode) {
+      state.batchSelection.delete(critique.id);
+      state.batchReviewedIds.delete(critique.id);
+      if (state.batchAutoSummary?.excludedIds) {
+        state.batchAutoSummary.excludedIds = state.batchAutoSummary.excludedIds
+          .filter((id) => id !== critique.id);
+        state.batchAutoSummary.excluded = state.batchAutoSummary.excludedIds.length;
+      }
+    }
     critique.status = "rejected";
     critique.lifecycle = "rejected";
     critique.lastEvaluatedVersion = state.version;
@@ -7610,9 +7757,13 @@ async function renderInspector() {
     });
     // Refresh the list and Category Mix underneath (like accept does) so the
     // rejected critique leaves the active view and the bar rebalances at once.
-    renderCritiques();
-    renderMarkers();
-    await renderInspector();
+    if (state.batchMode) {
+      await closeCritiqueFocus();
+    } else {
+      renderCritiques();
+      renderMarkers();
+      await renderInspector();
+    }
   });
   document.getElementById("focusRefineSolution")?.addEventListener("click", (event) =>
     openRationaleModal(critique, null, event.currentTarget, { intent: "refine-solution" }));
@@ -7864,6 +8015,24 @@ async function regenerateOneCritique(critique, {
       const next = [...state.critiques];
       next[index] = refreshed;
       state.critiques = scopeRank(enrichRecommendations(next, state.version));
+      if (isSolutionRefinement && state.batchMode) {
+        // A new solution is a new decision: it must be reviewed again. If the
+        // old attempt was excluded, tentatively add the replacement so the
+        // combined preview can test it when the author returns to the list.
+        state.batchReviewedIds.delete(targetId);
+        if (!state.batchSelection.has(targetId)) {
+          state.batchSelection.add(targetId);
+          if (state.batchAutoSummary?.excludedIds) {
+            state.batchAutoSummary.excludedIds = state.batchAutoSummary.excludedIds
+              .filter((id) => id !== targetId);
+            state.batchAutoSummary.excluded = state.batchAutoSummary.excludedIds.length;
+            state.batchAutoSummary.included = state.batchSelection.size;
+            if (state.batchAutoSummary.exclusionReasons) {
+              delete state.batchAutoSummary.exclusionReasons[targetId];
+            }
+          }
+        }
+      }
       state.previewCache.delete(targetId);
       state.interactionObservations.delete(targetId);
       state.critiqueRefreshNotice = null;
@@ -8797,7 +8966,7 @@ function mountStudyUI() {
 
 restoreStudySession();
 mountStudyUI();
-document.getElementById("focusBackButton").addEventListener("click", () => {
+document.getElementById("focusBackButton").addEventListener("click", async () => {
   // Study telemetry: closing the detail bounds the viewing interval (open -> close),
   // giving a reliable time-on-critique without any attention/gaze tracking.
   recordStudyAction("critique_closed", "Returned to the critique list", {
@@ -8805,7 +8974,7 @@ document.getElementById("focusBackButton").addEventListener("click", () => {
     dwellMs: critiqueInspectDwellMs(state.selectedCritiqueId),
   });
   state.critiqueInspect = { critiqueId: null, openedAtMs: 0 };
-  closeCritiqueFocus();
+  await closeCritiqueFocus();
 });
 // Both mode triggers hide themselves on activation (the face swap sets the
 // clicked button to display:none), which would drop keyboard/SR focus to
@@ -8822,6 +8991,9 @@ document.getElementById("batchSelectAllButton").addEventListener("click", async 
   state.batchAutoPreviewToken += 1;
   state.batchAutoSummary = null;
   state.batchSelection = new Set(filteredCritiques().filter(critiqueBatchEligible).map((c) => c.id));
+  state.batchReviewedIds = new Set(
+    [...state.batchReviewedIds].filter((id) => state.batchSelection.has(id)),
+  );
   renderCritiques();
   await refreshBatchPreview();
   emitPracticeAction("batch:selected", {
@@ -8833,14 +9005,24 @@ document.getElementById("batchClearButton").addEventListener("click", async () =
   state.batchAutoPreviewToken += 1;
   state.batchAutoSummary = null;
   state.batchSelection = new Set();
+  state.batchReviewedIds = new Set();
   renderCritiques();
   await refreshBatchPreview();
 });
 document.getElementById("batchApplyButton").addEventListener("click", async () => {
   const button = document.getElementById("batchApplyButton");
   if (button?.disabled) return;
+  if (button?.dataset.action === "review") {
+    const critique = critiqueById(button.dataset.nextCritiqueId);
+    if (critique) await openCritiqueDetail(critique);
+    return;
+  }
   const selectedIds = [...state.batchSelection];
   if (!selectedIds.length) return;
+  if (selectedIds.some((id) => !state.batchReviewedIds.has(id))) {
+    renderBatchApplyBar();
+    return;
+  }
   if (button) button.disabled = true;
   const applied = await applySelectionResolvingConflicts(selectedIds);
   if (!applied.ok) {
@@ -10000,6 +10182,7 @@ export function captureStudyRunnerWorkspaceState() {
       workingDraft: state.workingDraft,
       batchMode: state.batchMode,
       batchSelection: [...state.batchSelection],
+      batchReviewedIds: [...state.batchReviewedIds],
       crossFilterEnabled: state.crossFilterEnabled,
       crossFilterSelection: state.crossFilterSelection,
       scroll: {
@@ -10046,6 +10229,10 @@ export async function restoreStudyRunnerWorkspaceState(snapshot) {
   state.selectedVersionId = Number(saved.selectedVersionId) || state.versions.at(-1)?.id || 1;
   state.batchMode = Boolean(saved.batchMode);
   state.batchSelection = new Set(Array.isArray(saved.batchSelection) ? saved.batchSelection : []);
+  state.batchReviewedIds = new Set(
+    (Array.isArray(saved.batchReviewedIds) ? saved.batchReviewedIds : [])
+      .filter((id) => state.batchSelection.has(id)),
+  );
   state.crossFilterEnabled = Boolean(saved.crossFilterEnabled);
   state.artifact.libraryId = saved.artifactLibraryId || state.artifact.libraryId;
   activeDesignDocId = saved.activeDesignDocId || "";

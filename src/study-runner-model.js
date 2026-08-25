@@ -103,7 +103,7 @@ const freezeScaleItems = (items) => Object.freeze(items.map((item) => Object.fre
 export const POST_EXPERIENCE_SCALE_ITEMS = freezeScaleItems([
   {
     id: "vizier_final_dashboard_confidence",
-    statement: "I’m confident in the final dashboard I arrived at with VIZier.",
+    statement: "I’m satisfied with the quality of the final dashboard design I arrived at with VIZier.",
     interviewQuestion: "What else would you still change given more time and capabilities?",
   },
   {
@@ -118,8 +118,8 @@ export const POST_EXPERIENCE_SCALE_ITEMS = freezeScaleItems([
   },
   {
     id: "vizier_understanding",
-    statement: "VIZier helped me understand why particular dashboard-design choices may be effective or ineffective.",
-    interviewQuestion: "Please explain.",
+    statement: "VIZier helped me understand the ‘why’ behind dashboard design choices, and what makes them potentially effective or ineffective.",
+    interviewQuestion: "Any examples? Please explain.",
   },
   {
     id: "vizier_systematic_review",
@@ -128,18 +128,18 @@ export const POST_EXPERIENCE_SCALE_ITEMS = freezeScaleItems([
   },
   {
     id: "vizier_feedback_request",
-    statement: "After using VIZier, I feel better able to formulate a useful request for dashboard-design feedback.",
+    statement: "After using VIZier, I feel better able to formulate dashboard feedback requests (from people and/or systems) in a useful manner.",
     interviewQuestion: "Please explain any changes to how you might ask another person or system for feedback.",
   },
   {
     id: "vizier_control",
-    statement: "I felt in control of the design decisions and process when using VIZier.",
-    interviewQuestion: "Please explain what helped you feel more in control and what didn’t?",
+    statement: "When using VIZier, I felt in control of dashboard design decisions and design process.",
+    interviewQuestion: "Please explain what helped you feel more in control and what didn’t.",
   },
   {
     id: "vizier_future_use",
-    statement: "I expect to apply something from this session to future dashboard-design work.",
-    interviewQuestion: "How would you envision VIZier fitting into your existing workflows?",
+    statement: "I expect to apply something from this session to future dashboard design work.",
+    interviewQuestion: "Provide examples. Also, how would you envision VIZier fitting into your existing workflows?",
   },
 ]);
 

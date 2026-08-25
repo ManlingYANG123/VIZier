@@ -2013,16 +2013,6 @@ button { font: inherit; }
   opacity: 1;
 }
 
-.critique-readiness-note {
-  margin: 0 16px 8px;
-  color: #6e6e73;
-  font-size: 10.5px;
-  line-height: 1.4;
-  text-align: center;
-}
-
-.critique-readiness-note[hidden] { display: none; }
-
 /* Generate row: one clear review action, aligned to the panel edge. */
 .generate-row {
   display: flex;
@@ -2847,54 +2837,57 @@ button { font: inherit; }
   box-shadow: 0 2px 8px #1d1d1f12;
 }
 
-/* Batch (multi-select) apply. The checkbox is positioned absolutely so it does
-   not disturb the card's existing 3-column grid (which the cascade tunes in
-   several places). It sits in the top-right corner, clear of the title text and
-   above the vertically-centred chevron, so no left/right padding inset is needed
-   (the list-view's own padding would otherwise clobber a left gutter anyway). */
-.critique-card.batch-mode {
-  position: relative;
+/* Combined revisions stay critique-first: cards carry an explicit review state
+   and always open their diagnosis/evidence detail. They never masquerade as a
+   list of recommendation checkboxes. */
+.revision-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 20px;
+  padding: 3px 7px;
+  border: 1px solid #d7d9de;
+  border-radius: 7px;
+  background: #f7f7f8;
+  color: #5f6269;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1.2;
 }
-.critique-checkbox {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 1;
-  display: grid;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  border: 1.6px solid #c2c7d2;
-  border-radius: 5px;
-  background: #fff;
-  transition: background .12s ease, border-color .12s ease;
+.revision-state.reviewed {
+  border-color: #b9d8c5;
+  background: #f1f8f4;
+  color: #23633b;
 }
-.critique-checkbox svg { width: 12px; height: 12px; fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; opacity: 0; }
-.critique-card.batch-checked .critique-checkbox { border-color: var(--brand); background: var(--brand); }
-.critique-card.batch-checked .critique-checkbox svg { opacity: 1; }
-.critique-list-view .critique-card.batch-checked {
-  border-color: var(--brand);
-  background: var(--brand-soft);
-  box-shadow: 0 2px 8px #5b4cf01f;
+.revision-state.needs-review {
+  border-color: #c9c6e9;
+  background: #f5f4fc;
+  color: #514b84;
 }
-.critique-card.batch-ineligible {
-  opacity: .5;
-  cursor: default;
+.revision-state.excluded {
+  border-color: #e5d3b5;
+  background: #fff9ee;
+  color: #855a18;
 }
-.critique-card.batch-ineligible .critique-checkbox {
-  border-style: dashed;
-  border-color: #d3d7e0;
-  background: #f4f5f8;
+.revision-exclusion-reason {
+  max-width: 48ch;
+  color: #6d604e;
+  font-size: 10.5px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
-.critique-list-view .critique-card.batch-ineligible:hover {
-  transform: none;
-  border-color: var(--priority-border);
-  background: #fff;
+.critique-list-view .critique-card.revision-reviewed {
+  background: #fbfdfc;
+}
+.critique-list-view .critique-card.revision-excluded {
+  background: #fffdf8;
+}
+.critique-list-view .critique-card.revision-excluded:hover {
+  background: #fffaf0;
 }
 
-/* Bottom apply bar — pinned under the list. It is the multi-select ENTRY when
-   idle (the full-width "Select multiple" button) and morphs into the apply
-   controls (count · note · Clear · Apply · Done) while batch mode is on.
+/* Bottom revision bar — pinned under the list. It is the combined-review entry
+   when idle and becomes review progress + final Apply while the revision is on.
    Visibility is eligibility-driven; the .active class swaps which face shows. */
 .batch-apply-bar {
   display: flex;
@@ -2957,6 +2950,15 @@ button { font: inherit; }
   border-color: var(--line);
 }
 .batch-apply-bar .button.primary:not(:disabled):hover { border-color: #b9bfcc; background: #fafbfc; }
+.batch-apply-bar.reviewing .button.primary:not(:disabled) {
+  border-color: #2c2c2e;
+  background: #2c2c2e;
+  color: #fff;
+}
+.batch-apply-bar.reviewing .button.primary:not(:disabled):hover {
+  border-color: #1d1d1f;
+  background: #1d1d1f;
+}
 .batch-apply-bar.ready .button.primary:not(:disabled) { color: var(--brand); border-color: color-mix(in srgb, var(--brand) 40%, var(--line)); }
 .batch-apply-bar .button.primary svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 

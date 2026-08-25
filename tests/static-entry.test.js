@@ -25,7 +25,7 @@ test("context inference is a visible, confirm-before-review workflow", async () 
   assert.match(source, /CONTEXT_WORKFLOW_STATUS\.GENERATING/);
   assert.match(source, /Confirm Context First/);
   assert.match(source, /contextReadyForReview\(\)/);
-  assert.match(source, /Review and confirm context in the left panel/);
+  assert.doesNotMatch(source, /Review and confirm context in the left panel/);
   assert.match(source, /setContextWorkflow\(CONTEXT_WORKFLOW_STATUS\.CONFIRMED\)/);
   // The confirm control gates review from a persistent footer pinned to the
   // bottom of the context panel (it survives the status header's re-renders).
@@ -346,7 +346,7 @@ test("focused critique details render before preview hydration", async () => {
   assert.match(source, /const canApplyIndividually = descriptor\.executable/);
   assert.match(source, /const canAcceptGuidance = actionable/);
   assert.match(source, /const canAcceptIndividually = canApplyIndividually \|\| canAcceptGuidance/);
-  assert.match(source, /canAcceptIndividually \? "" : "disabled"/);
+  assert.match(source, /acceptEnabled \? "" : "disabled"/);
   assert.match(source, /const common = \{\s*livePreview,\s*previewFailure,\s*checkpoint,\s*executable,/);
   assert.doesNotMatch(source, /\$\{executable \? "" : "disabled"\}/);
   assert.match(source, /const fallbackResult = actionable && !usableLivePreview/);
@@ -379,7 +379,7 @@ test("guidance-only recommendations are marked as considered, not applied", asyn
   // Guidance carries a tracked decision under an honest label — nothing is
   // applied to the canvas, so the action reads "Mark as Considered", not "Accept".
   assert.match(source, /canAcceptGuidance \? "Mark as Considered" : "Accept Change"/);
-  assert.match(source, /class="focus-action \$\{canAcceptGuidance \? "consider" : "accept"\}"/);
+  assert.match(source, /class="focus-action \$\{canAcceptGuidance && !state\.batchMode \? "consider" : "accept"\}"/);
   assert.match(source, /critique\.status = "accepted"/);
   assert.match(source, /critique\.lifecycle = "guidance-accepted"/);
   assert.match(source, /guidanceOnly: true/);
