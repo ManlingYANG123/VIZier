@@ -81,6 +81,67 @@ function geometryErrors(board: BoardMeta): string[] {
   return errors;
 }
 
+function approximateTextWidth(text: string, fontPx: number): number {
+  let units = 0;
+  for (const char of Array.from(text)) {
+    if (/\s/u.test(char)) units += 0.32;
+    else if (/[^\u0000-\u024f]/u.test(char)) units += 1;
+    else if (/[MW@#%&]/u.test(char)) units += 0.82;
+    else if (/[A-Z]/u.test(char)) units += 0.68;
+    else if (/[ilI1.,'’]/u.test(char)) units += 0.3;
+    else units += 0.54;
+  }
+  return units * fontPx;
+}
+
+function estimatedHeadingBottom(board: BoardMeta): number {
+  const canvasWidth = Number(board.canvasWidth) || 1100;
+  const titleFont = Number(board.typography?.titleFontPx) || 30;
+  const subtitleFont = Number(board.typography?.subtitleFontPx) || 13;
+  // The live heading reserves 34px on each side and shares its first line with
+  // the small date/version label. Keep a conservative 140px budget for that
+  // metadata so long titles wrap here whenever they wrap on the real canvas.
+  const titleWidth = Math.max(220, canvasWidth - 68 - 140);
+  const bodyWidth = Math.max(220, canvasWidth - 68);
+  const titleLines = Math.max(1, Math.ceil(
+    approximateTextWidth(String(board.title || ""), titleFont) / titleWidth,
+  ));
+  const subtitle = String(board.subtitle || "").trim();
+  const subtitleLines = subtitle
+    ? Math.max(1, Math.ceil(approximateTextWidth(subtitle, subtitleFont) / bodyWidth))
+    : 0;
+  return 24
+    + titleLines * titleFont * 1.2
+    + (subtitleLines ? 7 + subtitleLines * subtitleFont * 1.35 : 0);
+}
+
+function kpiBandTop(board: BoardMeta): number {
+  const topFilter = (board.filters || []).some((filter) =>
+    filter.placement === "top-row" ||
+    (filter.placement === "floating" && Number(filter.position?.y) >= 76 && Number(filter.position?.y) < 138)
+  );
+  if (topFilter) return 144;
+  return board.kpiLayout === "card-grid" ? 96 : 100;
+}
+
+/** Dashboard chrome is outside board.tiles, so tile-only geometry cannot catch
+ * a wrapped heading colliding with a newly added KPI band. Estimate the same
+ * fixed chrome positions the frontend renders and reject only newly introduced
+ * heading/KPI or heading/tile collisions. */
+function chromeLayoutErrors(board: BoardMeta): string[] {
+  const errors: string[] = [];
+  const headingBottom = estimatedHeadingBottom(board);
+  if (board.hasKpis && board.kpis?.length && headingBottom + 8 > kpiBandTop(board)) {
+    errors.push("the wrapped dashboard heading overlaps the KPI band");
+  }
+  for (const tile of board.tiles || []) {
+    if (tile.bounds && tile.bounds.y < headingBottom + 8) {
+      errors.push(`tile ${tile.id} overlaps the dashboard heading`);
+    }
+  }
+  return errors;
+}
+
 function isAnalyticalChart(spec: VegaLiteSpec | undefined): boolean {
   if (!spec) return false;
   return unitSpecs(spec).some(({ spec: unit }) => {
@@ -182,6 +243,8 @@ export function validateAppliedDashboard(
   errors.push(...geometryErrors(nextBoard).filter((error) => !baselineGeometry.has(error)));
   const baselineBalance = new Set(layoutBalanceErrors(originalBoard, originalSpecs));
   errors.push(...layoutBalanceErrors(nextBoard, nextSpecs).filter((error) => !baselineBalance.has(error)));
+  const baselineChrome = new Set(chromeLayoutErrors(originalBoard));
+  errors.push(...chromeLayoutErrors(nextBoard).filter((error) => !baselineChrome.has(error)));
   const baselineType = typographySeverity(originalBoard, originalSpecs);
   const nextType = typographySeverity(nextBoard, nextSpecs);
   if (nextType > 1.05 && nextType > baselineType + 0.05) {

@@ -5215,7 +5215,7 @@ function setBatchPreviewPending(pending) {
   if (el) el.hidden = !pending;
 }
 
-async function computeBatchPreview(selectedIds) {
+async function computeBatchPreview(selectedIds, source = null) {
   if (!selectedIds.length || !reviewResultsMatchContext() || !state.artifact.hasExecutableSpecs) {
     return { ok: false, plan: null, result: null, reason: null };
   }
@@ -5242,8 +5242,8 @@ async function computeBatchPreview(selectedIds) {
     const result = await streamApplyForCurrentMode({
       version: state.version,
       context: reviewContextForEngine(),
-      specMap: buildEngineSpecMap(),
-      board: buildEngineBoardMeta(),
+      specMap: source?.specMap || buildEngineSpecMap(),
+      board: source?.board || buildEngineBoardMeta(),
       critiques: state.critiques,
       selectedRecommendationIds: plan.order,
     });
@@ -5280,8 +5280,77 @@ async function computeBatchPreview(selectedIds) {
   }
 }
 
-async function presentBatchPreview(outcome) {
-  state.batchPreviewValidated = true;
+function renderedBatchPreviewErrors() {
+  const errors = [];
+  const overlap = (first, second, inset = 1) => (
+    first.left < second.right - inset
+    && first.right > second.left + inset
+    && first.top < second.bottom - inset
+    && first.bottom > second.top + inset
+  );
+  const visible = (element) => element
+    && !element.hidden
+    && getComputedStyle(element).display !== "none"
+    && getComputedStyle(element).visibility !== "hidden";
+  const heading = els.dashboardTitle?.closest(".dashboard-heading");
+  const headingRect = visible(heading) ? heading.getBoundingClientRect() : null;
+  const kpiRect = visible(els.kpiRow) ? els.kpiRow.getBoundingClientRect() : null;
+
+  if (headingRect && kpiRect && overlap(headingRect, kpiRect)) {
+    errors.push("The dashboard heading overlaps the KPI summary.");
+  }
+
+  els.tilesLayer.querySelectorAll(".tile").forEach((tile) => {
+    const tileRect = tile.getBoundingClientRect();
+    const tileName = tile.querySelector(".tile-label")?.textContent?.trim() || "A chart";
+    if (headingRect && overlap(headingRect, tileRect)) {
+      errors.push(`${tileName} overlaps the dashboard heading.`);
+    }
+    if (kpiRect && overlap(kpiRect, tileRect)) {
+      errors.push(`${tileName} overlaps the KPI summary.`);
+    }
+
+    const host = tile.querySelector(".vega-host");
+    const svg = host?.querySelector("svg");
+    if (!host || !svg) {
+      errors.push(`${tileName} did not render.`);
+      return;
+    }
+    const hostRect = host.getBoundingClientRect();
+    const visibleMarks = [...svg.querySelectorAll(
+      ".role-mark path, .role-mark rect, .role-mark circle, .role-mark line, .role-mark text, .role-mark symbol",
+    )].filter((mark) => {
+      const rect = mark.getBoundingClientRect();
+      const style = getComputedStyle(mark);
+      return style.display !== "none"
+        && style.visibility !== "hidden"
+        && Number(style.opacity || 1) > 0
+        && rect.width > 0.5
+        && rect.height > 0.5;
+    });
+    if (!visibleMarks.length) errors.push(`${tileName} rendered without visible data or narrative content.`);
+
+    const clipTolerance = 4;
+    const clippedText = [...svg.querySelectorAll("text")].some((text) => {
+      const rect = text.getBoundingClientRect();
+      if (!rect.width || !rect.height) return false;
+      return rect.left < hostRect.left - clipTolerance
+        || rect.right > hostRect.right + clipTolerance
+        || rect.top < hostRect.top - clipTolerance
+        || rect.bottom > hostRect.bottom + clipTolerance;
+    });
+    if (clippedText) errors.push(`${tileName} has labels clipped outside its chart frame.`);
+  });
+
+  return [...new Set(errors)];
+}
+
+function afterDashboardPaint() {
+  return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+}
+
+async function presentBatchPreview(outcome, { renderBar = true } = {}) {
+  state.batchPreviewValidated = false;
   state.batchPreviewFailure = null;
   state.canvasPreview = {
     batch: true,
@@ -5297,7 +5366,17 @@ async function presentBatchPreview(outcome) {
   renderDashboardChrome({ renderContext: false });
   await renderTiles();
   renderMarkers();
-  renderBatchApplyBar(outcome.plan);
+  await afterDashboardPaint();
+  const renderedErrors = renderedBatchPreviewErrors();
+  if (renderedErrors.length) {
+    state.batchPreviewFailure = `Preview failed the rendered layout check: ${renderedErrors[0]}`;
+    await clearBatchPreview();
+    if (renderBar) renderBatchApplyBar(outcome.plan);
+    return { ok: false, errors: renderedErrors };
+  }
+  state.batchPreviewValidated = true;
+  if (renderBar) renderBatchApplyBar(outcome.plan);
+  return { ok: true, errors: [] };
 }
 
 async function refreshBatchPreview() {
@@ -5321,8 +5400,10 @@ async function refreshBatchPreview() {
     renderBatchApplyBar(outcome.plan);
     return outcome;
   }
-  await presentBatchPreview(outcome);
-  return outcome;
+  const presentation = await presentBatchPreview(outcome);
+  return presentation.ok
+    ? outcome
+    : { ...outcome, ok: false, reason: state.batchPreviewFailure };
 }
 
 // Full reviews open directly into the broadest combined result that passes the
@@ -5355,8 +5436,24 @@ async function startAutomaticCombinedPreview() {
   renderBatchApplyBar();
   setBatchPreviewPending(true);
 
+  // Every retry must start from the committed dashboard, not a previously
+  // painted trial. Otherwise a rejected preview can contaminate the next
+  // engine request and appear safe only because its changes were already staged.
+  const source = {
+    specMap: buildEngineSpecMap(),
+    board: buildEngineBoardMeta(),
+  };
+  const validateCandidate = async (ids) => {
+    const outcome = await computeBatchPreview(ids, source);
+    if (!outcome.ok) return outcome;
+    state.batchSelection = new Set(ids);
+    const presentation = await presentBatchPreview(outcome, { renderBar: false });
+    if (presentation.ok) return outcome;
+    return { ...outcome, ok: false, reason: state.batchPreviewFailure };
+  };
+
   let safeIds = structurallySafe;
-  let finalOutcome = safeIds.length ? await computeBatchPreview(safeIds) : null;
+  let finalOutcome = safeIds.length ? await validateCandidate(safeIds) : null;
   if (autoToken !== state.batchAutoPreviewToken) return;
 
   if (!finalOutcome?.ok) {
@@ -5364,7 +5461,7 @@ async function startAutomaticCombinedPreview() {
     finalOutcome = null;
     for (const critiqueId of structurallySafe) {
       const trialIds = [...safeIds, critiqueId];
-      const trial = await computeBatchPreview(trialIds);
+      const trial = await validateCandidate(trialIds);
       if (autoToken !== state.batchAutoPreviewToken) return;
       if (trial.ok) {
         safeIds = trialIds;
@@ -5378,7 +5475,7 @@ async function startAutomaticCombinedPreview() {
     // the system back to tiny, isolated tweaks.
     for (const critiqueId of structurallySafe.filter((id) => !safeIds.includes(id))) {
       const trialIds = [...safeIds, critiqueId];
-      const trial = await computeBatchPreview(trialIds);
+      const trial = await validateCandidate(trialIds);
       if (autoToken !== state.batchAutoPreviewToken) return;
       if (trial.ok) {
         safeIds = trialIds;
@@ -5399,7 +5496,11 @@ async function startAutomaticCombinedPreview() {
   };
   renderCritiques();
   if (finalOutcome?.ok && safeIds.length) {
-    await presentBatchPreview(finalOutcome);
+    const presentation = await presentBatchPreview(finalOutcome);
+    if (!presentation.ok) {
+      await failBatchPreview(state.batchPreviewFailure);
+      renderBatchApplyBar(finalOutcome.plan);
+    }
   } else {
     await failBatchPreview("No combined set passed the dashboard quality check. Try previewing one suggestion at a time.");
     renderBatchApplyBar();

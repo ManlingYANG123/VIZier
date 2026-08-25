@@ -105,3 +105,41 @@ test("post-apply validation permits a dramatic analytical layout change", () => 
   const result = validateAppliedDashboard(original, next, specs, specs);
   assert.equal(result.ok, true);
 });
+
+test("post-apply validation rejects a long wrapped title colliding with a new KPI band", () => {
+  const original = board();
+  original.title = "Britain's Garden Birds";
+  original.subtitle = "Who is visiting UK gardens";
+  const next = structuredClone(original);
+  next.title = "Britain's favourite garden birds are still common — but some have sharply declined";
+  next.hasKpis = true;
+  next.kpis = [{ label: "Top garden bird", value: "4.3", computed: true }];
+  next.kpiLayout = "inline-summary";
+  next.kpiReservedHeight = 152;
+  next.tiles = next.tiles!.map((tile) => ({
+    ...tile,
+    bounds: tile.bounds ? { ...tile.bounds, y: 192 } : tile.bounds,
+  }));
+
+  const result = validateAppliedDashboard(original, next, specs, specs);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join(" "), /heading overlaps the KPI band/);
+});
+
+test("post-apply validation allows a short title with a readable KPI band", () => {
+  const original = board();
+  original.title = "Britain's Garden Birds";
+  original.subtitle = "Who is visiting UK gardens";
+  const next = structuredClone(original);
+  next.hasKpis = true;
+  next.kpis = [{ label: "Top garden bird", value: "4.3", computed: true }];
+  next.kpiLayout = "inline-summary";
+  next.kpiReservedHeight = 152;
+  next.tiles = next.tiles!.map((tile) => ({
+    ...tile,
+    bounds: tile.bounds ? { ...tile.bounds, y: 192 } : tile.bounds,
+  }));
+
+  const result = validateAppliedDashboard(original, next, specs, specs);
+  assert.equal(result.ok, true);
+});
