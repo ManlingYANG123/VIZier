@@ -10013,7 +10013,13 @@ body.panel-resizing * {
   flex-wrap: wrap;
 }
 .design-doc-status-label { flex: 1 1 auto; min-width: 0; }
-.design-doc-review-link {
+.design-doc-status-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+}
+.design-doc-action-link {
   flex: none;
   border: 0;
   padding: 0;
@@ -10025,7 +10031,8 @@ body.panel-resizing * {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
-.design-doc-review-link:hover { color: #4939df; }
+.design-doc-action-link:hover { color: #4939df; }
+.design-doc-action-link:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 2px; }
 
 .constraint-review {
   position: fixed;
@@ -10973,9 +10980,6 @@ body.panel-resizing * {
 .study-workspace-finish { min-height: 32px; padding: 6px 11px; border: 1px solid #2c2c2e; border-radius: 7px; background: #2c2c2e; color: #fff; font: inherit; font-size: 10.5px; font-weight: 650; cursor: pointer; }
 .study-workspace-finish:hover { background: #424245; }
 .study-workspace-finish:disabled { opacity: .58; cursor: wait; }
-.study-workspace-pdf { min-height: 32px; padding: 6px 11px; border: 1px solid #b8b8bd; border-radius: 7px; background: #fff; color: #2c2c2e; font: inherit; font-size: 10.5px; font-weight: 650; cursor: pointer; }
-.study-workspace-pdf:hover { border-color: #6e6e73; background: #f5f5f7; }
-.study-workspace-pdf:focus-visible { outline: 2px solid #1d1d1f; outline-offset: 2px; }
 .study-workspace-timer { min-height: 32px; padding: 6px 9px; border: 1px solid #d7d7dc; border-radius: 7px; background: #f7f7f8; }
 
 @media (max-width: 900px) {

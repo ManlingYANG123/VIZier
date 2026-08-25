@@ -1443,23 +1443,8 @@ async function mountVizierPhase() {
   button.type = "button";
   button.className = "study-workspace-finish";
   button.textContent = runnerState.phase === "training" ? "Finish practice" : "Finish formal use";
-  const pdfButton = material?.pdfUrl ? document.createElement("button") : null;
-  if (pdfButton) {
-    pdfButton.type = "button";
-    pdfButton.className = "study-workspace-pdf";
-    pdfButton.textContent = "Preview PDF";
-    pdfButton.setAttribute("aria-label", "Preview the assigned design document PDF in a new tab");
-    pdfButton.addEventListener("click", () => {
-      window.open(material.pdfUrl, "_blank", "noopener,noreferrer");
-      recordStudyAction("design_document_previewed", "Previewed the assigned design document", {
-        phase: runnerState.phase,
-        materialCode: material.code,
-        pdfUrl: material.pdfUrl,
-      });
-    });
-  }
   const topActions = document.querySelector(".top-actions");
-  topActions?.prepend(...[pdfButton, timerElement, button].filter(Boolean));
+  topActions?.prepend(...[timerElement, button].filter(Boolean));
   startStageTimerTicker();
   wireStageTimerControl();
   wireStudyBackControl();

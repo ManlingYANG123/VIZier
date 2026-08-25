@@ -196,6 +196,7 @@ test("study onboarding binds each assigned dashboard to its protocol PDF", async
 test("group study routes boot the neutral runner before VIZier", async () => {
   const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
   const bootstrap = await readFile(new URL("../src/bootstrap.js", import.meta.url), "utf8");
+  const app = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
   const runner = await readFile(new URL("../src/study-runner.js", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 
@@ -230,8 +231,10 @@ test("group study routes boot the neutral runner before VIZier", async () => {
   assert.match(runner, /openStudyMaterialForRunner/);
   assert.match(runner, /studyPhaseUsesVizier\(runnerState\.phase\)/);
   assert.match(runner, /isDashboardTaskPhase\(runnerState\.phase\)/);
-  assert.match(runner, /className = "study-workspace-pdf"/);
-  assert.match(runner, /window\.open\(material\.pdfUrl, "_blank", "noopener,noreferrer"\)/);
+  assert.doesNotMatch(runner, /study-workspace-pdf|Preview PDF/);
+  assert.match(app, /data-doc-preview>Preview PDF/);
+  assert.match(app, /function previewDesignDocument\(\)/);
+  assert.match(app, /window\.open\(url, "_blank", "noopener,noreferrer"\)/);
   assert.match(styles, /\.study-assessment-layout/);
   assert.match(styles, /\.study-dashboard-wrap\s*\{[^}]*display:\s*flex/);
   assert.match(styles, /\.study-dashboard-world/);
@@ -244,7 +247,8 @@ test("group study routes boot the neutral runner before VIZier", async () => {
   assert.doesNotMatch(styles, /\.study-scale-question legend\s*\{[^}]*max-width:\s*70ch/);
   assert.doesNotMatch(styles, /\.study-questionnaire-page form > footer\s*\{[^}]*position:\s*sticky/);
   assert.match(styles, /\.study-workspace-progress/);
-  assert.match(styles, /\.study-workspace-pdf/);
+  assert.match(styles, /\.design-doc-status-actions/);
+  assert.match(styles, /\.design-doc-action-link:focus-visible/);
 });
 
 test("guided practice uses presets while the dashboard task keeps the live engine", async () => {

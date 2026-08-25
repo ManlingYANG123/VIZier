@@ -117,7 +117,7 @@ test("the design-rules review popup is styled as a modal", async () => {
   const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(css, /\.constraint-review \{/);
   assert.match(css, /\.constraint-row\.is-off/);
-  assert.match(css, /\.design-doc-review-link/);
+  assert.match(css, /\.design-doc-action-link/);
 });
 
 test("the design-doc control is shared by onboarding and the workspace panel", async () => {

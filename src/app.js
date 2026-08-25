@@ -10101,6 +10101,7 @@ function showBriefError(error) {
 /* ------------------------------------------------------------------ */
 
 let lastDesignDocFile = null;
+let designDocPreviewObjectUrl = "";
 // The design-rules review popup traps Escape while open; this holds its handler
 // so closeConstraintReview can detach it. null when the popup is closed.
 let constraintReviewKeydown = null;
@@ -10206,7 +10207,38 @@ function renderDesignDocStatus() {
   renderDashboardCards();
 }
 
+function releaseDesignDocPreviewObjectUrl() {
+  if (!designDocPreviewObjectUrl) return;
+  URL.revokeObjectURL(designDocPreviewObjectUrl);
+  designDocPreviewObjectUrl = "";
+}
+
+function designDocumentPreviewUrl() {
+  const libraryDocument = DESIGN_DOC_LIBRARY.find((doc) => doc.id === activeDesignDocId);
+  if (libraryDocument?.url) return libraryDocument.url;
+  const isPdf = lastDesignDocFile && (
+    lastDesignDocFile.type === "application/pdf"
+    || /\.pdf$/i.test(lastDesignDocFile.name || "")
+  );
+  if (!isPdf) return "";
+  if (!designDocPreviewObjectUrl) {
+    designDocPreviewObjectUrl = URL.createObjectURL(lastDesignDocFile);
+  }
+  return designDocPreviewObjectUrl;
+}
+
+function previewDesignDocument() {
+  const url = designDocumentPreviewUrl();
+  if (!url) return;
+  window.open(url, "_blank", "noopener,noreferrer");
+  recordStudyAction("design_document_previewed", "Previewed the active design document", {
+    filename: state.designDoc.filename || null,
+    designDocumentId: activeDesignDocId || null,
+  });
+}
+
 function clearDesignDoc() {
+  releaseDesignDocPreviewObjectUrl();
   lastDesignDocFile = null;
   activeDesignDocId = "";
   state.constraintSet = null;
@@ -10301,6 +10333,7 @@ function setDesignDocNote(note) {
  * context snapshot. */
 async function handleDesignDoc(file) {
   if (!file) return;
+  if (file !== lastDesignDocFile) releaseDesignDocPreviewObjectUrl();
   const note = state.designDoc.note || "";
   if (!isSupportedDesignDoc(file)) {
     lastDesignDocFile = null;
@@ -10375,6 +10408,7 @@ function attachDesignDocListeners(root) {
   // The "Review rules" link is re-rendered inside the status on every state
   // change, so delegate from the stable status element that persists.
   if (status) status.addEventListener("click", (e) => {
+    if (e.target.closest("[data-doc-preview]")) previewDesignDocument();
     if (e.target.closest("[data-rules-review]")) openConstraintReview();
   });
   if (browse && input) browse.addEventListener("click", () => input.click());
@@ -10435,14 +10469,22 @@ function constraintStatusMarkup() {
   const total = set && Array.isArray(set.constraints) ? set.constraints.length : 0;
   if (!total) {
     const where = set?.provenance ? ` in ${set.provenance}` : "";
-    return escapeHTML(`No actionable rules found${where}. Add a specific note, then Apply to try again.`);
+    return `<span class="design-doc-status-label">${escapeHTML(`No actionable rules found${where}. Add a specific note, then Apply to try again.`)}</span>`
+      + (designDocumentPreviewUrl()
+        ? `<span class="design-doc-status-actions"><button type="button" class="design-doc-action-link" data-doc-preview>Preview PDF</button></span>`
+        : "");
   }
   const active = effectiveConstraintCount();
   const label = active === total
     ? `${total} design rule${total === 1 ? "" : "s"} loaded.`
     : `${active} of ${total} design rules active.`;
   return `<span class="design-doc-status-label">${escapeHTML(label)}</span>`
-    + `<button type="button" class="design-doc-review-link" data-rules-review>Review Rules</button>`;
+    + `<span class="design-doc-status-actions">`
+    + (designDocumentPreviewUrl()
+      ? `<button type="button" class="design-doc-action-link" data-doc-preview>Preview PDF</button>`
+      : "")
+    + `<button type="button" class="design-doc-action-link" data-rules-review>Review Rules</button>`
+    + `</span>`;
 }
 
 /** One selectable rule row for the review popup. */
