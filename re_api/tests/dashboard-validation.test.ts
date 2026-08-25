@@ -53,3 +53,33 @@ test("post-apply validation does not block an unrelated change for a pre-existin
   const result = validateAppliedDashboard(original, next, specs, specs);
   assert.equal(result.ok, true);
 });
+
+test("post-apply validation rejects charts compressed into unreadable strips", () => {
+  const original = board();
+  const next = structuredClone(original);
+  next.tiles![1].bounds = { x: 556, y: 96, w: 516, h: 110 };
+  const result = validateAppliedDashboard(original, next, specs, specs);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join(" "), /compressed below half/);
+});
+
+test("post-apply validation rejects a tile enlarged into a dashboard-dominating billboard", () => {
+  const original = board();
+  const next = structuredClone(original);
+  next.tiles = [
+    { id: "a", bounds: { x: 28, y: 96, w: 800, h: 600 } },
+    { id: "b", bounds: { x: 850, y: 96, w: 222, h: 260 } },
+  ];
+  const result = validateAppliedDashboard(original, next, specs, specs);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join(" "), /expands disproportionately/);
+});
+
+test("post-apply validation still permits a readable hierarchy change", () => {
+  const original = board();
+  const next = structuredClone(original);
+  next.tiles![0].bounds = { x: 28, y: 96, w: 620, h: 320 };
+  next.tiles![1].bounds = { x: 676, y: 96, w: 396, h: 260 };
+  const result = validateAppliedDashboard(original, next, specs, specs);
+  assert.equal(result.ok, true);
+});

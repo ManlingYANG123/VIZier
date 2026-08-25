@@ -579,6 +579,110 @@ test("a named layout composition survives validation without model-authored pixe
   assert.deepEqual(layout?.proposal.layoutTiles, boardWithBounds.tiles.map((tile) => tile.id));
 });
 
+test("a control-placement critique cannot masquerade as a tile-layout fix", async () => {
+  const boardWithControl = {
+    ...dashboardBoard(),
+    canvasWidth: 1100,
+    canvasHeight: 720,
+    tiles: dashboardBoard().tiles!.map((tile) => ({ ...tile, bounds: tileBounds[tile.id] })),
+    filters: [{
+      id: "maximum-revenue",
+      label: "Maximum revenue",
+      kind: "range" as const,
+      field: "revenue",
+      targets: ["task-velocity"],
+      wired: true,
+      variant: "slider" as const,
+      placement: "floating" as const,
+      position: { x: 760, y: 82, w: 290 },
+    }],
+  };
+  const result = await discoverDashboardCritiques(
+    dashboardSpecMap(),
+    { goal: "Keep dashboard controls easy to find." },
+    boardWithControl,
+    new SequenceClient([diagnosisPayload([{
+      ...critique,
+      object: "layout",
+      problem: "misaligned or disorganized",
+      recommendation: "layout:organize related views",
+      surface: "structural",
+      tileId: null,
+      title: "Keep the controls together at the top",
+      issue: "The revenue threshold slider floats above the right column instead of reading as part of the main control area.",
+      rationale: "Related controls should form one predictable filtering region.",
+      evidence: "The Maximum revenue filter uses floating placement.",
+      suggestion: "Move the slider into the same top control band so all filtering starts in one place.",
+      proposal: {
+        kind: "edit-layout",
+        mode: "executable",
+        composition: "hero-left",
+        layoutTiles: boardWithControl.tiles.map((tile) => tile.id),
+      },
+      target: { granularity: "dashboard control", ref: {} },
+      evidenceRefs: [{
+        source: "dashboard",
+        path: "board.filters",
+        detail: "Maximum revenue is a floating slider.",
+      }],
+    }]), {
+      repairs: [{
+        index: 0,
+        proposal: {
+          kind: "edit-layout",
+          mode: "executable",
+          composition: "hero-left",
+          layoutTiles: boardWithControl.tiles.map((tile) => tile.id),
+        },
+        target: { ref: {} },
+      }],
+    }]),
+  );
+  const controlPlacement = result.critiques.find((item) => item.title === "Keep the controls together at the top");
+  assert.ok(controlPlacement);
+  assert.equal(controlPlacement!.proposal.kind, "manual");
+  assert.equal(controlPlacement!.proposal.mode, "guidance_only");
+});
+
+test("a vertical hero composition with too many side charts degrades to guidance", async () => {
+  const base = dashboardBoard();
+  const tiles = [
+    ...base.tiles!.map((tile) => ({ ...tile, bounds: tileBounds[tile.id] })),
+    { id: "extra-a", title: "Extra A", bounds: { x: 28, y: 690, w: 508, h: 258 } },
+    { id: "extra-b", title: "Extra B", bounds: { x: 564, y: 690, w: 508, h: 258 } },
+  ];
+  const specMap = {
+    ...dashboardSpecMap(),
+    "extra-a": { mark: "bar", data: { values: [{ category: "A", value: 1 }] }, encoding: { x: { field: "category" }, y: { field: "value" } } },
+    "extra-b": { mark: "line", data: { values: [{ category: "A", value: 1 }] }, encoding: { x: { field: "category" }, y: { field: "value" } } },
+  } as SpecMap;
+  const result = await discoverDashboardCritiques(
+    specMap,
+    { goal: "Create a stronger hierarchy." },
+    { ...base, canvasWidth: 1100, canvasHeight: 1000, tiles },
+    new StubClient(diagnosisPayload([{
+      ...critique,
+      object: "layout",
+      problem: "misaligned or disorganized",
+      recommendation: "layout:organize related views",
+      surface: "structural",
+      tileId: null,
+      proposal: {
+        kind: "edit-layout",
+        mode: "executable",
+        composition: "hero-left",
+        layoutTiles: tiles.map((tile) => tile.id),
+      },
+      target: { granularity: "dashboard", ref: {} },
+      evidenceRefs: [{ source: "dashboard", path: "board.tiles", detail: "Six dashboard tiles." }],
+    }])),
+  );
+  const layout = result.critiques.find((item) => item.dimension === "layout");
+  assert.ok(layout);
+  assert.equal(layout!.proposal.kind, "manual");
+  assert.equal(layout!.proposal.mode, "guidance_only");
+});
+
 test("a later review excludes an already adopted proposal signature", async () => {
   const payload = diagnosisPayload([{
     ...critique,

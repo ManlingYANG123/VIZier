@@ -951,6 +951,18 @@ export function validatedProposal(raw: JsonObject, tileId: string | null, packet
         sanitizedComposition = undefined;
         sanitizedLayoutTiles = [];
       }
+      // A vertical hero composition gives every non-hero tile one row in the
+      // side column. Beyond four total tiles those rows collapse into chart
+      // strips (the old 80px floor technically passed them, but axes, legends,
+      // and labels became unreadable). Other compositions use a grid and can
+      // safely support the existing six-tile cap.
+      if (
+        (sanitizedComposition === "hero-left" || sanitizedComposition === "asymmetric-grid") &&
+        sanitizedLayoutTiles.length > 4
+      ) {
+        sanitizedComposition = undefined;
+        sanitizedLayoutTiles = [];
+      }
     }
     if (!sanitizedLayout.length && !sanitizedComposition) kind = "manual";
   }
@@ -1104,6 +1116,29 @@ export function validatedProposal(raw: JsonObject, tileId: string | null, packet
   return { proposal, ref };
 }
 
+/** edit-layout can only move chart tiles. A critique about relocating a filter
+ * control must remain guidance until the apply engine has an operation for
+ * board.filters[].placement/position; otherwise the model's fallback layout
+ * payload reflows unrelated charts while leaving the control untouched. */
+export function asksToRepositionControl(raw: JsonObject, refs: EvidenceRef[], packet: EvidencePacket): boolean {
+  const prose = [raw.title, raw.issue, raw.rationale, raw.evidence, raw.suggestion]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ");
+  const targetText = JSON.stringify(object(object(raw.target).ref));
+  const filterNames = (packet.board.filters || [])
+    .flatMap((filter) => [filter.id, filter.label])
+    .filter(Boolean);
+  const searchableText = `${prose} ${targetText}`.toLowerCase();
+  const namesFilter = filterNames.some((name) => searchableText.includes(name.toLowerCase()));
+  const citesFilters = refs.some((ref) => ref.path === "board.filters" || ref.path.startsWith("board.filters."));
+  const mentionsControl = citesFilters || namesFilter ||
+    /\b(slider|filter|control|dropdown|selector|checkbox|toggle)\b/i.test(searchableText);
+  const requestsPlacement =
+    /\b(move|relocate|place|position|align|group|cluster|together|float|floating|top|bottom|left|right|band|row|rail)\b/i
+      .test(prose);
+  return mentionsControl && requestsPlacement;
+}
+
 function defaultSurface(dimension: Dimension): Surface {
   if (dimension === "interaction") return "interaction";
   if (dimension === "text") return "text";
@@ -1243,6 +1278,18 @@ function validateCritique(
   }
   let { proposal, ref } = validatedProposal(raw, tileId, packet);
   const priorDiag = proposal.diag;
+  if (proposal.kind === "edit-layout" && asksToRepositionControl(raw, validatedRefs, packet)) {
+    proposal = { kind: "manual", mode: "guidance_only" };
+    if (process.env.RE_API_DIVERSITY_DEBUG) {
+      proposal.diag = {
+        ...(priorDiag as object),
+        final: "manual",
+        demoted: true,
+        reason: "control-placement-is-not-a-tile-layout-operation",
+      };
+    }
+    ref = {};
+  }
   // A tentative DIAGNOSIS (inferred / weaker grounding) no longer forces its FIX
   // to guidance. Executability is orthogonal to diagnostic confidence: the
   // proposal already passed the same real-field, sanitize, compile, and rollback

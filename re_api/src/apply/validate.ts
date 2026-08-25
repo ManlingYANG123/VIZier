@@ -80,6 +80,42 @@ function geometryErrors(board: BoardMeta): string[] {
   return errors;
 }
 
+/** Reject a newly proposed hierarchy when it achieves emphasis by making
+ * sibling charts unreadable or by turning one tile into a near-full-canvas
+ * billboard. These are relative checks, so pre-existing compact dashboards and
+ * ordinary hierarchy changes are not penalized. */
+function layoutReadabilityErrors(originalBoard: BoardMeta, nextBoard: BoardMeta): string[] {
+  const errors: string[] = [];
+  const originals = new Map(
+    (originalBoard.tiles || [])
+      .filter((tile): tile is BoardTileMeta & { bounds: Bounds } => Boolean(tile.bounds))
+      .map((tile) => [tile.id, tile.bounds]),
+  );
+  for (const tile of nextBoard.tiles || []) {
+    const before = originals.get(tile.id);
+    const after = tile.bounds;
+    if (!before || !after || before.w <= 0 || before.h <= 0 || after.w <= 0 || after.h <= 0) continue;
+    const unchanged = before.x === after.x && before.y === after.y && before.w === after.w && before.h === after.h;
+    if (unchanged) continue;
+    if (after.w < before.w * 0.5 || after.h < before.h * 0.5) {
+      errors.push(`tile ${tile.id} is compressed below half its readable dimension`);
+      continue;
+    }
+    const areaGrowth = (after.w * after.h) / (before.w * before.h);
+    if (areaGrowth > 3) {
+      errors.push(`tile ${tile.id} expands disproportionately relative to the original layout`);
+      continue;
+    }
+    const beforeAspect = before.w / before.h;
+    const afterAspect = after.w / after.h;
+    const aspectChange = Math.max(beforeAspect / afterAspect, afterAspect / beforeAspect);
+    if (aspectChange > 2.25) {
+      errors.push(`tile ${tile.id} changes aspect ratio enough to compromise chart readability`);
+    }
+  }
+  return errors;
+}
+
 function fontSizes(value: unknown, key = "", out: number[] = []): number[] {
   if (typeof value === "number" && /fontSize$/i.test(key) && Number.isFinite(value)) {
     out.push(value);
@@ -133,6 +169,7 @@ export function validateAppliedDashboard(
   }
   const baselineGeometry = new Set(geometryErrors(originalBoard));
   errors.push(...geometryErrors(nextBoard).filter((error) => !baselineGeometry.has(error)));
+  errors.push(...layoutReadabilityErrors(originalBoard, nextBoard));
   const baselineType = typographySeverity(originalBoard, originalSpecs);
   const nextType = typographySeverity(nextBoard, nextSpecs);
   if (nextType > 1.05 && nextType > baselineType + 0.05) {

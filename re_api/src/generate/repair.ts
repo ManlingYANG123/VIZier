@@ -19,7 +19,7 @@ import type { Critique, Dimension, Finding, SpecMap } from "../contracts.ts";
 import type { LLMClient } from "../llm/client.ts";
 import type { EvidencePacket } from "./evidence.ts";
 import { applyProposals } from "../apply/index.ts";
-import { validatedProposal } from "./discover.ts";
+import { asksToRepositionControl, validatedProposal } from "./discover.ts";
 
 /** Only process advice is inherently non-artifact. An uncatalogued (`other`)
  * component critique may be repaired when it is tied to real dashboard evidence. */
@@ -63,7 +63,7 @@ Choose the proposal kind that implements the suggestion:
 - edit-spec — the general route for any change to ONE tile's Vega-Lite spec (sort, axis title/format, label angle, chart title, color scheme, legend placement, scale domain, mark options, spec-internal layout). Set target.ref.tile to that tile id and give proposal.edits: an array of {"op":"set"|"remove","path":[...],"value":<present only for set>}. The path addresses into that tile's spec exactly. Only reference fields that ALREADY exist; never add data, datasets, inline values, params, usermeta, or root width/height/autosize (tile size comes from edit-layout).
 - add-tooltip — add tooltips to a tile. Set target.ref.tile.
 - add-cross-filter — wire a selection from a source tile to targets on a shared field. Set target.ref.source, target.ref.targets (array), target.ref.field.
-- edit-layout — move/resize dashboard tiles (a board-level layout change: tile position/size lives on the board, NOT in any spec). Give proposal.layout: an array of {"tile":<tile id>,"bounds":{"x":<num>,"y":<num>,"w":<num>,"h":<num>}} in canvas pixels. Only list the tiles whose box changes; keep boxes on-canvas, non-overlapping, and at least 80×80. Never reduce a tile's current width or height; reflow or enlarge instead so axes, legends, and text cannot be clipped.
+- edit-layout — move/resize dashboard tiles (a board-level layout change: tile position/size lives on the board, NOT in any spec). Give proposal.layout: an array of {"tile":<tile id>,"bounds":{"x":<num>,"y":<num>,"w":<num>,"h":<num>}} in canvas pixels. Only list the tiles whose box changes; keep boxes on-canvas, non-overlapping, and at least 80×80. Never reduce a tile's current width or height; reflow or enlarge instead so axes, legends, and text cannot be clipped. This operation cannot move filters or controls; omit a repair whose suggestion is to relocate one.
 - add-kpis — add a summary KPI row to the board. Optionally give proposal.kpis: an array of {"label":<short label>,"tile":<tile id whose data backs it>,"field":<field name>,"agg":"count"|"sum"|"avg"|"min"|"max"|"distinct","filter":<optional {"field":<real category field>,"value":<exact real row value>}>,"highlight":<optional true>,"unit":<optional "%"|"d">}. Choose proposal.kpiStyle as "editorial", "product", "compact", or "technical" to fit the dashboard's existing typography and density rather than defaulting to one look. The engine computes each value from that tile's real data — never state a number yourself. A category-specific KPI must include its exact category filter. Omit proposal.kpis only if you cannot name real fields.
 - wire-filter-control — repair an existing visible board filter with proposal.filterId set to its exact id.
 - dashboard-title — set a descriptive dashboard title. Give proposal.label (required) and optionally proposal.subtitle.
@@ -131,7 +131,12 @@ export async function repairGuidanceToExecutable(
   const repairable: RepairCandidate[] = [];
   candidates.forEach((value, index) => {
     if (repairable.length >= MAX_REPAIRS) return;
-    if (isRepairable(value)) {
+    const controlPlacement = asksToRepositionControl(
+      value.critique as unknown as Record<string, unknown>,
+      value.critique.evidenceRefs || [],
+      packet,
+    );
+    if (isRepairable(value) && !controlPlacement) {
       repairable.push({ index, critique: value.critique, finding: value.finding, tileId: value.critique.tileId });
     }
   });
