@@ -2555,7 +2555,6 @@ function renderVersions() {
           <p>${comparisonInstruction}</p>
         </div>
         ${validated ? "" : `<span class="revision-validation warning">Review Needed</span>`}
-        ${afterVersion.afterSnapshot ? `<button type="button" class="save-checkpoint-button" id="restoreCheckpointButton">Restore this checkpoint</button>` : ""}
       </div>
       <div class="revision-visual-comparison" id="revisionVisualComparison"></div>
       ${afterVersion.kind === "revision" ? `
@@ -2568,9 +2567,6 @@ function renderVersions() {
             </button>`).join("")}
         </div>` : ""}`;
     renderRevisionSnapshotComparison(beforeVersion, afterVersion);
-    detail.querySelector("#restoreCheckpointButton")?.addEventListener("click", () => {
-      void restoreDashboardCheckpoint(afterVersion);
-    });
   }
 
   els.versionList.querySelectorAll("[data-version-id]").forEach((button) => {
@@ -5853,29 +5849,6 @@ async function refreshAfterDashboardMutation() {
   renderVersions();
   renderWorkingDraftStatus();
   await renderInspector();
-}
-
-async function restoreDashboardCheckpoint(checkpoint) {
-  if (!checkpoint?.afterSnapshot) return;
-  const beforeVersion = Number(state.version) || 1;
-  if (state.workingDraft.dirty && !window.confirm(
-    "Restore this checkpoint? Unsaved Working Draft changes will be discarded.",
-  )) return;
-  applyLiveSnapshot(checkpoint.afterSnapshot);
-  const afterVersion = beforeVersion + 1;
-  state.version = afterVersion;
-  state.workingDraft = createWorkingDraft(checkpoint.id);
-  recordStudyAction("dashboard_state_restored", `Restored Checkpoint ${checkpoint.id}`, {
-    source: "checkpoint",
-    checkpointId: checkpoint.id,
-    beforeVersion,
-    afterVersion,
-  });
-  await refreshAfterDashboardMutation();
-  emitPracticeAction("checkpoint:restored", {
-    checkpointId: checkpoint.id,
-    dashboardVersion: afterVersion,
-  });
 }
 
 async function applyRecommendationSelection(selectedIds, conflictChoices = {}, { via, applyId: existingApplyId, skipRequest = false } = {}) {

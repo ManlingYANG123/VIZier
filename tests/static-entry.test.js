@@ -9,6 +9,14 @@ test("Vite entry does not contain an unevaluated server-side cache token", async
   assert.match(html, /<script type="module" src="\/src\/bootstrap\.js"><\/script>/);
 });
 
+test("checkpoint details remain comparison-only without a restore action", async () => {
+  const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
+
+  assert.doesNotMatch(source, /Restore this checkpoint/);
+  assert.doesNotMatch(source, /restoreCheckpointButton/);
+  assert.doesNotMatch(source, /restoreDashboardCheckpoint/);
+});
+
 test("frontend sends review scope instead of context-dependent generation modes", async () => {
   const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
 
