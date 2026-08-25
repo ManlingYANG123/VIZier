@@ -119,6 +119,7 @@ import {
   isDecidedCritique,
   mergeAskResults,
   pickCritiqueRefreshReplacement,
+  solutionRefinementAlignment,
   solutionAttemptChanged,
 } from "./critique-merge.js";
 import {
@@ -456,6 +457,7 @@ const state = {
   nextRationaleId: 1,
   rationaleEditId: null,
   rationaleIntent: "save",
+  refinementRequestToken: 0,
   interactionJournal: [],
   nextInteractionEventId: 1,
   preferenceAgent: {
@@ -4353,14 +4355,20 @@ function openRationaleModal(critique, rationale = null, anchor = null, { intent 
   });
 }
 
-function closeContextModal() {
+function closeContextModal({ cancelPending = true } = {}) {
   const modal = document.getElementById("contextModal");
+  const input = document.getElementById("contextInput");
+  if (cancelPending && state.rationaleIntent === "refine-solution" && input.disabled) {
+    // The engine request may still finish, but its token becomes stale so the
+    // late response cannot replace the critique after the author closes here.
+    state.refinementRequestToken += 1;
+  }
   modal.hidden = true;
   modal.style.removeProperty("left");
   modal.style.removeProperty("top");
   modal.removeAttribute("aria-label");
   document.getElementById("contextInjectForm").reset();
-  document.getElementById("contextInput").disabled = false;
+  input.disabled = false;
   document.getElementById("saveRationaleButton").disabled = false;
   document.getElementById("rationaleHint").hidden = true;
   document.getElementById("rationaleError").hidden = true;
@@ -7766,7 +7774,10 @@ function readReviewStrengths(resp, reviewScope) {
   }));
 }
 
-async function regenerateOneCritique(critique, { refinementRationale = "" } = {}) {
+async function regenerateOneCritique(critique, {
+  refinementRationale = "",
+  isCancelled = () => false,
+} = {}) {
   if (!critique) return "error";
   const isSolutionRefinement = Boolean(refinementRationale.trim());
   const targetId = critique.id;
@@ -7787,10 +7798,11 @@ async function regenerateOneCritique(critique, { refinementRationale = "" } = {}
     }),
   );
   try {
-    const { critiques: incoming, answer } = await generateCritiquesFromEngine(
-      isSolutionRefinement
-        ? critiqueSolutionRefinementRequest(critique, refinementRationale)
-        : critiqueRefreshRequest(critique),
+    const refinementRequest = isSolutionRefinement
+      ? critiqueSolutionRefinementRequest(critique, refinementRationale)
+      : "";
+    let { critiques: incoming, answer } = await generateCritiquesFromEngine(
+      isSolutionRefinement ? refinementRequest : critiqueRefreshRequest(critique),
       {
         persistReviewMeta: false,
         traceTitle: isSolutionRefinement
@@ -7798,9 +7810,39 @@ async function regenerateOneCritique(critique, { refinementRationale = "" } = {}
           : "Refreshing this critique for the current dashboard",
       },
     );
-    const replacement = pickCritiqueRefreshReplacement(critique, incoming, answer);
+    if (isCancelled()) return "cancelled";
+    let replacement = pickCritiqueRefreshReplacement(critique, incoming, answer);
+    let alignment = isSolutionRefinement && replacement
+      ? solutionRefinementAlignment(critique, replacement, refinementRationale)
+      : { aligned: true, reason: "" };
+    const firstAttemptIsOtherwiseUsable = Boolean(
+      isSolutionRefinement
+      && replacement
+      && critiqueIsExecutable(replacement)
+      && solutionAttemptChanged(critique, replacement),
+    );
+    if (firstAttemptIsOtherwiseUsable && !alignment.aligned) {
+      // Give the engine one automatic repair attempt with the failed acceptance
+      // check spelled out. The client still validates the second result before
+      // it is allowed to replace anything visible.
+      ({ critiques: incoming, answer } = await generateCritiquesFromEngine(
+        `${refinementRequest}\n\nThe previous candidate failed this acceptance check: ${alignment.reason} Return a corrected candidate that passes it.`,
+        {
+          persistReviewMeta: false,
+          traceTitle: "Aligning the new solution with your direction",
+        },
+      ));
+      if (isCancelled()) return "cancelled";
+      replacement = pickCritiqueRefreshReplacement(critique, incoming, answer);
+      alignment = replacement
+        ? solutionRefinementAlignment(critique, replacement, refinementRationale)
+        : { aligned: true, reason: "" };
+    }
     const usableReplacement = isSolutionRefinement
-      ? replacement && critiqueIsExecutable(replacement) && solutionAttemptChanged(critique, replacement)
+      ? replacement
+        && critiqueIsExecutable(replacement)
+        && solutionAttemptChanged(critique, replacement)
+        && alignment.aligned
       : replacement;
     if (usableReplacement) {
       const refreshed = isSolutionRefinement
@@ -7854,7 +7896,9 @@ async function regenerateOneCritique(critique, { refinementRationale = "" } = {}
       return "updated";
     }
     if (isSolutionRefinement) {
-      const message = answer || "VIZier did not return a different executable solution. Adjust your direction and try again.";
+      const message = !alignment.aligned
+        ? `${alignment.reason} VIZier kept the current solution unchanged.`
+        : answer || "VIZier did not return a different executable solution. Adjust your direction and try again.";
       tracePanel.fail(message);
       recordStudyAction("critique_request_failed", "Solution refinement did not produce an executable alternative", {
         requestId,
@@ -7864,7 +7908,7 @@ async function regenerateOneCritique(critique, { refinementRationale = "" } = {}
         latencyMs: Date.now() - requestStartedAt,
         reason: message,
       });
-      return "error";
+      return { status: "error", message };
     }
     const retired = {
       ...state.critiques[index],
@@ -7901,6 +7945,7 @@ async function regenerateOneCritique(critique, { refinementRationale = "" } = {}
     await renderInspector();
     return "retired";
   } catch (err) {
+    if (isCancelled()) return "cancelled";
     const message = err instanceof Error ? err.message : String(err);
     tracePanel.fail(`${isSolutionRefinement ? "Could not generate another solution" : "Could not refresh this critique"} — ${message}`);
     showFocusApplyFailure(message);
@@ -8367,6 +8412,7 @@ async function resetDemo() {
   state.nextRationaleId = 1;
   state.rationaleEditId = null;
   state.rationaleIntent = "save";
+  state.refinementRequestToken += 1;
   resetInteractionMemory();
   state.previewCache.clear();
   state.canvasPreview = null;
@@ -9143,7 +9189,6 @@ document.addEventListener("keydown", (event) => {
     const returnTarget = contextModal.dataset.intent === "refine-solution"
       ? "focusRefineSolution"
       : "focusAddContext";
-    if (document.getElementById("contextInput")?.disabled) return;
     closeContextModal();
     document.getElementById(returnTarget)?.focus();
     return;
@@ -9175,7 +9220,6 @@ document.getElementById("closeContextModal").addEventListener("click", () => {
 document.addEventListener("pointerdown", (event) => {
   const modal = document.getElementById("contextModal");
   if (!modal || modal.hidden || modal.contains(event.target)) return;
-  if (document.getElementById("contextInput")?.disabled) return;
   if (event.target.closest("#focusAddContext, #focusRefineSolution, #focusEditRationale, [data-rationale-edit]")) return;
   closeContextModal();
 });
@@ -9236,18 +9280,22 @@ document.getElementById("contextInjectForm").addEventListener("submit", async (e
   if (rationaleIntent === "refine-solution" && critique && critiqueIsExecutable(critique)) {
     const input = document.getElementById("contextInput");
     const submit = document.getElementById("saveRationaleButton");
-    const close = document.getElementById("closeContextModal");
+    const hint = document.getElementById("rationaleHint");
     const error = document.getElementById("rationaleError");
+    const requestToken = ++state.refinementRequestToken;
     input.disabled = true;
-    close.disabled = true;
     submit.disabled = true;
     submit.textContent = "Generating Another Fix…";
+    hint.textContent = "Generating a new solution from your direction. You can close this window to cancel this attempt.";
     error.hidden = true;
     renderFixedContextPanel();
-    const outcome = await regenerateOneCritique(critique, { refinementRationale: text });
-    close.disabled = false;
+    const outcome = await regenerateOneCritique(critique, {
+      refinementRationale: text,
+      isCancelled: () => requestToken !== state.refinementRequestToken,
+    });
+    if (requestToken !== state.refinementRequestToken || outcome === "cancelled") return;
     if (outcome === "updated") {
-      closeContextModal();
+      closeContextModal({ cancelPending: false });
       document.getElementById("focusRefineSolution")?.focus();
       return;
     }
@@ -9257,7 +9305,10 @@ document.getElementById("contextInjectForm").addEventListener("submit", async (e
     input.disabled = false;
     submit.disabled = false;
     submit.textContent = "Try Again";
-    error.textContent = "VIZier could not generate a different executable solution. Adjust your direction and try again.";
+    hint.textContent = "The identified issue stays fixed. Edit your direction, then try another solution.";
+    error.textContent = typeof outcome === "object" && outcome?.message
+      ? outcome.message
+      : "VIZier could not generate a different executable solution. Adjust your direction and try again.";
     error.hidden = false;
     input.focus();
     return;
@@ -11055,6 +11106,7 @@ async function loadJsonDashboard(data, fileName = "dashboard.json", { skipContex
   state.nextRationaleId = 1;
   state.rationaleEditId = null;
   state.rationaleIntent = "save";
+  state.refinementRequestToken += 1;
   // A loaded dashboard can ship with cross-filter already wired (a tile stamped
   // usermeta.crossFilter.role === "source"). Enable the runtime on load so the
   // baked-in "click a source mark → filter the related tiles" behavior is live

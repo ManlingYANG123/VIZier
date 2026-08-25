@@ -17,10 +17,22 @@ test("fixable critiques offer accept, rationale-required refinement, and issue r
   assert.match(source, /Generate Another Fix/);
   assert.match(source, /refiningSolution && !ta\.value\.trim\(\)/);
   assert.match(source, /critiqueSolutionRefinementRequest\(critique, refinementRationale\)/);
+  assert.match(source, /solutionRefinementAlignment\(critique, replacement, refinementRationale\)/);
   assert.match(source, /state\.batchReviewedIds instanceof Set/);
   assert.match(source, /if \(refreshCombinedPreview\) await refreshBatchPreview\(\)/);
   assert.match(styles, /\.focus-actions:has\(#focusRefineSolution\)\s*\{\s*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
   assert.match(styles, /\.focus-action\.refine/);
+});
+
+test("solution generation can be closed and ignores a late response", async () => {
+  const source = await readApp();
+
+  assert.doesNotMatch(source, /close\.disabled = true/);
+  assert.doesNotMatch(source, /contextInput"\)\?\.disabled\) return/);
+  assert.match(source, /const requestToken = \+\+state\.refinementRequestToken/);
+  assert.match(source, /isCancelled: \(\) => requestToken !== state\.refinementRequestToken/);
+  assert.match(source, /if \(isCancelled\(\)\) return "cancelled"/);
+  assert.match(source, /close this window to cancel this attempt/);
 });
 
 test("guidance critiques keep their existing decision and rationale actions without solution refinement", async () => {

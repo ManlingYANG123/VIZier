@@ -11,6 +11,8 @@ import {
   isDecidedCritique,
   mergeAskResults,
   pickCritiqueRefreshReplacement,
+  refinementDirectionRequiresShorterText,
+  solutionRefinementAlignment,
   solutionAttemptChanged,
 } from "../src/critique-merge.js";
 
@@ -406,6 +408,63 @@ test("solution refinement keeps the diagnosis fixed and asks for one executable 
     suggestion: previous.suggestion,
     proposal: structuredClone(previous.proposal),
   }), false);
+});
+
+test("shorter-text refinement becomes a prompt constraint and a client acceptance check", () => {
+  const previous = critique({
+    suggestion: "Replace the current heading with a concise statement of the dashboard's main takeaway.",
+    proposal: {
+      kind: "dashboard-title",
+      label: "Britain's favourite garden birds remain common, but several familiar species have declined sharply",
+    },
+  });
+  assert.equal(refinementDirectionRequiresShorterText("the text is too long"), true);
+  assert.equal(refinementDirectionRequiresShorterText("文本太长，请精简"), true);
+  assert.match(
+    critiqueSolutionRefinementRequest(previous, "the text is too long"),
+    /HARD ACCEPTANCE CONSTRAINT[\s\S]*at least 20% shorter/,
+  );
+
+  const stillLong = solutionRefinementAlignment(previous, {
+    suggestion: "Replace the current heading with another concise statement of the dashboard's main takeaway.",
+    proposal: {
+      kind: "dashboard-title",
+      label: "Britain's garden birds remain common, though several familiar species have declined sharply",
+    },
+  }, "the text is too long");
+  assert.equal(stillLong.aligned, false);
+  assert.match(stillLong.reason, /not materially shorter/i);
+
+  const dodgesTextChange = solutionRefinementAlignment(previous, {
+    suggestion: "Shorten the heading to its core takeaway.",
+    proposal: { kind: "edit-layout", composition: "hero-left" },
+  }, "the text is too long");
+  assert.equal(dodgesTextChange.aligned, false);
+  assert.match(dodgesTextChange.reason, /did not provide.*shorter replacement text/i);
+
+  const shorter = solutionRefinementAlignment(previous, {
+    suggestion: "Shorten the heading to its core conservation takeaway.",
+    proposal: { kind: "dashboard-title", label: "Britain's garden birds are declining" },
+  }, "the text is too long");
+  assert.deepEqual(shorter, { aligned: true, reason: "" });
+});
+
+test("shorter-text validation checks concrete text inside edit-spec proposals", () => {
+  const previous = critique({
+    suggestion: "Use a shorter axis title that keeps the measure clear for readers.",
+    proposal: {
+      kind: "edit-spec",
+      edits: [{ op: "set", path: ["encoding", "x", "axis", "title"], value: "Average number of birds observed per garden" }],
+    },
+  });
+  const result = solutionRefinementAlignment(previous, {
+    suggestion: "Shorten the axis title for faster scanning.",
+    proposal: {
+      kind: "edit-spec",
+      edits: [{ op: "set", path: ["encoding", "x", "axis", "title"], value: "Average birds observed per garden" }],
+    },
+  }, "the axis text is too long");
+  assert.equal(result.aligned, true);
 });
 
 test("pickCritiqueRefreshReplacement keeps the matching issue and ignores extras", () => {

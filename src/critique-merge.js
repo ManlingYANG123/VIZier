@@ -177,6 +177,85 @@ export function groupCritiquesByAsk(critiques) {
 }
 
 const NOT_APPLICABLE_PATTERN = /no material issue|no longer (present|applicable|needed|relevant)|not (present|applicable) (any more|anymore|any longer)|issue (is |has been )?(gone|resolved|fixed|addressed)|keep the current treatment/i;
+const SHORTER_TEXT_PATTERN = /\b(?:text|copy|title|label|wording)?\s*(?:is|are|feels?|seems?)?\s*too\s+(?:long|wordy|verbose)\b|\b(?:shorter|shorten|concise|condense|trim|less\s+text|reduce\s+(?:the\s+)?(?:text|copy|wording))\b|(?:文字|文本|标题|文案).*(?:太长|过长)|(?:缩短|精简|简短)/iu;
+const AUTHORED_TEXT_KEY_PATTERN = /^(?:label|title|subtitle|text|copy|caption|description)$/i;
+
+function normalizedTextLength(value) {
+  return Array.from(String(value || "").replace(/\s+/g, " ").trim()).length;
+}
+
+function materiallyShorter(before, after) {
+  const beforeLength = normalizedTextLength(before);
+  const afterLength = normalizedTextLength(after);
+  if (!beforeLength || !afterLength) return false;
+  const requiredReduction = Math.max(1, Math.ceil(beforeLength * 0.2));
+  return afterLength <= beforeLength - requiredReduction;
+}
+
+function proposalTextValues(proposal) {
+  const values = [];
+  const visit = (value, key = "") => {
+    if (typeof value === "string") {
+      if (AUTHORED_TEXT_KEY_PATTERN.test(key) && value.trim()) values.push(value.trim());
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      value.forEach((item) => visit(item, key));
+      return;
+    }
+    if (
+      Array.isArray(value.path)
+      && typeof value.value === "string"
+      && AUTHORED_TEXT_KEY_PATTERN.test(String(value.path.at(-1) || ""))
+      && value.value.trim()
+    ) values.push(value.value.trim());
+    Object.entries(value).forEach(([childKey, child]) => {
+      if (childKey === "value" && Array.isArray(value.path)) return;
+      visit(child, childKey);
+    });
+  };
+  visit(proposal);
+  return values;
+}
+
+export function refinementDirectionRequiresShorterText(rationale) {
+  return SHORTER_TEXT_PATTERN.test(String(rationale || "").trim());
+}
+
+/** Validate user-authored refinement constraints before replacing the visible fix. */
+export function solutionRefinementAlignment(previous, replacement, rationale) {
+  if (!refinementDirectionRequiresShorterText(rationale)) {
+    return { aligned: true, reason: "" };
+  }
+  const previousSuggestion = String(previous?.suggestion || "").trim();
+  const nextSuggestion = String(replacement?.suggestion || "").trim();
+  if (!materiallyShorter(previousSuggestion, nextSuggestion)) {
+    return {
+      aligned: false,
+      reason: "The regenerated recommendation was not materially shorter than the current one.",
+    };
+  }
+  const previousProposalText = proposalTextValues(previous?.proposal).join(" ");
+  const nextProposalText = proposalTextValues(replacement?.proposal).join(" ");
+  if (previousProposalText && !nextProposalText) {
+    return {
+      aligned: false,
+      reason: "The regenerated solution did not provide the requested shorter replacement text.",
+    };
+  }
+  if (
+    previousProposalText
+    && nextProposalText
+    && !materiallyShorter(previousProposalText, nextProposalText)
+  ) {
+    return {
+      aligned: false,
+      reason: "The proposed replacement text was not materially shorter than the current proposal.",
+    };
+  }
+  return { aligned: true, reason: "" };
+}
 
 /** Prompt that asks the engine to refresh one stale recommendation, not the whole board. */
 export function critiqueRefreshRequest(critique) {
@@ -203,11 +282,19 @@ export function critiqueSolutionRefinementRequest(critique, rationale) {
     || critique?.target?.ref?.tile
     || critique?.target?.ref?.source
     || "the dashboard";
+  const shorterTextConstraint = refinementDirectionRequiresShorterText(rationale)
+    ? [
+        "HARD ACCEPTANCE CONSTRAINT: Make the recommendation wording and every proposed replacement text at least 20% shorter than the previous attempt.",
+        "Use direct, compact language. A different but similarly long sentence does not satisfy the request.",
+      ]
+    : [];
   return [
     "Generate an ALTERNATIVE SOLUTION for this ONE previously identified issue.",
     "The author accepts the diagnosis. Keep the issue, evidence, target, and scope fixed.",
     "Do not start a full review, introduce a substitute issue, or repeat the previous solution unchanged.",
+    "Treat the author's refinement direction as a hard acceptance constraint, not optional context.",
     "Return exactly one concrete executable recommendation that follows the author's refinement direction.",
+    ...shorterTextConstraint,
     `Issue title: ${critique?.title || ""}`,
     `Target: ${target}`,
     critique?.issue ? `Accepted problem: ${critique.issue}` : "",
