@@ -133,6 +133,7 @@ import {
 import { createPracticeTutorial } from "./practice-tutorial.js";
 
 const DEFAULT_FEEDBACK_SCOPE = [...CATEGORY_ORDER];
+const REVIEW_TEMPERATURE = 0.4;
 
 // Clear any stale localStorage/sessionStorage on load to prevent state conflicts
 try {
@@ -493,11 +494,8 @@ const state = {
   // resolution when the selection changes faster than the engine responds.
   batchPreviewToken: 0,
   reviewScope: "full",
-  // Author-set model temperature for the next review, on the model's 0–1 scale
-  // (0 = focused sanity check, higher = more divergent exploration). The slider
-  // shows this number directly and sends it verbatim; the engine clamps it. 0.4
-  // is the engine default, so an untouched control changes nothing.
-  reviewTemperature: 0.4,
+  // Every review uses one fixed, moderately exploratory model temperature.
+  reviewTemperature: REVIEW_TEMPERATURE,
   // After a single-critique refresh finds the issue gone: keep the focus card
   // open with a confirmation, then return to the main list on Back to Critiques.
   critiqueRefreshNotice: null,
@@ -507,13 +505,11 @@ let preferenceAgentTimer = null;
 let contextHintTimer = null;
 let contextHintIndex = 0;
 
-// Guided Practice uses frozen review/apply responses while the tutorial is
-// visible so the lesson stays fast and repeatable. Pausing the tutorial enters
-// free exploration: the same workspace then routes Ask and Apply to the live
-// engine, just like normal use and the Dashboard Task.
+// Practice opens directly into free exploration. Prepared material and Context
+// remain available, while every Ask and Apply uses the live engine.
 const practiceRuntime = {
   active: false,
-  tutorialMode: true,
+  tutorialMode: false,
   materialCode: null,
   preset: null,
   tutorial: null,
@@ -531,8 +527,8 @@ function practiceUsesPreset() {
 function practiceStudyFields() {
   return practiceIsActive()
     ? {
-        executionMode: practiceUsesPreset() ? "practice-preset" : "live-engine",
-        practiceMode: practiceRuntime.tutorialMode ? "tutorial" : "free-explore",
+        executionMode: "live-engine",
+        practiceMode: "free-explore",
         practicePresetVersion: PRACTICE_PRESET_VERSION,
         practiceMaterialCode: practiceRuntime.materialCode,
       }
@@ -749,29 +745,6 @@ document.querySelector("#app").innerHTML = `
           <div class="critique-history-list" id="critiqueHistoryList" role="group" aria-label="Critique History List"></div>
         </div>
         <div class="generate-row">
-          <div class="temp-slider" id="reviewTempControl">
-            <div class="temp-slider-head">
-              <span class="temp-slider-label" id="reviewTemperatureLabel">Exploration</span>
-              <output class="temp-slider-value" id="reviewTemperatureValue" for="reviewTemperature">0.4</output>
-              <button
-                class="inline-help"
-                type="button"
-                data-help="How widely the model explores when drafting the next review. Lower keeps it focused and conservative, giving steadier, more repeatable results that stay on the most obvious issues. Higher lets it range further and surface less obvious possibilities. Different design stages want different settings."
-                aria-label="About exploration. Lower keeps the review focused and conservative. Higher lets it range further and surface less obvious possibilities."
-              >i</button>
-            </div>
-            <input
-              class="temp-slider-input"
-              id="reviewTemperature"
-              type="range"
-              min="0"
-              max="1"
-              step="0.1"
-              value="0.4"
-              aria-label="Exploration (0 = focused, 1 = divergent)"
-              aria-describedby="reviewTemperatureLabel"
-            />
-          </div>
           <button class="panel-ai-action critique-generate-button" id="aiAssistButton" type="button" aria-label="Confirm context before generating critiques" disabled>
             <span class="ai-action-title">Confirm Context First</span>
             ${CRITIQUE_AI_ICON}
@@ -779,7 +752,7 @@ document.querySelector("#app").innerHTML = `
           </button>
         </div>
         <!-- Engine activity streams here while a review runs, directly below the
-             exploration control and generate button, then clears itself. During
+             generate button, then clears itself. During
              the single-critique Apply flow the list view is hidden, so the
              module falls back to the panel top (see traceHost() in api-client). -->
         <div class="engine-trace-host" id="reApiTraceHost"></div>
@@ -1084,13 +1057,6 @@ function syncReviewReadiness() {
     const request = (focusedInput?.value || "").replace(/\s+/g, " ").trim();
     focusedSend.disabled = running || request.length < 3 || !ready;
   }
-  // Lock the exploration slider while a review is generating — the temperature
-  // is read at request time, so changing it mid-run would misrepresent what the
-  // in-flight critiques were drafted with.
-  const tempControl = document.getElementById("reviewTempControl");
-  const tempInput = document.getElementById("reviewTemperature");
-  if (tempInput) tempInput.disabled = running;
-  if (tempControl) tempControl.classList.toggle("locked", running);
   if (!ready && !running) actionTitle.textContent = docProcessing ? "Reading Document…" : "Confirm Context First";
   if (ready && !running) {
     actionTitle.textContent = state.critiques.length ? "Regenerate Critiques" : "Generate Critiques";
@@ -1119,44 +1085,6 @@ function syncReviewReadiness() {
   els.localReviewButton.setAttribute("data-tooltip", ready
     ? "Drag a box on the dashboard to review just that area"
     : "Confirm context first to review an area");
-}
-
-// The review-temperature slider runs on the model's own 0–1 scale. The author
-// sets the number directly (the readout shows it); the engine only clamps it.
-// One decimal keeps the value in lockstep with the slider's 0.1 step.
-const REVIEW_TEMPERATURE_MIN = 0;
-const REVIEW_TEMPERATURE_MAX = 1;
-
-function formatReviewTemperature(value) {
-  return value.toFixed(1);
-}
-
-function renderReviewTemperature() {
-  const input = document.getElementById("reviewTemperature");
-  if (!input) return;
-  const value = state.reviewTemperature;
-  input.value = String(value);
-  // Drive the filled portion of the track from the current value so the native
-  // range input reads as a shadcn-style slider with a colored range.
-  const fraction = (value - REVIEW_TEMPERATURE_MIN) / (REVIEW_TEMPERATURE_MAX - REVIEW_TEMPERATURE_MIN);
-  input.style.setProperty("--temp-fill", `${Math.round(fraction * 100)}%`);
-  input.setAttribute("aria-valuetext", formatReviewTemperature(value));
-  const readout = document.getElementById("reviewTemperatureValue");
-  if (readout) readout.textContent = formatReviewTemperature(value);
-}
-
-function wireReviewTemperature() {
-  const input = document.getElementById("reviewTemperature");
-  if (!input) return;
-  input.addEventListener("input", () => {
-    const parsed = Number(input.value);
-    if (!Number.isFinite(parsed)) return;
-    state.reviewTemperature = Math.round(
-      Math.min(REVIEW_TEMPERATURE_MAX, Math.max(REVIEW_TEMPERATURE_MIN, parsed)) * 10,
-    ) / 10;
-    renderReviewTemperature();
-  });
-  renderReviewTemperature();
 }
 
 function workingDraftChangeCount() {
@@ -6804,7 +6732,11 @@ function renderCanvasPreviewControl() {
   const awaitingFocusSlot = Boolean(
     state.canvasPreview && !state.canvasPreview.batch && state.selectedCritiqueId)
     && !document.getElementById("focusCompareSlot");
-  control.hidden = !state.canvasPreview || awaitingFocusSlot;
+  const guidanceOnlyFocus = Boolean(
+    state.canvasPreview && !state.canvasPreview.batch && state.selectedCritiqueId
+    && state.canvasPreview.guidanceOnly,
+  );
+  control.hidden = !state.canvasPreview || awaitingFocusSlot || guidanceOnlyFocus;
   control.style.setProperty("--preview-accent", state.canvasPreview?.accent || COLORS.visual);
   const phase = state.canvasPreview?.phase || "before";
   const toggle = document.getElementById("canvasPreviewToggle");
@@ -6864,6 +6796,7 @@ function configureCanvasPreview(critique, descriptor) {
         phase: "after",
         result: usableLivePreview || fallbackResult,
         hasExecutableProposal: Boolean(usableLivePreview),
+        guidanceOnly: !critiqueIsExecutable(critique),
         interactionPreview,
         accent: critiqueGroupPresentation(critique.dimension).color,
       }
@@ -7123,8 +7056,8 @@ async function renderInspector() {
           </div>
         </details>` : ""}
       ${actionable ? `<section class="focus-canvas-evidence">
-        <h3>Compare on the Canvas</h3>
-        <div class="focus-compare-slot" id="focusCompareSlot"></div>
+        <h3>${critiqueIsExecutable(critique) ? "Compare on the Canvas" : "Affected area on the Canvas"}</h3>
+        ${critiqueIsExecutable(critique) ? '<div class="focus-compare-slot" id="focusCompareSlot"></div>' : ""}
         ${critiqueTileCount(critique) > 1 ? `<small>The preview shows one representative chart; the same fix applies to all ${critiqueTileCount(critique)} charts on Accept.</small>` : ""}
         ${canvasComparisonHint(descriptor)}
         ${runtimeEvidence ? `<small class="runtime-evidence">Last runtime observation · ${escapeHTML(runtimeEvidence)}</small>` : ""}
@@ -8840,7 +8773,6 @@ initializeRevisionDockResizing();
 initScopeTooltip();
 renderContextToolState();
 renderWorkingDraftStatus();
-wireReviewTemperature();
 requestAnimationFrame(fitCanvas);
 
 // ---------------------------------------------------------------------------
@@ -9228,7 +9160,7 @@ const STUDY_MATERIALS = [
 function disablePracticeRuntime() {
   practiceRuntime.tutorial?.destroy();
   practiceRuntime.active = false;
-  practiceRuntime.tutorialMode = true;
+  practiceRuntime.tutorialMode = false;
   practiceRuntime.materialCode = null;
   practiceRuntime.preset = null;
   practiceRuntime.tutorial = null;
@@ -9256,7 +9188,7 @@ function configurePracticePreset(material) {
   const preset = practicePresetForMaterial(material.code);
   if (!preset) throw new Error(`No guided-practice preset is configured for material ${material.code}.`);
   practiceRuntime.active = true;
-  practiceRuntime.tutorialMode = true;
+  practiceRuntime.tutorialMode = false;
   practiceRuntime.materialCode = material.code;
   practiceRuntime.preset = preset;
   practiceRuntime.tutorialState = null;
@@ -9664,9 +9596,7 @@ export async function restoreStudyRunnerWorkspaceState(snapshot) {
   state.nextInteractionEventId = Number(saved.nextInteractionEventId) || 1;
   state.reviewScope = saved.reviewScope || "full";
   state.reviewRequest = String(saved.reviewRequest || "");
-  state.reviewTemperature = Number.isFinite(Number(saved.reviewTemperature))
-    ? Number(saved.reviewTemperature)
-    : state.reviewTemperature;
+  state.reviewTemperature = REVIEW_TEMPERATURE;
   state.nextAskId = Number(saved.nextAskId) || 1;
   state.nextLocalReviewId = Number(saved.nextLocalReviewId) || 1;
   state.versions = Array.isArray(saved.versions) && saved.versions.length
@@ -9679,7 +9609,7 @@ export async function restoreStudyRunnerWorkspaceState(snapshot) {
   state.artifact.libraryId = saved.artifactLibraryId || state.artifact.libraryId;
   activeDesignDocId = saved.activeDesignDocId || "";
   practiceRuntime.tutorialState = clone(snapshot.tutorial || null);
-  practiceRuntime.tutorialMode = !snapshot.tutorial?.paused;
+  practiceRuntime.tutorialMode = false;
   state.previewCache.clear();
   state.canvasPreview = null;
   els.searchInput.value = state.search;

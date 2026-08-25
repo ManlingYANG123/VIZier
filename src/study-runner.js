@@ -1448,9 +1448,6 @@ async function mountVizierPhase() {
   startStageTimerTicker();
   wireStageTimerControl();
   wireStudyBackControl();
-  if (runnerState.phase === "training") {
-    await app.startGuidedPracticeTutorial(material.code);
-  }
   button.addEventListener("click", async () => {
     const isTask = isDashboardTaskPhase(runnerState.phase);
     const confirmed = window.confirm(isTask
@@ -1465,7 +1462,7 @@ async function mountVizierPhase() {
     if (timerOutput) timerOutput.textContent = formatStudyPhaseTimer(
       studyPhaseTimerElapsedMs(activePhaseTimer(), Date.parse(completedAt)),
     );
-    recordStudyAction(isTask ? "controlled_task_finished" : "training_finished", isTask ? "Finished controlled task" : "Finished guided practice", {
+    recordStudyAction(isTask ? "controlled_task_finished" : "training_finished", isTask ? "Finished controlled task" : "Finished practice exploration", {
       groupId: runnerGroup.id,
       materialCode: material.code,
     });

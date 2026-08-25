@@ -251,7 +251,7 @@ test("group study routes boot the neutral runner before VIZier", async () => {
   assert.match(styles, /\.design-doc-action-link:focus-visible/);
 });
 
-test("guided practice uses presets while the dashboard task keeps the live engine", async () => {
+test("practice opens directly in free exploration with the live engine", async () => {
   const app = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
   const runner = await readFile(new URL("../src/study-runner.js", import.meta.url), "utf8");
   const tutorial = await readFile(new URL("../src/practice-tutorial.js", import.meta.url), "utf8");
@@ -259,10 +259,11 @@ test("guided practice uses presets while the dashboard task keeps the live engin
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 
   assert.match(runner, /practice: runnerState\.phase === "training"/);
-  assert.match(runner, /if \(runnerState\.phase === "training"\) \{\s+await app\.startGuidedPracticeTutorial/);
+  assert.doesNotMatch(runner, /startGuidedPracticeTutorial/);
   assert.match(app, /if \(!practiceUsesPreset\(\)\) return streamApply/);
   assert.match(app, /practiceReviewResponse\(practiceRuntime\.preset/);
-  assert.match(app, /executionMode: practiceUsesPreset\(\) \? "practice-preset" : "live-engine"/);
+  assert.match(app, /executionMode: "live-engine"/);
+  assert.match(app, /practiceMode: "free-explore"/);
   assert.match(presets, /Should I change the layout\?/);
   assert.match(presets, /Is this title clear enough\?/);
   assert.match(tutorial, /const tutorialStepCount = milestones\.length \+ 1/);
@@ -323,7 +324,7 @@ test("guided practice uses presets while the dashboard task keeps the live engin
   assert.match(tutorial, /modeToggle\.addEventListener\("click", \(\) => setPaused\(!paused\)\)/);
   assert.match(app, /practice_tutorial_mode_changed/);
   assert.match(app, /practiceRuntime\.tutorialMode = mode === "tutorial"/);
-  assert.match(app, /practiceMode: practiceRuntime\.tutorialMode \? "tutorial" : "free-explore"/);
+  assert.match(app, /practiceMode: "free-explore"/);
   assert.match(app, /function practiceUsesPreset\(\)/);
   assert.match(app, /const resp = practiceUsesPreset\(\)/);
   assert.match(styles, /\.practice-guide-mode-toggle\[data-mode="explore"\]/);
@@ -385,6 +386,11 @@ test("guidance-only recommendations are marked as considered, not applied", asyn
   assert.match(source, /Guidance-only recommendations must be implemented manually/);
   assert.match(source, /"Review Area"/);
   assert.match(source, /"Focused Question"/);
+  // Guidance-only critiques from full, focused, and selected-area reviews share
+  // the same proposal gate, so none receives the Original/Proposed switch.
+  assert.match(source, /guidanceOnly: !critiqueIsExecutable\(critique\)/);
+  assert.match(source, /control\.hidden = !state\.canvasPreview \|\| awaitingFocusSlot \|\| guidanceOnlyFocus/);
+  assert.match(source, /critiqueIsExecutable\(critique\) \? '<div class="focus-compare-slot"/);
   const guidanceHandler = source.match(
     /if \(!canAcceptGuidance\) return;[\s\S]*?document\.getElementById\("guidanceAcceptedNotice"\)\?\.focus\(\);/,
   )?.[0] || "";
@@ -754,61 +760,17 @@ test("a board-layout change moves real tiles on the canvas", async () => {
   assert.match(engine, /writes: \["dashboard\.layout", "chart\.bounds"\]/);
 });
 
-test("the review-temperature slider sits inline with Generate, shows the number, and sends it", async () => {
+test("reviews use a fixed 0.4 temperature without exposing an exploration slider", async () => {
   const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 
-  // The slider and the Generate button share one row.
   assert.match(source, /class="generate-row"/);
-  assert.match(
-    source,
-    /class="generate-row">[\s\S]*id="reviewTemperature"[\s\S]*id="aiAssistButton"/,
-  );
-
-  // A continuous range input on the model's 0–1 scale, defaulting to moderate exploration.
-  assert.match(source, /id="reviewTemperature"\s+type="range"/);
-  assert.match(source, /min="0"\s*\n?\s*max="1"\s*\n?\s*step="0.1"\s*\n?\s*value="0.4"/);
-
-  // The value is shown to the author (not hidden) via a live readout.
-  assert.match(source, /id="reviewTemperatureValue"/);
-  assert.match(source, /readout\.textContent = formatReviewTemperature\(value\)/);
-
-  // A header row carries a short word-label at the top-left (without exposing
-  // the word "temperature") and the numeric readout at the top-right.
-  assert.match(
-    source,
-    /class="temp-slider-head">[\s\S]*class="temp-slider-label"[\s\S]*id="reviewTemperatureValue"/,
-  );
-  assert.match(source, /class="temp-slider-label"[^>]*>Exploration</);
-  const labelText = source.match(/class="temp-slider-label"[^>]*>([^<]*)</)?.[1] ?? "";
-  assert.ok(
-    !/temperature/i.test(labelText),
-    `the slider label must not use the word "temperature" (was "${labelText}")`,
-  );
-
-  // The state carries the number and BOTH generation requests (full + local)
-  // send it verbatim — count the send sites so dropping one is caught.
-  assert.match(source, /reviewTemperature: 0\.4/);
+  assert.match(source, /const REVIEW_TEMPERATURE = 0\.4/);
+  assert.match(source, /reviewTemperature: REVIEW_TEMPERATURE/);
   const sendSites = source.match(/reviewTemperature: state\.reviewTemperature/g) ?? [];
-  assert.equal(
-    sendSites.length,
-    2,
-    `expected both review requests to forward state.reviewTemperature (found ${sendSites.length})`,
-  );
-
-  // The slider is wired and its filled track is driven from the value.
-  assert.match(source, /function wireReviewTemperature\(\)/);
-  assert.match(source, /wireReviewTemperature\(\);/);
-  assert.match(source, /setProperty\("--temp-fill"/);
-
-  // Native range input dressed as a filled-track slider whose fill is read from
-  // the CSS variable (not merely mentioned in a comment).
-  assert.match(styles, /\.temp-slider-input::-webkit-slider-runnable-track/);
-  assert.match(styles, /var\(--temp-fill/);
-
-  // The filled track uses the system ink color, not the old accent blue.
-  assert.match(styles, /#2C2C2E/);
-  assert.doesNotMatch(styles, /#4c7ef3/i);
+  assert.equal(sendSites.length, 2);
+  assert.doesNotMatch(source, /id="reviewTemperature"|reviewTemperatureValue|wireReviewTemperature/);
+  assert.doesNotMatch(styles, /\.temp-slider/);
 });
 
 test("the active critique panel hides decided recommendations and moves them to a history popover", async () => {
