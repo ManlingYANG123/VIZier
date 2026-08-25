@@ -490,6 +490,13 @@ const state = {
   // an unresolved conflict blocks Apply until one of the pair is unchecked.
   batchMode: false,
   batchSelection: new Set(),
+  // Applying is permitted only when the exact current selection has produced a
+  // valid combined preview. A full review also records how many recommendations
+  // the automatic safe-subset pass had to leave out.
+  batchPreviewValidated: false,
+  batchPreviewFailure: null,
+  batchAutoSummary: null,
+  batchAutoPreviewToken: 0,
   // Monotonic token guarding the async combined preview against out-of-order
   // resolution when the selection changes faster than the engine responds.
   batchPreviewToken: 0,
@@ -781,7 +788,7 @@ document.querySelector("#app").innerHTML = `
               <button class="button ghost small" id="batchClearButton" type="button">Clear all</button>
               <button class="button primary small" id="batchApplyButton" type="button" disabled>
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7"/></svg>
-                <span>Apply selected</span>
+                <span>Apply previewed</span>
               </button>
             </div>
           </div>
@@ -5079,6 +5086,8 @@ function renderCritiques() {
       // Ineligible cards (guidance / already decided) are inert.
       if (state.batchMode) {
         if (!critiqueBatchEligible(critique)) return;
+        state.batchAutoPreviewToken += 1;
+        state.batchAutoSummary = null;
         if (state.batchSelection.has(critique.id)) state.batchSelection.delete(critique.id);
         else state.batchSelection.add(critique.id);
         renderCritiques();
@@ -5142,6 +5151,10 @@ function syncBatchToggle() {
 function resetBatchState() {
   state.batchMode = false;
   state.batchSelection = new Set();
+  state.batchPreviewValidated = false;
+  state.batchPreviewFailure = null;
+  state.batchAutoSummary = null;
+  state.batchAutoPreviewToken += 1;
   state.batchPreviewToken += 1; // invalidate any in-flight preview
   if (state.canvasPreview?.batch) state.canvasPreview = null;
   setBatchPreviewPending(false);
@@ -5166,6 +5179,10 @@ async function setBatchMode(on) {
   if (on) {
     state.batchMode = true;
     state.batchSelection = new Set();
+    state.batchPreviewValidated = false;
+    state.batchPreviewFailure = null;
+    state.batchAutoSummary = null;
+    state.batchAutoPreviewToken += 1;
     state.batchPreviewToken += 1; // invalidate any in-flight preview
     syncBatchToggle();
     renderCritiques();
@@ -5198,30 +5215,31 @@ function setBatchPreviewPending(pending) {
   if (el) el.hidden = !pending;
 }
 
-async function refreshBatchPreview() {
-  const token = ++state.batchPreviewToken;
-  const selectedIds = [...state.batchSelection];
+async function computeBatchPreview(selectedIds) {
   if (!selectedIds.length || !reviewResultsMatchContext() || !state.artifact.hasExecutableSpecs) {
-    setBatchPreviewPending(false);
-    await clearBatchPreview();
-    renderBatchApplyBar();
-    return;
+    return { ok: false, plan: null, result: null, reason: null };
   }
   const plan = buildApplicationPlan(selectedIds, state.critiques);
-  renderBatchApplyBar(plan);
-  // No previewable combined result when the plan can't apply (conflict/cycle) or
-  // a prerequisite is guidance-only — the same two gates the bar enforces. Clear
-  // any prior batch preview so the canvas doesn't show a merged result that no
-  // longer matches the selection; the bar carries the blocker message.
-  if (!plan.canApply || batchPlanGuidanceBlock(plan)) {
-    setBatchPreviewPending(false);
-    await clearBatchPreview();
-    return;
+  if (!plan.canApply) {
+    return {
+      ok: false,
+      plan,
+      result: null,
+      reason: plan.cyclic
+        ? "These suggestions depend on each other. Remove one and try again."
+        : "This selection contains conflicting suggestions. Remove one and try again.",
+    };
   }
-  setBatchPreviewPending(true);
-  let result = null;
+  if (batchPlanGuidanceBlock(plan)) {
+    return {
+      ok: false,
+      plan,
+      result: null,
+      reason: "A required suggestion is guidance-only and cannot join the canvas preview.",
+    };
+  }
   try {
-    result = await streamApplyForCurrentMode({
+    const result = await streamApplyForCurrentMode({
       version: state.version,
       context: reviewContextForEngine(),
       specMap: buildEngineSpecMap(),
@@ -5229,26 +5247,48 @@ async function refreshBatchPreview() {
       critiques: state.critiques,
       selectedRecommendationIds: plan.order,
     });
+    if (!result || result.rollback?.rolledBack) {
+      return {
+        ok: false,
+        plan,
+        result,
+        reason: result?.rollback?.reason || "The combined result did not pass the dashboard quality check.",
+      };
+    }
+    // The canvas must represent the exact checked set. The engine may safely
+    // isolate a bad edit, but silently previewing only part of a checked set
+    // would make the later Apply ambiguous, so partial success is not validated.
+    const appliedIds = new Set(result.applicationOrder || []);
+    const omitted = plan.requested.filter((id) => !appliedIds.has(id));
+    if (omitted.length || result.unresolvedConflicts?.length) {
+      return {
+        ok: false,
+        plan,
+        result,
+        reason: "One or more selected suggestions could not be safely combined.",
+      };
+    }
+    return { ok: true, plan, result, reason: null };
   } catch (error) {
     console.warn("[batch preview]", error);
-    if (token === state.batchPreviewToken) {
-      setBatchPreviewPending(false);
-      await failBatchPreview();
-    }
-    return;
+    return {
+      ok: false,
+      plan,
+      result: null,
+      reason: error instanceof Error ? error.message : String(error),
+    };
   }
-  if (token !== state.batchPreviewToken) return; // superseded by a newer selection
-  setBatchPreviewPending(false);
-  if (!result || result.rollback?.rolledBack) {
-    await failBatchPreview();
-    return;
-  }
+}
+
+async function presentBatchPreview(outcome) {
+  state.batchPreviewValidated = true;
+  state.batchPreviewFailure = null;
   state.canvasPreview = {
     batch: true,
     critiqueId: null,
-    critiqueTitle: `${plan.order.length} combined ${plan.order.length === 1 ? "fix" : "fixes"}`,
+    critiqueTitle: `${outcome.plan.order.length} combined ${outcome.plan.order.length === 1 ? "fix" : "fixes"}`,
     phase: "after",
-    result,
+    result: outcome.result,
     hasExecutableProposal: true,
     interactionPreview: null,
     accent: COLORS.visual,
@@ -5257,6 +5297,120 @@ async function refreshBatchPreview() {
   renderDashboardChrome({ renderContext: false });
   await renderTiles();
   renderMarkers();
+  renderBatchApplyBar(outcome.plan);
+}
+
+async function refreshBatchPreview() {
+  const token = ++state.batchPreviewToken;
+  const selectedIds = [...state.batchSelection];
+  state.batchPreviewValidated = false;
+  state.batchPreviewFailure = null;
+  if (!selectedIds.length || !reviewResultsMatchContext() || !state.artifact.hasExecutableSpecs) {
+    setBatchPreviewPending(false);
+    await clearBatchPreview();
+    renderBatchApplyBar();
+    return;
+  }
+  renderBatchApplyBar();
+  setBatchPreviewPending(true);
+  const outcome = await computeBatchPreview(selectedIds);
+  if (token !== state.batchPreviewToken) return; // superseded by a newer selection
+  setBatchPreviewPending(false);
+  if (!outcome.ok) {
+    await failBatchPreview(outcome.reason);
+    renderBatchApplyBar(outcome.plan);
+    return outcome;
+  }
+  await presentBatchPreview(outcome);
+  return outcome;
+}
+
+// Full reviews open directly into the broadest combined result that passes the
+// same transaction and whole-dashboard quality gate as Apply. Try the complete
+// structurally compatible set first; only when that fails, rebuild greedily in
+// ranked order so a single unsafe recommendation cannot erase every useful
+// improvement. This changes preview state only — the Working Draft is untouched.
+async function startAutomaticCombinedPreview() {
+  const candidates = filteredCritiques().filter(critiqueBatchEligible);
+  if (!candidates.length) {
+    if (state.batchMode) await setBatchMode(false);
+    return;
+  }
+  const autoToken = ++state.batchAutoPreviewToken;
+  state.batchPreviewToken += 1;
+  state.batchMode = true;
+  state.batchPreviewValidated = false;
+  state.batchPreviewFailure = null;
+  state.batchAutoSummary = null;
+
+  const structurallySafe = [];
+  for (const critique of candidates) {
+    const trialIds = [...structurallySafe, critique.id];
+    const plan = buildApplicationPlan(trialIds, state.critiques);
+    if (!plan.canApply || batchPlanGuidanceBlock(plan)) continue;
+    structurallySafe.push(critique.id);
+  }
+  state.batchSelection = new Set(structurallySafe);
+  renderCritiques();
+  renderBatchApplyBar();
+  setBatchPreviewPending(true);
+
+  let safeIds = structurallySafe;
+  let finalOutcome = safeIds.length ? await computeBatchPreview(safeIds) : null;
+  if (autoToken !== state.batchAutoPreviewToken) return;
+
+  if (!finalOutcome?.ok) {
+    safeIds = [];
+    finalOutcome = null;
+    for (const critiqueId of structurallySafe) {
+      const trialIds = [...safeIds, critiqueId];
+      const trial = await computeBatchPreview(trialIds);
+      if (autoToken !== state.batchAutoPreviewToken) return;
+      if (trial.ok) {
+        safeIds = trialIds;
+        finalOutcome = trial;
+      }
+    }
+    // A layout fix can be unsafe in isolation yet become balanced once a
+    // complementary higher-priority fix is present. Retry the deferred items
+    // against the validated base, accepting each only when the enlarged set
+    // still passes. The result is maximal for single additions without forcing
+    // the system back to tiny, isolated tweaks.
+    for (const critiqueId of structurallySafe.filter((id) => !safeIds.includes(id))) {
+      const trialIds = [...safeIds, critiqueId];
+      const trial = await computeBatchPreview(trialIds);
+      if (autoToken !== state.batchAutoPreviewToken) return;
+      if (trial.ok) {
+        safeIds = trialIds;
+        finalOutcome = trial;
+      }
+    }
+  }
+
+  setBatchPreviewPending(false);
+  const finalExcludedIds = candidates
+    .map((critique) => critique.id)
+    .filter((id) => !safeIds.includes(id));
+  state.batchSelection = new Set(safeIds);
+  state.batchAutoSummary = {
+    requested: candidates.length,
+    included: safeIds.length,
+    excluded: finalExcludedIds.length,
+  };
+  renderCritiques();
+  if (finalOutcome?.ok && safeIds.length) {
+    await presentBatchPreview(finalOutcome);
+  } else {
+    await failBatchPreview("No combined set passed the dashboard quality check. Try previewing one suggestion at a time.");
+    renderBatchApplyBar();
+  }
+  recordStudyAction("combined_preview_built", `Previewed ${safeIds.length} safely combined recommendations`, {
+    requestedCritiqueIds: candidates.map((critique) => critique.id),
+    previewedCritiqueIds: safeIds,
+    excludedCritiqueIds: finalExcludedIds,
+    dashboardVersion: state.version,
+    committed: false,
+  });
 }
 
 // Drop a batch combined preview from the canvas and repaint to the committed
@@ -5270,14 +5424,12 @@ async function clearBatchPreview() {
   renderMarkers();
 }
 
-// The combined preview couldn't be built for the current selection (engine threw
-// or rolled back). Clear the stale preview and correct the bar note so it never
-// claims the canvas shows a merged result it doesn't. Apply stays enabled — the
-// apply path runs its own transaction and reports its own outcome honestly.
-async function failBatchPreview() {
+// A failed preview blocks Apply: the exact checked combination has not earned a
+// validated canvas state, so committing it would violate preview-before-apply.
+async function failBatchPreview(reason = null) {
+  state.batchPreviewValidated = false;
+  state.batchPreviewFailure = reason || "The combined result did not pass the dashboard quality check.";
   await clearBatchPreview();
-  const noteEl = document.getElementById("batchApplyNote");
-  if (noteEl) noteEl.textContent = "Couldn't build the combined preview — you can still apply the selection.";
 }
 
 // Bottom apply bar: count, combined-result note, and the Apply button. The plan
@@ -5302,7 +5454,7 @@ function renderBatchApplyBar(plan = null) {
   const applyButton = document.getElementById("batchApplyButton");
   const clearButton = document.getElementById("batchClearButton");
   const selectAllButton = document.getElementById("batchSelectAllButton");
-  if (countEl) countEl.textContent = `${count} selected`;
+  if (countEl) countEl.textContent = `${count} in preview`;
   if (clearButton) clearButton.disabled = count === 0;
   // "Select all" adds every batch-eligible critique; disable it once nothing new
   // remains to add (no eligible critiques, or all of them are already selected).
@@ -5312,8 +5464,12 @@ function renderBatchApplyBar(plan = null) {
   }
   const resolvedPlan = plan || (count ? buildApplicationPlan([...state.batchSelection], state.critiques) : null);
   const autoIncluded = resolvedPlan ? resolvedPlan.order.length - resolvedPlan.requested.length : 0;
-  let note = "Choose fixes to apply together.";
-  if (count === 0) note = "";
+  let note = "Choose suggestions to preview together. Nothing is applied yet.";
+  if (count === 0) {
+    note = state.batchPreviewFailure
+      ? `${state.batchPreviewFailure} Nothing was applied.`
+      : "";
+  }
   let canApply = false;
   if (count) {
     if (!reviewResultsMatchContext()) {
@@ -5321,16 +5477,20 @@ function renderBatchApplyBar(plan = null) {
       // and the "regenerate first" copy read as noise (and misfires for
       // local-review sessions, per the interaction-logic audit).
       note = "";
+    } else if (state.batchPreviewFailure) {
+      note = `${state.batchPreviewFailure} Nothing was applied.`;
     } else if (resolvedPlan?.unresolvedConflicts.length) {
       note = `Deselect ${resolvedPlan.unresolvedConflicts.length === 1 ? "a conflicting pair" : `${resolvedPlan.unresolvedConflicts.length} conflicting pairs`} to apply.`;
     } else if (resolvedPlan?.cyclic) {
       note = "These fixes depend on each other — narrow the selection.";
     } else if (resolvedPlan && batchPlanGuidanceBlock(resolvedPlan)) {
       note = "A prerequisite is guidance-only — apply it first.";
-    } else if (resolvedPlan?.canApply) {
+    } else if (resolvedPlan?.canApply && state.batchPreviewValidated) {
+      const excluded = state.batchAutoSummary?.excluded || 0;
       note = autoIncluded > 0
-        ? `Applies ${resolvedPlan.order.length} fixes (+${autoIncluded} prerequisite).`
-        : `Applies ${resolvedPlan.order.length} ${resolvedPlan.order.length === 1 ? "fix" : "fixes"}.`;
+        ? `Previewing ${resolvedPlan.order.length} safely combined suggestions (+${autoIncluded} prerequisite). Nothing applied.`
+        : `Previewing ${resolvedPlan.order.length} safely combined ${resolvedPlan.order.length === 1 ? "suggestion" : "suggestions"}. Nothing applied.`;
+      if (excluded) note += ` ${excluded} ${excluded === 1 ? "suggestion was" : "suggestions were"} excluded by conflict or quality checks.`;
       canApply = true;
     }
   }
@@ -7875,7 +8035,11 @@ async function runAIAssist(options = {}) {
     // canvas was computed from the old selection/critiques and no longer matches
     // the (now pruned) selection. Recompute it — or clear it if the selection is
     // empty — so the canvas never shows a stale merged result.
-    if (state.batchMode) await refreshBatchPreview();
+    if (attemptedScope === "full") {
+      await startAutomaticCombinedPreview();
+    } else if (state.batchMode) {
+      await refreshBatchPreview();
+    }
     // Study telemetry: the set the participant was shown after this review. Paired
     // with critique_opened, this yields the reliable "displayed vs inspected" split
     // (which available critiques were never opened) without any gaze/scroll signal.
@@ -8434,6 +8598,8 @@ document.getElementById("batchExitButton").addEventListener("click", async () =>
   document.getElementById("batchSelectToggle")?.focus();
 });
 document.getElementById("batchSelectAllButton").addEventListener("click", async () => {
+  state.batchAutoPreviewToken += 1;
+  state.batchAutoSummary = null;
   state.batchSelection = new Set(filteredCritiques().filter(critiqueBatchEligible).map((c) => c.id));
   renderCritiques();
   await refreshBatchPreview();
@@ -8443,6 +8609,8 @@ document.getElementById("batchSelectAllButton").addEventListener("click", async 
   });
 });
 document.getElementById("batchClearButton").addEventListener("click", async () => {
+  state.batchAutoPreviewToken += 1;
+  state.batchAutoSummary = null;
   state.batchSelection = new Set();
   renderCritiques();
   await refreshBatchPreview();
