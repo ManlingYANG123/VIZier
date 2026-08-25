@@ -5,6 +5,7 @@
  */
 import { compile } from "vega-lite";
 import type { BoardMeta, BoardTileMeta, Bounds, SpecMap, VegaLiteSpec } from "../contracts.ts";
+import { encodedFieldsDeep, markType, unitSpecs } from "../detect/specUtil.ts";
 
 export interface CompileResult {
   ok: boolean;
@@ -80,37 +81,47 @@ function geometryErrors(board: BoardMeta): string[] {
   return errors;
 }
 
-/** Reject a newly proposed hierarchy when it achieves emphasis by making
- * sibling charts unreadable or by turning one tile into a near-full-canvas
- * billboard. These are relative checks, so pre-existing compact dashboards and
- * ordinary hierarchy changes are not penalized. */
-function layoutReadabilityErrors(originalBoard: BoardMeta, nextBoard: BoardMeta): string[] {
+function isAnalyticalChart(spec: VegaLiteSpec | undefined): boolean {
+  if (!spec) return false;
+  return unitSpecs(spec).some(({ spec: unit }) => {
+    const mark = markType(unit);
+    return Boolean(mark && mark !== "text");
+  });
+}
+
+function isLowInformationTile(spec: VegaLiteSpec | undefined): boolean {
+  if (!spec) return false;
+  const units = unitSpecs(spec);
+  return units.length > 0 &&
+    units.every(({ spec: unit }) => markType(unit) === "text") &&
+    encodedFieldsDeep(spec).length === 0;
+}
+
+/** Evaluate information-to-space balance rather than limiting how far a layout
+ * may move from its starting point. Analytical views may grow dramatically;
+ * charts only need enough absolute room to remain legible, while a literal KPI
+ * or text tile may not consume more space than its information content earns. */
+function layoutBalanceErrors(board: BoardMeta, specs: SpecMap): string[] {
   const errors: string[] = [];
-  const originals = new Map(
-    (originalBoard.tiles || [])
-      .filter((tile): tile is BoardTileMeta & { bounds: Bounds } => Boolean(tile.bounds))
-      .map((tile) => [tile.id, tile.bounds]),
+  const tiles = (board.tiles || []).filter(
+    (tile): tile is BoardTileMeta & { bounds: Bounds } => Boolean(tile.bounds),
   );
-  for (const tile of nextBoard.tiles || []) {
-    const before = originals.get(tile.id);
-    const after = tile.bounds;
-    if (!before || !after || before.w <= 0 || before.h <= 0 || after.w <= 0 || after.h <= 0) continue;
-    const unchanged = before.x === after.x && before.y === after.y && before.w === after.w && before.h === after.h;
-    if (unchanged) continue;
-    if (after.w < before.w * 0.5 || after.h < before.h * 0.5) {
-      errors.push(`tile ${tile.id} is compressed below half its readable dimension`);
-      continue;
+  for (const tile of tiles) {
+    if (isAnalyticalChart(specs[tile.id]) && (tile.bounds.w < 220 || tile.bounds.h < 140)) {
+      errors.push(`chart tile ${tile.id} has insufficient absolute space for readable axes and marks`);
     }
-    const areaGrowth = (after.w * after.h) / (before.w * before.h);
-    if (areaGrowth > 3) {
-      errors.push(`tile ${tile.id} expands disproportionately relative to the original layout`);
-      continue;
-    }
-    const beforeAspect = before.w / before.h;
-    const afterAspect = after.w / after.h;
-    const aspectChange = Math.max(beforeAspect / afterAspect, afterAspect / beforeAspect);
-    if (aspectChange > 2.25) {
-      errors.push(`tile ${tile.id} changes aspect ratio enough to compromise chart readability`);
+  }
+  const totalArea = tiles.reduce((sum, tile) => sum + tile.bounds.w * tile.bounds.h, 0);
+  const chartAreas = tiles
+    .filter((tile) => isAnalyticalChart(specs[tile.id]))
+    .map((tile) => tile.bounds.w * tile.bounds.h);
+  const largestChartArea = chartAreas.length ? Math.max(...chartAreas) : 0;
+  if (tiles.length >= 3 && largestChartArea > 0 && totalArea > 0) {
+    for (const tile of tiles.filter((candidate) => isLowInformationTile(specs[candidate.id]))) {
+      const area = tile.bounds.w * tile.bounds.h;
+      if (area / totalArea > 0.3 && area > largestChartArea * 1.5) {
+        errors.push(`low-information tile ${tile.id} dominates the dashboard's analytical views`);
+      }
     }
   }
   return errors;
@@ -169,7 +180,8 @@ export function validateAppliedDashboard(
   }
   const baselineGeometry = new Set(geometryErrors(originalBoard));
   errors.push(...geometryErrors(nextBoard).filter((error) => !baselineGeometry.has(error)));
-  errors.push(...layoutReadabilityErrors(originalBoard, nextBoard));
+  const baselineBalance = new Set(layoutBalanceErrors(originalBoard, originalSpecs));
+  errors.push(...layoutBalanceErrors(nextBoard, nextSpecs).filter((error) => !baselineBalance.has(error)));
   const baselineType = typographySeverity(originalBoard, originalSpecs);
   const nextType = typographySeverity(nextBoard, nextSpecs);
   if (nextType > 1.05 && nextType > baselineType + 0.05) {

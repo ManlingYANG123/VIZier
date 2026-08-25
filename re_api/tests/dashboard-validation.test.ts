@@ -60,19 +60,30 @@ test("post-apply validation rejects charts compressed into unreadable strips", (
   next.tiles![1].bounds = { x: 556, y: 96, w: 516, h: 110 };
   const result = validateAppliedDashboard(original, next, specs, specs);
   assert.equal(result.ok, false);
-  assert.match(result.errors.join(" "), /compressed below half/);
+  assert.match(result.errors.join(" "), /insufficient absolute space/);
 });
 
-test("post-apply validation rejects a tile enlarged into a dashboard-dominating billboard", () => {
+test("post-apply validation rejects a low-information KPI enlarged over analytical views", () => {
   const original = board();
+  original.tiles!.push({ id: "c", bounds: { x: 28, y: 384, w: 500, h: 292 } });
   const next = structuredClone(original);
   next.tiles = [
-    { id: "a", bounds: { x: 28, y: 96, w: 800, h: 600 } },
-    { id: "b", bounds: { x: 850, y: 96, w: 222, h: 260 } },
+    { id: "a", bounds: { x: 28, y: 96, w: 650, h: 580 } },
+    { id: "b", bounds: { x: 706, y: 96, w: 366, h: 260 } },
+    { id: "c", bounds: { x: 706, y: 384, w: 366, h: 292 } },
   ];
-  const result = validateAppliedDashboard(original, next, specs, specs);
+  const originalSpecs = {
+    ...specs,
+    a: {
+      data: { values: [{ x: 0 }] },
+      mark: { type: "text" },
+      encoding: { text: { value: "$4.28M" } },
+    },
+    c: { mark: "bar", config: { axis: { labelFontSize: 12 } } },
+  };
+  const result = validateAppliedDashboard(original, next, originalSpecs, originalSpecs);
   assert.equal(result.ok, false);
-  assert.match(result.errors.join(" "), /expands disproportionately/);
+  assert.match(result.errors.join(" "), /low-information tile a dominates/);
 });
 
 test("post-apply validation still permits a readable hierarchy change", () => {
@@ -80,6 +91,17 @@ test("post-apply validation still permits a readable hierarchy change", () => {
   const next = structuredClone(original);
   next.tiles![0].bounds = { x: 28, y: 96, w: 620, h: 320 };
   next.tiles![1].bounds = { x: 676, y: 96, w: 396, h: 260 };
+  const result = validateAppliedDashboard(original, next, specs, specs);
+  assert.equal(result.ok, true);
+});
+
+test("post-apply validation permits a dramatic analytical layout change", () => {
+  const original = board();
+  const next = structuredClone(original);
+  next.tiles = [
+    { id: "a", bounds: { x: 28, y: 96, w: 700, h: 580 } },
+    { id: "b", bounds: { x: 756, y: 96, w: 316, h: 260 } },
+  ];
   const result = validateAppliedDashboard(original, next, specs, specs);
   assert.equal(result.ok, true);
 });

@@ -644,7 +644,7 @@ test("a control-placement critique cannot masquerade as a tile-layout fix", asyn
   assert.equal(controlPlacement!.proposal.mode, "guidance_only");
 });
 
-test("a vertical hero composition with too many side charts degrades to guidance", async () => {
+test("a tall dashboard may use a dramatic six-tile vertical hero composition", async () => {
   const base = dashboardBoard();
   const tiles = [
     ...base.tiles!.map((tile) => ({ ...tile, bounds: tileBounds[tile.id] })),
@@ -679,8 +679,8 @@ test("a vertical hero composition with too many side charts degrades to guidance
   );
   const layout = result.critiques.find((item) => item.dimension === "layout");
   assert.ok(layout);
-  assert.equal(layout!.proposal.kind, "manual");
-  assert.equal(layout!.proposal.mode, "guidance_only");
+  assert.equal(layout!.proposal.kind, "edit-layout");
+  assert.equal(layout!.proposal.mode, "executable");
 });
 
 test("a later review excludes an already adopted proposal signature", async () => {

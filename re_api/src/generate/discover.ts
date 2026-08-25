@@ -951,18 +951,6 @@ export function validatedProposal(raw: JsonObject, tileId: string | null, packet
         sanitizedComposition = undefined;
         sanitizedLayoutTiles = [];
       }
-      // A vertical hero composition gives every non-hero tile one row in the
-      // side column. Beyond four total tiles those rows collapse into chart
-      // strips (the old 80px floor technically passed them, but axes, legends,
-      // and labels became unreadable). Other compositions use a grid and can
-      // safely support the existing six-tile cap.
-      if (
-        (sanitizedComposition === "hero-left" || sanitizedComposition === "asymmetric-grid") &&
-        sanitizedLayoutTiles.length > 4
-      ) {
-        sanitizedComposition = undefined;
-        sanitizedLayoutTiles = [];
-      }
     }
     if (!sanitizedLayout.length && !sanitizedComposition) kind = "manual";
   }
