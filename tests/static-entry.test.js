@@ -245,6 +245,8 @@ test("group study routes boot the neutral runner before VIZier", async () => {
   assert.match(styles, /\.study-runner-shell\.is-questionnaire[\s\S]*?overflow-y:\s*auto/);
   assert.match(styles, /\.study-scale-question legend\s*\{[^}]*float:\s*left/);
   assert.doesNotMatch(styles, /\.study-scale-question legend\s*\{[^}]*max-width:\s*70ch/);
+  assert.match(styles, /\.study-scale-question\s*\{[^}]*border-bottom:\s*2px solid #b8b8bd/);
+  assert.match(styles, /\.study-scale-interview-question\s*\{[^}]*border-top:\s*1px solid #e2e2e6/);
   assert.doesNotMatch(styles, /\.study-questionnaire-page form > footer\s*\{[^}]*position:\s*sticky/);
   assert.match(styles, /\.study-workspace-progress/);
   assert.match(styles, /\.design-doc-status-actions/);
@@ -765,6 +767,7 @@ test("reviews use a fixed 0.4 temperature without exposing an exploration slider
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 
   assert.match(source, /class="generate-row"/);
+  assert.match(styles, /\.generate-row\s*\{[^}]*justify-content:\s*center/);
   assert.match(source, /const REVIEW_TEMPERATURE = 0\.4/);
   assert.match(source, /reviewTemperature: REVIEW_TEMPERATURE/);
   const sendSites = source.match(/reviewTemperature: state\.reviewTemperature/g) ?? [];
