@@ -1,14 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildRefinedCritique,
   DECIDED_STATUSES,
   critiqueIdentityKey,
   critiqueRefreshLooksRetired,
   critiqueRefreshRequest,
+  critiqueSolutionRefinementRequest,
   groupCritiquesByAsk,
   isDecidedCritique,
   mergeAskResults,
   pickCritiqueRefreshReplacement,
+  solutionAttemptChanged,
 } from "../src/critique-merge.js";
 
 // Minimal critique factory — only the fields the merge cares about.
@@ -363,6 +366,46 @@ test("critiqueRefreshRequest asks the engine to refresh one issue only", () => {
   assert.match(request, /ONE previously identified issue/);
   assert.match(request, /Hard-coded KPI row/);
   assert.match(request, /Do not start a full new review/);
+});
+
+test("solution refinement keeps the diagnosis fixed and asks for one executable alternative", () => {
+  const previous = critique({
+    title: "The callout dominates the analysis",
+    issue: "A small supporting fact occupies most of the canvas",
+    evidence: "The callout is larger than both analytical charts",
+    suggestion: "Shrink the callout",
+    proposal: { kind: "edit-layout", mode: "executable" },
+    revision: 2,
+  });
+  const request = critiqueSolutionRefinementRequest(previous, "Keep the layout; reduce only the empty space.");
+  assert.match(request, /author accepts the diagnosis/i);
+  assert.match(request, /Keep the issue, evidence, target, and scope fixed/);
+  assert.match(request, /exactly one concrete executable recommendation/);
+  assert.match(request, /Keep the layout; reduce only the empty space/);
+
+  const refined = buildRefinedCritique(previous, {
+    title: "A different title that must not replace the diagnosis",
+    issue: "A different issue that must not be accepted",
+    suggestion: "Tighten padding inside the callout",
+    proposal: { kind: "edit-spec", mode: "executable" },
+  }, "Keep the layout", 4);
+  assert.equal(refined.id, previous.id);
+  assert.equal(refined.title, previous.title);
+  assert.equal(refined.issue, previous.issue);
+  assert.equal(refined.evidence, previous.evidence);
+  assert.equal(refined.suggestion, "Tighten padding inside the callout");
+  assert.equal(refined.proposal.kind, "edit-spec");
+  assert.equal(refined.revision, 3);
+  assert.equal(refined.lastEvaluatedVersion, 4);
+  assert.deepEqual(refined.revisions.at(-1), {
+    rationale: "Keep the layout",
+    suggestion: "Tighten padding inside the callout",
+  });
+  assert.equal(solutionAttemptChanged(previous, refined), true);
+  assert.equal(solutionAttemptChanged(previous, {
+    suggestion: previous.suggestion,
+    proposal: structuredClone(previous.proposal),
+  }), false);
 });
 
 test("pickCritiqueRefreshReplacement keeps the matching issue and ignores extras", () => {

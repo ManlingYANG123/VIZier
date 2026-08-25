@@ -4167,6 +4167,24 @@ body.revision-dock-resizing .revision-dock.version-history {
   font-size: 11.5px;
 }
 
+.rationale-hint,
+.rationale-error {
+  margin: 0;
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.rationale-hint {
+  color: #6e6e73;
+}
+
+.rationale-error {
+  padding: 7px 8px;
+  border-radius: 7px;
+  background: #fff1f1;
+  color: #9f2631;
+}
+
 .revision-dock-bar {
   height: 43px;
   display: grid;
@@ -4702,6 +4720,26 @@ body.revision-dock-resizing .revision-dock.version-history {
   border-radius: 10px;
   background: #2c2c2e;
   color: #fff;
+}
+.focus-actions:has(#focusRefineSolution) {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.focus-actions:has(#focusRefineSolution) .focus-action {
+  min-height: 42px;
+  padding-inline: 8px;
+}
+.focus-actions:has(#focusRefineSolution) .focus-action.accept {
+  grid-column: auto;
+}
+.focus-action.refine {
+  border-color: #c7c7cc;
+  background: #f5f5f7;
+  color: #3a3a3c;
+}
+.focus-action.refine:hover:not(:disabled) {
+  border-color: #8e8e93;
+  background: #ededf0;
+  color: #1d1d1f;
 }
 .focus-action.reject:hover { border-color: #efb6ba; color: #b4232f; background: #fff6f6; }
 /* Guidance's primary action is a decision, not a canvas apply — so it reads as a

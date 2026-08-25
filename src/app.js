@@ -111,12 +111,15 @@ import {
   createContextWorkflow,
 } from "./context-workflow.js";
 import {
+  buildRefinedCritique,
   DECIDED_STATUSES,
   critiqueRefreshRequest,
+  critiqueSolutionRefinementRequest,
   groupCritiquesByAsk,
   isDecidedCritique,
   mergeAskResults,
   pickCritiqueRefreshReplacement,
+  solutionAttemptChanged,
 } from "./critique-merge.js";
 import {
   CONTEXT_BOX_FIELDS,
@@ -452,6 +455,7 @@ const state = {
   rationales: [],
   nextRationaleId: 1,
   rationaleEditId: null,
+  rationaleIntent: "save",
   interactionJournal: [],
   nextInteractionEventId: 1,
   preferenceAgent: {
@@ -839,6 +843,8 @@ document.querySelector("#app").innerHTML = `
           <button type="button" id="closeContextModal" aria-label="Close rationale popover">×</button>
         </div>
         <textarea id="contextInput" rows="2" maxlength="600" required placeholder="e.g. Keep labels readable from across the room."></textarea>
+        <p class="rationale-hint" id="rationaleHint" hidden></p>
+        <p class="rationale-error" id="rationaleError" role="alert" hidden></p>
         <div class="modal-actions"><button class="button primary small rationale-submit" id="saveRationaleButton" type="submit">Keep this in mind</button></div>
       </form>
     </div>
@@ -4301,21 +4307,45 @@ function positionRationalePopover(anchor = rationaleAnchorElement) {
   Object.assign(modal.style, { left: `${left}px`, top: `${top}px` });
 }
 
-function openRationaleModal(critique, rationale = null, anchor = null) {
+function openRationaleModal(critique, rationale = null, anchor = null, { intent = "save" } = {}) {
   if (!critique && !rationale) return;
+  const refiningSolution = intent === "refine-solution";
   state.contextTargetId = critique?.id || rationale.critiqueId;
   state.rationaleEditId = rationale?.id || null;
+  state.rationaleIntent = intent;
   rationaleAnchorElement = anchor;
   const modal = document.getElementById("contextModal");
   const title = critique?.title || rationale.critiqueTitle;
   const rationaleContext = critique || rationale;
-  modal.setAttribute("aria-label", `${rationale ? "Edit" : "Add"} rationale for ${title}`);
-  document.getElementById("saveRationaleButton").textContent = rationale
-    ? "Save thought"
-    : "Keep this in mind";
+  const prompt = document.getElementById("rationalePrompt");
+  const hint = document.getElementById("rationaleHint");
+  const error = document.getElementById("rationaleError");
+  const submit = document.getElementById("saveRationaleButton");
+  modal.dataset.intent = intent;
+  modal.setAttribute("aria-label", refiningSolution
+    ? `Refine the solution for ${title}`
+    : `${rationale ? "Edit" : "Add"} rationale for ${title}`);
+  prompt.textContent = refiningSolution
+    ? "What should change about this solution?"
+    : "What should VIZier keep in mind here?";
+  hint.textContent = refiningSolution
+    ? "The identified issue stays fixed. VIZier will generate a different solution from your direction."
+    : "";
+  hint.hidden = !refiningSolution;
+  error.hidden = true;
+  error.textContent = "";
+  submit.textContent = refiningSolution
+    ? "Generate Another Fix"
+    : rationale
+      ? "Save thought"
+      : "Keep this in mind";
   const ta = document.getElementById("contextInput");
   ta.value = rationale?.text || "";
-  ta.placeholder = rationalePlaceholderFor(rationaleContext);
+  ta.disabled = false;
+  ta.placeholder = refiningSolution
+    ? "e.g. Keep the current layout and reduce only the empty space."
+    : rationalePlaceholderFor(rationaleContext);
+  submit.disabled = refiningSolution && !ta.value.trim();
   modal.hidden = false;
   requestAnimationFrame(() => {
     positionRationalePopover(anchor);
@@ -4330,8 +4360,14 @@ function closeContextModal() {
   modal.style.removeProperty("top");
   modal.removeAttribute("aria-label");
   document.getElementById("contextInjectForm").reset();
+  document.getElementById("contextInput").disabled = false;
+  document.getElementById("saveRationaleButton").disabled = false;
+  document.getElementById("rationaleHint").hidden = true;
+  document.getElementById("rationaleError").hidden = true;
+  modal.removeAttribute("data-intent");
   state.contextTargetId = null;
   state.rationaleEditId = null;
+  state.rationaleIntent = "save";
   rationaleAnchorElement = null;
 }
 
@@ -7413,14 +7449,20 @@ async function renderInspector() {
             : `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7"/></svg>`}
           <span>${canAcceptGuidance ? "Mark as Considered" : "Accept Change"}</span>
         </button>
+        ${critiqueIsExecutable(critique) ? `
+        <button class="focus-action refine" id="focusRefineSolution" type="button" aria-haspopup="dialog" ${actionable ? "" : "disabled"}>
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12.7 5.6A5.2 5.2 0 0 0 3.3 4.3"/><path d="M3.3 2.2v2.1h2.1"/><path d="M3.3 10.4a5.2 5.2 0 0 0 9.4 1.3"/><path d="M12.7 13.8v-2.1h-2.1"/></svg>
+          <span>Refine Solution</span>
+        </button>` : ""}
         <button class="focus-action reject" id="focusReject" type="button" ${actionable ? "" : "disabled"}>
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7M11.5 4.5l-7 7"/></svg>
-          <span>Reject</span>
+          <span>${critiqueIsExecutable(critique) ? "Reject Issue" : "Reject"}</span>
         </button>
+        ${critiqueIsExecutable(critique) ? "" : `
         <button class="focus-action secondary" id="focusAddContext" type="button">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5h10v7H7l-3 2v-2H3z"/><path d="M8 5.5v3M6.5 7h3"/></svg>
           <span>${rejected ? "Add Rejection Reason" : critiqueRationales.length ? "Update Rationale" : "Add Rationale"}</span>
-        </button>
+        </button>`}
       </footer>
     </article>`;
 
@@ -7564,7 +7606,9 @@ async function renderInspector() {
     renderMarkers();
     await renderInspector();
   });
-  document.getElementById("focusAddContext").addEventListener("click", (event) =>
+  document.getElementById("focusRefineSolution")?.addEventListener("click", (event) =>
+    openRationaleModal(critique, null, event.currentTarget, { intent: "refine-solution" }));
+  document.getElementById("focusAddContext")?.addEventListener("click", (event) =>
     openRationaleModal(critique, critiqueRationales.at(-1) || null, event.currentTarget));
   document.getElementById("focusEditRationale")?.addEventListener("click", (event) =>
     openRationaleModal(critique, critiqueRationales.at(-1), event.currentTarget));
@@ -7722,8 +7766,9 @@ function readReviewStrengths(resp, reviewScope) {
   }));
 }
 
-async function regenerateOneCritique(critique) {
+async function regenerateOneCritique(critique, { refinementRationale = "" } = {}) {
   if (!critique) return "error";
+  const isSolutionRefinement = Boolean(refinementRationale.trim());
   const targetId = critique.id;
   const index = state.critiques.findIndex((item) => item.id === targetId);
   if (index < 0) return "error";
@@ -7734,24 +7779,33 @@ async function regenerateOneCritique(critique) {
     `Regenerated one critique: ${critique.title}`,
     critiqueRequestStudyData({
       requestId,
-      requestMode: "stale_recovery",
+      requestMode: isSolutionRefinement ? "solution_refinement" : "stale_recovery",
       scope: "critique",
       queryText: null,
-      trigger: "stale-dashboard-recovery",
+      trigger: isSolutionRefinement ? "refine-solution" : "stale-dashboard-recovery",
       critiqueId: targetId,
     }),
   );
   try {
     const { critiques: incoming, answer } = await generateCritiquesFromEngine(
-      critiqueRefreshRequest(critique),
+      isSolutionRefinement
+        ? critiqueSolutionRefinementRequest(critique, refinementRationale)
+        : critiqueRefreshRequest(critique),
       {
         persistReviewMeta: false,
-        traceTitle: "Refreshing this critique for the current dashboard",
+        traceTitle: isSolutionRefinement
+          ? "Generating another solution for this critique"
+          : "Refreshing this critique for the current dashboard",
       },
     );
     const replacement = pickCritiqueRefreshReplacement(critique, incoming, answer);
-    if (replacement) {
-      const refreshed = {
+    const usableReplacement = isSolutionRefinement
+      ? replacement && critiqueIsExecutable(replacement) && solutionAttemptChanged(critique, replacement)
+      : replacement;
+    if (usableReplacement) {
+      const refreshed = isSolutionRefinement
+        ? buildRefinedCritique(critique, replacement, refinementRationale, state.version)
+        : {
         ...replacement,
         id: targetId,
         status: "pending",
@@ -7772,6 +7826,9 @@ async function regenerateOneCritique(critique) {
       state.interactionObservations.delete(targetId);
       state.critiqueRefreshNotice = null;
       state.selectedCritiqueId = targetId;
+      const refreshCombinedPreview = state.batchMode && state.batchSelection.has(targetId);
+      if (state.batchReviewedIds instanceof Set) state.batchReviewedIds.delete(targetId);
+      if (refreshCombinedPreview) state.batchPreviewValidated = false;
       recordStudyAction(
         "critique_regenerated",
         `Updated solution for: ${critique.title}`,
@@ -7779,19 +7836,35 @@ async function regenerateOneCritique(critique) {
           requestId,
           critiqueId: targetId,
           outcome: "updated",
+          requestMode: isSolutionRefinement ? "solution_refinement" : "stale_recovery",
+          refinementRationale: isSolutionRefinement ? refinementRationale : null,
           dimension: critique.dimension,
           latencyMs: Date.now() - requestStartedAt,
         },
       );
       recordCritiquesDisplayed("focused", critique.askId || null, {
         requestId,
-        requestMode: "stale_recovery",
+        requestMode: isSolutionRefinement ? "solution_refinement" : "stale_recovery",
         latencyMs: Date.now() - requestStartedAt,
       });
       renderMarkers();
       renderCritiques();
       await renderInspector();
+      if (refreshCombinedPreview) await refreshBatchPreview();
       return "updated";
+    }
+    if (isSolutionRefinement) {
+      const message = answer || "VIZier did not return a different executable solution. Adjust your direction and try again.";
+      tracePanel.fail(message);
+      recordStudyAction("critique_request_failed", "Solution refinement did not produce an executable alternative", {
+        requestId,
+        requestMode: "solution_refinement",
+        scope: "critique",
+        critiqueId: targetId,
+        latencyMs: Date.now() - requestStartedAt,
+        reason: message,
+      });
+      return "error";
     }
     const retired = {
       ...state.critiques[index],
@@ -7829,11 +7902,11 @@ async function regenerateOneCritique(critique) {
     return "retired";
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    tracePanel.fail(`Could not refresh this critique — ${message}`);
+    tracePanel.fail(`${isSolutionRefinement ? "Could not generate another solution" : "Could not refresh this critique"} — ${message}`);
     showFocusApplyFailure(message);
     recordStudyAction("critique_request_failed", "Stale-critique recovery failed", {
       requestId,
-      requestMode: "stale_recovery",
+      requestMode: isSolutionRefinement ? "solution_refinement" : "stale_recovery",
       scope: "critique",
       critiqueId: targetId,
       latencyMs: Date.now() - requestStartedAt,
@@ -8293,6 +8366,7 @@ async function resetDemo() {
   state.rationales = [];
   state.nextRationaleId = 1;
   state.rationaleEditId = null;
+  state.rationaleIntent = "save";
   resetInteractionMemory();
   state.previewCache.clear();
   state.canvasPreview = null;
@@ -9066,8 +9140,12 @@ document.addEventListener("keydown", (event) => {
   }
   const contextModal = document.getElementById("contextModal");
   if (contextModal && !contextModal.hidden) {
+    const returnTarget = contextModal.dataset.intent === "refine-solution"
+      ? "focusRefineSolution"
+      : "focusAddContext";
+    if (document.getElementById("contextInput")?.disabled) return;
     closeContextModal();
-    document.getElementById("focusAddContext")?.focus();
+    document.getElementById(returnTarget)?.focus();
     return;
   }
   if (!els.localReviewPopover.hidden && !state.localReviewSubmitting) {
@@ -9086,16 +9164,30 @@ document.addEventListener("keydown", (event) => {
 });
 
 // Critique-level design rationale modal.
-document.getElementById("closeContextModal").addEventListener("click", closeContextModal);
+document.getElementById("closeContextModal").addEventListener("click", () => {
+  const modal = document.getElementById("contextModal");
+  const returnTarget = modal.dataset.intent === "refine-solution"
+    ? "focusRefineSolution"
+    : "focusAddContext";
+  closeContextModal();
+  document.getElementById(returnTarget)?.focus();
+});
 document.addEventListener("pointerdown", (event) => {
   const modal = document.getElementById("contextModal");
   if (!modal || modal.hidden || modal.contains(event.target)) return;
-  if (event.target.closest("#focusAddContext, #focusEditRationale, [data-rationale-edit]")) return;
+  if (document.getElementById("contextInput")?.disabled) return;
+  if (event.target.closest("#focusAddContext, #focusRefineSolution, #focusEditRationale, [data-rationale-edit]")) return;
   closeContextModal();
 });
 window.addEventListener("resize", () => positionRationalePopover());
+document.getElementById("contextInput").addEventListener("input", (event) => {
+  if (state.rationaleIntent !== "refine-solution") return;
+  document.getElementById("saveRationaleButton").disabled = !event.currentTarget.value.trim();
+  document.getElementById("rationaleError").hidden = true;
+});
 document.getElementById("contextInjectForm").addEventListener("submit", async (event) => {
   event.preventDefault();
+  const rationaleIntent = state.rationaleIntent;
   const existingRationale = state.rationales.find((item) => item.id === state.rationaleEditId);
   const critique = critiqueById(state.contextTargetId);
   const text = document.getElementById("contextInput").value.trim();
@@ -9141,6 +9233,35 @@ document.getElementById("contextInjectForm").addEventListener("submit", async (e
       currentCritiqueId: rationale.critiqueId,
     },
   }, { synthesize: false });
+  if (rationaleIntent === "refine-solution" && critique && critiqueIsExecutable(critique)) {
+    const input = document.getElementById("contextInput");
+    const submit = document.getElementById("saveRationaleButton");
+    const close = document.getElementById("closeContextModal");
+    const error = document.getElementById("rationaleError");
+    input.disabled = true;
+    close.disabled = true;
+    submit.disabled = true;
+    submit.textContent = "Generating Another Fix…";
+    error.hidden = true;
+    renderFixedContextPanel();
+    const outcome = await regenerateOneCritique(critique, { refinementRationale: text });
+    close.disabled = false;
+    if (outcome === "updated") {
+      closeContextModal();
+      document.getElementById("focusRefineSolution")?.focus();
+      return;
+    }
+    // Keep the author's direction in place after a failed generation so they
+    // can edit and retry without retyping it or creating duplicate rationales.
+    state.rationaleEditId = rationale.id;
+    input.disabled = false;
+    submit.disabled = false;
+    submit.textContent = "Try Again";
+    error.textContent = "VIZier could not generate a different executable solution. Adjust your direction and try again.";
+    error.hidden = false;
+    input.focus();
+    return;
+  }
   closeContextModal();
   renderFixedContextPanel();
   if (!critique) return;
@@ -10933,6 +11054,7 @@ async function loadJsonDashboard(data, fileName = "dashboard.json", { skipContex
   state.rationales = [];
   state.nextRationaleId = 1;
   state.rationaleEditId = null;
+  state.rationaleIntent = "save";
   // A loaded dashboard can ship with cross-filter already wired (a tile stamped
   // usermeta.crossFilter.role === "source"). Enable the runtime on load so the
   // baked-in "click a source mark → filter the related tiles" behavior is live

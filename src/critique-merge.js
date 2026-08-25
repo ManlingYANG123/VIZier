@@ -197,6 +197,55 @@ export function critiqueRefreshRequest(critique) {
   ].filter(Boolean).join("\n");
 }
 
+/** Ask for a different solution without reopening the accepted diagnosis. */
+export function critiqueSolutionRefinementRequest(critique, rationale) {
+  const target = critique?.tileId
+    || critique?.target?.ref?.tile
+    || critique?.target?.ref?.source
+    || "the dashboard";
+  return [
+    "Generate an ALTERNATIVE SOLUTION for this ONE previously identified issue.",
+    "The author accepts the diagnosis. Keep the issue, evidence, target, and scope fixed.",
+    "Do not start a full review, introduce a substitute issue, or repeat the previous solution unchanged.",
+    "Return exactly one concrete executable recommendation that follows the author's refinement direction.",
+    `Issue title: ${critique?.title || ""}`,
+    `Target: ${target}`,
+    critique?.issue ? `Accepted problem: ${critique.issue}` : "",
+    critique?.evidence ? `Evidence: ${critique.evidence}` : "",
+    critique?.suggestion ? `Previous solution: ${critique.suggestion}` : "",
+    `Author's refinement direction: ${String(rationale || "").trim()}`,
+    critique?.dimension ? `Dimension: ${critique.dimension}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+/** Preserve diagnosis identity while replacing only the mutable solution attempt. */
+export function buildRefinedCritique(previous, replacement, rationale, dashboardVersion) {
+  const nextSuggestion = replacement?.suggestion || previous?.suggestion || "";
+  return {
+    ...structuredClone(previous),
+    suggestion: nextSuggestion,
+    proposal: structuredClone(replacement?.proposal || previous?.proposal),
+    recommendation: replacement?.recommendation || previous?.recommendation,
+    surface: replacement?.surface || previous?.surface,
+    fixability: replacement?.fixability || previous?.fixability,
+    status: "pending",
+    lifecycle: "active",
+    lastEvaluatedVersion: dashboardVersion,
+    revision: (Number(previous?.revision) || 1) + 1,
+    revisions: [
+      ...(structuredClone(previous?.revisions) || []),
+      { rationale: String(rationale || "").trim(), suggestion: nextSuggestion },
+    ],
+  };
+}
+
+export function solutionAttemptChanged(previous, replacement) {
+  const beforeSuggestion = String(previous?.suggestion || "").trim();
+  const afterSuggestion = String(replacement?.suggestion || "").trim();
+  if (beforeSuggestion !== afterSuggestion) return true;
+  return JSON.stringify(previous?.proposal || null) !== JSON.stringify(replacement?.proposal || null);
+}
+
 export function critiqueRefreshLooksRetired(critique, answer = "") {
   const text = [
     answer,
