@@ -295,6 +295,56 @@ export function buildApplicationPlan(
 }
 
 /**
+ * Keep multi-select permissive while deriving the largest deterministic subset
+ * that can enter one preview transaction. Earlier selected ids win ties so the
+ * result is stable; dependencies are still included by the ordinary plan.
+ * This never mutates or silently unchecks the author's selection.
+ */
+export function largestCompatibleSelection(selectedIds, recommendations) {
+  const requested = unique(selectedIds).filter(Boolean);
+  let best = [];
+
+  const canJoinPreview = (ids) => {
+    const plan = buildApplicationPlan(ids, recommendations);
+    if (!plan.canApply) return false;
+    const byId = new Map(recommendations.map((item) => [item.id, item]));
+    return !plan.order.some((id) => byId.get(id)?.proposal?.mode === "guidance_only");
+  };
+
+  const visit = (index, included) => {
+    if (included.length + (requested.length - index) <= best.length) return;
+    if (index >= requested.length) {
+      if (included.length > best.length) best = [...included];
+      return;
+    }
+    const withCurrent = [...included, requested[index]];
+    if (canJoinPreview(withCurrent)) visit(index + 1, withCurrent);
+    visit(index + 1, included);
+  };
+
+  visit(0, []);
+  const selected = new Set(best);
+  const excluded = requested
+    .filter((id) => !selected.has(id))
+    .map((id) => {
+      const trial = buildApplicationPlan([...best, id], recommendations);
+      const reason = trial.unresolvedConflicts.length
+        ? "Conflicts with another previewed change."
+        : trial.cyclic
+          ? "Creates a dependency cycle with the previewed changes."
+          : trial.missingDependencies.length
+            ? "Requires a change that cannot join this preview."
+            : "Could not safely join the combined preview.";
+      return { id, reason };
+    });
+  return {
+    selectedIds: best,
+    excluded,
+    plan: best.length ? buildApplicationPlan(best, recommendations) : null,
+  };
+}
+
+/**
  * Apply a valid plan to a clone. The executor mutates only the cloned draft.
  */
 export function applyPlan(plan, dashboardState, executor) {

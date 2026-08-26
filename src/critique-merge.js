@@ -228,14 +228,6 @@ export function solutionRefinementAlignment(previous, replacement, rationale) {
   if (!refinementDirectionRequiresShorterText(rationale)) {
     return { aligned: true, reason: "" };
   }
-  const previousSuggestion = String(previous?.suggestion || "").trim();
-  const nextSuggestion = String(replacement?.suggestion || "").trim();
-  if (!materiallyShorter(previousSuggestion, nextSuggestion)) {
-    return {
-      aligned: false,
-      reason: "The regenerated recommendation was not materially shorter than the current one.",
-    };
-  }
   const previousProposalText = proposalTextValues(previous?.proposal).join(" ");
   const nextProposalText = proposalTextValues(replacement?.proposal).join(" ");
   if (previousProposalText && !nextProposalText) {
@@ -255,6 +247,27 @@ export function solutionRefinementAlignment(previous, replacement, rationale) {
     };
   }
   return { aligned: true, reason: "" };
+}
+
+function critiqueTargetLocation(critique) {
+  const tiles = critique?.target?.ref?.tiles;
+  if (Array.isArray(tiles) && tiles.length) return [...tiles].sort().join("+");
+  return critique?.tileId
+    || critique?.target?.ref?.tile
+    || critique?.target?.ref?.source
+    || "dashboard";
+}
+
+/** A solution refinement may change the remedy, but never the accepted
+ * diagnosis or its dashboard target. Reject model drift before proposal data
+ * validated for one tile is combined with the stable id/target of another. */
+export function solutionRefinementCandidateMatches(previous, replacement) {
+  if (!previous || !replacement) return false;
+  if (critiqueTargetLocation(previous) !== critiqueTargetLocation(replacement)) return false;
+  if (previous.dimension && replacement.dimension !== previous.dimension) return false;
+  if (previous.object && replacement.object !== previous.object) return false;
+  if (previous.problem && replacement.problem !== previous.problem) return false;
+  return true;
 }
 
 /** Prompt that asks the engine to refresh one stale recommendation, not the whole board. */
@@ -277,11 +290,25 @@ export function critiqueRefreshRequest(critique) {
 }
 
 /** Ask for a different solution without reopening the accepted diagnosis. */
-export function critiqueSolutionRefinementRequest(critique, rationale) {
+export function critiqueSolutionRefinementRequest(critique, rationale, {
+  optionIndex = 1,
+  optionCount = 3,
+  strategy = "Use a materially different executable approach from the current solution.",
+  allowNoAlternative = false,
+  joint = false,
+} = {}) {
   const target = critique?.tileId
     || critique?.target?.ref?.tile
     || critique?.target?.ref?.source
     || "the dashboard";
+  const diagnosisContract = JSON.stringify({
+    object: critique?.object || null,
+    problem: critique?.problem || null,
+    dimension: critique?.dimension || null,
+    tileId: critique?.tileId ?? null,
+    target: critique?.target || null,
+  });
+  const previousProposal = JSON.stringify(critique?.proposal || null);
   const shorterTextConstraint = refinementDirectionRequiresShorterText(rationale)
     ? [
         "HARD ACCEPTANCE CONSTRAINT: Make the recommendation wording and every proposed replacement text at least 20% shorter than the previous attempt.",
@@ -289,17 +316,31 @@ export function critiqueSolutionRefinementRequest(critique, rationale) {
       ]
     : [];
   return [
-    "Generate an ALTERNATIVE SOLUTION for this ONE previously identified issue.",
+    joint
+      ? "Generate 1–3 ALTERNATIVE SOLUTIONS for this ONE previously identified issue in a single response."
+      : "Generate an ALTERNATIVE SOLUTION for this ONE previously identified issue.",
+    joint ? "Return fewer than three when the issue has fewer genuinely distinct executable solutions."
+      : `You are generating option ${optionIndex} of ${optionCount}.`,
     "The author accepts the diagnosis. Keep the issue, evidence, target, and scope fixed.",
+    `EXACT DIAGNOSIS AND TARGET CONTRACT: ${diagnosisContract}`,
+    "Every returned option MUST repeat that exact object, problem, dimension, tileId, target granularity, and target ref. Do not modify any other tile or dashboard element.",
     "Do not start a full review, introduce a substitute issue, or repeat the previous solution unchanged.",
     "Treat the author's refinement direction as a hard acceptance constraint, not optional context.",
-    "Return exactly one concrete executable recommendation that follows the author's refinement direction.",
+    `ALTERNATIVE STRATEGY: ${String(strategy || "").trim()}`,
+    "Make this option meaningfully distinct in both its recommendation and executable proposal, not merely reworded.",
+    joint
+      ? "Return each meaningful alternative as a separate critique with the SAME diagnosis, evidence, target, and scope. Make their executable proposals visibly distinct."
+      : allowNoAlternative
+      ? "Return one concrete executable recommendation only if it is meaningfully different. Otherwise return no critique and state that no distinct alternative is warranted."
+      : "Return exactly one concrete executable recommendation that follows the author's refinement direction.",
     ...shorterTextConstraint,
     `Issue title: ${critique?.title || ""}`,
     `Target: ${target}`,
     critique?.issue ? `Accepted problem: ${critique.issue}` : "",
     critique?.evidence ? `Evidence: ${critique.evidence}` : "",
     critique?.suggestion ? `Previous solution: ${critique.suggestion}` : "",
+    `Previous executable proposal: ${previousProposal}`,
+    "Each new proposal must produce a non-identical dashboard/spec state when executed against the contracted target.",
     `Author's refinement direction: ${String(rationale || "").trim()}`,
     critique?.dimension ? `Dimension: ${critique.dimension}` : "",
   ].filter(Boolean).join("\n");
@@ -312,6 +353,10 @@ export function buildRefinedCritique(previous, replacement, rationale, dashboard
     ...structuredClone(previous),
     suggestion: nextSuggestion,
     proposal: structuredClone(replacement?.proposal || previous?.proposal),
+    // The replacement was generated through an internal focused meta-prompt.
+    // Its requestContract describes that prompt, not an author-facing dashboard
+    // request, and carrying it forward can incorrectly roll back a valid fix.
+    requestContract: structuredClone(previous?.requestContract),
     recommendation: replacement?.recommendation || previous?.recommendation,
     surface: replacement?.surface || previous?.surface,
     fixability: replacement?.fixability || previous?.fixability,

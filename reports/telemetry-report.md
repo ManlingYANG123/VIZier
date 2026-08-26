@@ -23,7 +23,7 @@ No flakiness, no skipped/todo tests. One benign warning in the frontend suite
 Telemetry-specific coverage that passed:
 - `study telemetry pairs review requests with displayed or failed, and checkpoint counts match applied ids` — [tests/static-entry.test.js:794](../tests/static-entry.test.js#L794)
 - `session end archives high-resolution PNG and reloadable JSON…` — [tests/static-entry.test.js:777](../tests/static-entry.test.js#L777)
-- `saveStudySession writes the event log plus dashboard PNG and JSON files` + path-traversal rejection — [re_api/tests/study-store.test.ts](../re_api/tests/study-store.test.ts)
+- `saveStudySession writes every file into one folder per participant` + path-traversal rejection — [re_api/tests/study-store.test.ts](../re_api/tests/study-store.test.ts)
 - `study-session.js` bundle/artifact/zip tests — [tests/study-session.test.js](../tests/study-session.test.js)
 
 ---
@@ -118,7 +118,7 @@ Confirmed **not** telemetry (they look like events but never reach the recording
 - **On save / session end:** bundle (events + before/after dashboard snapshots, screenshots stripped)
   uploaded via the same-origin backend → **S3** when `STUDY_S3_BUCKET` + `AWS_REGION` + creds are set,
   otherwise written to local `data/` ([re_api/src/study-store.ts](../re_api/src/study-store.ts)).
-  Layout: `studies/{participant}/{session}/{stamp}.json` + `dashboards/checkpoint-NN.{json,png}` + `final.{json,png}`.
+  Layout: one folder per participant, `studies/{participant}/{session}_{filename}` — session log, `checkpoint-NN.{json,png}`, `final.{json,png}`, and the post scale.
 - **Backup:** local JSON + an uncompressed ZIP of dashboard files downloaded on End.
 
 Derivable without extra instrumentation: displayed-vs-inspected, time-on-critique

@@ -348,11 +348,15 @@ function svgMarkup(value) {
   }
 }
 
+function studyArtifactName(path) {
+  return String(path || "").replace(/\\/g, "/").split("/").filter(Boolean).pop() || "";
+}
+
 function pushBoardImage(artifacts, slug, pngDataUrl, svgFallback) {
   const png = pngBase64(pngDataUrl);
   if (png) {
     artifacts.push({
-      path: `dashboards/${slug}.png`,
+      path: `${slug}.png`,
       contentType: "image/png",
       encoding: "base64",
       data: png,
@@ -362,7 +366,7 @@ function pushBoardImage(artifacts, slug, pngDataUrl, svgFallback) {
   const svg = svgMarkup(svgFallback);
   if (svg && svg.length <= 2_000_000) {
     artifacts.push({
-      path: `dashboards/${slug}.svg`,
+      path: `${slug}.svg`,
       contentType: "image/svg+xml",
       text: svg,
     });
@@ -380,7 +384,7 @@ export function buildStudyDashboardArtifacts({
     const slug = dashboardFileSlug(version?.id, "checkpoint");
     if (version?.afterSnapshot) {
       artifacts.push({
-        path: `dashboards/${slug}.json`,
+        path: `${slug}.json`,
         contentType: "application/json",
         text: JSON.stringify(
           dashboardDocumentFromSnapshot(version.afterSnapshot, slug),
@@ -393,7 +397,7 @@ export function buildStudyDashboardArtifacts({
   }
   if (finalDocument) {
     artifacts.push({
-      path: "dashboards/final.json",
+      path: "final.json",
       contentType: "application/json",
       text: JSON.stringify(finalDocument, null, 2),
     });
@@ -507,15 +511,6 @@ function safeDownloadName(value) {
   return String(value || "na").replace(/[^A-Za-z0-9._-]+/g, "-");
 }
 
-const PHASE_FILE_SLUGS = {
-  pre_assessment: "01-pre-assessment",
-  training: "02-training",
-  dashboard_task: "03-dashboard-task",
-  timed_task: "03-dashboard-task",
-  post_assessment: "04-post-assessment",
-  complete: "05-session-complete",
-};
-
 /** Filesystem-safe UTC stamp: 2026-08-23T22-21-41Z */
 export function studyFileStamp(iso = nowIso()) {
   const text = String(iso || nowIso());
@@ -526,18 +521,11 @@ export function studyFileStamp(iso = nowIso()) {
 
 export function studyRecordFileName({
   recordKind = "phase-log",
-  phase = "",
-  assessment = "",
   savedAt,
 } = {}) {
   const stamp = studyFileStamp(savedAt);
-  if (recordKind === "scale") {
-    const which = String(assessment || phase).includes("post") ? "post" : "pre";
-    return `scale-${which}-${stamp}.json`;
-  }
-  const slug = PHASE_FILE_SLUGS[phase]
-    || `00-${String(recordKind || "record").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "record"}`;
-  return `${slug}-${stamp}.json`;
+  if (recordKind === "scale") return `scale-post-${stamp}.json`;
+  return `session-${stamp}.json`;
 }
 
 export function buildStudyBundle(snapshot = null, reason = "manual", options = {}) {
@@ -577,21 +565,19 @@ export function buildStudyBundle(snapshot = null, reason = "manual", options = {
 }
 
 export function buildStudyScaleRecord({
-  assessment,
   phase,
   scaleResponses = [],
   questionsPresented = [],
   submittedAt = null,
 } = {}) {
   const savedAt = nowIso();
-  const which = String(assessment || "").includes("post") ? "post" : "pre";
   return {
     schema: "vizier-study-scale/1",
     schemaVersion: 1,
     appVersion: STUDY_APP_VERSION,
     recordKind: "scale",
-    assessment: which,
-    phase: phase || (which === "post" ? "post_assessment" : "pre_assessment"),
+    assessment: "post",
+    phase: phase || "post_assessment",
     participantId: session ? session.participantId : null,
     groupId: session ? session.groupId : null,
     sessionId: session ? session.sessionId : null,
@@ -600,7 +586,7 @@ export function buildStudyScaleRecord({
     instrumentVersion: "vizier-study-scales-v1",
     questionsPresented: Array.isArray(questionsPresented) ? questionsPresented : [],
     scaleResponses: Array.isArray(scaleResponses) ? scaleResponses : [],
-    fileName: studyRecordFileName({ recordKind: "scale", assessment: which, savedAt }),
+    fileName: studyRecordFileName({ recordKind: "scale", savedAt }),
   };
 }
 
@@ -643,10 +629,8 @@ export function buildStudyBackupFiles(artifacts = [], bundle = {}) {
     names.add("session.json");
   }
   for (const artifact of artifacts || []) {
-    const parts = String(artifact?.path || "").replace(/^\/+/, "").split("/");
-    if (!parts.length || parts.some((part) => !part || part === "." || part === "..")) continue;
-    const name = parts.join("/");
-    if (names.has(name)) continue;
+    const name = studyArtifactName(artifact?.path);
+    if (!name || name === "." || name === ".." || names.has(name)) continue;
     names.add(name);
     files.push({ name, bytes: artifactBytes(artifact) });
   }

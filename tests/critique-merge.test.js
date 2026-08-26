@@ -12,6 +12,7 @@ import {
   mergeAskResults,
   pickCritiqueRefreshReplacement,
   refinementDirectionRequiresShorterText,
+  solutionRefinementCandidateMatches,
   solutionRefinementAlignment,
   solutionAttemptChanged,
 } from "../src/critique-merge.js";
@@ -30,6 +31,33 @@ function critique(overrides = {}) {
     ...overrides,
   };
 }
+
+test("solution refinement keeps the accepted diagnosis and exact target", () => {
+  const previous = critique({
+    object: "readability",
+    problem: "cluttered | crowded",
+    dimension: "text",
+    tileId: "did-you-know",
+    target: { granularity: "chart", ref: { tile: "did-you-know" } },
+  });
+  assert.equal(solutionRefinementCandidateMatches(previous, {
+    ...previous,
+    id: "alternative",
+    suggestion: "Use a different text hierarchy.",
+    proposal: { kind: "edit-spec", edits: [] },
+  }), true);
+  assert.equal(solutionRefinementCandidateMatches(previous, {
+    ...previous,
+    id: "drifted-target",
+    tileId: "population-trend",
+    target: { granularity: "chart", ref: { tile: "population-trend" } },
+  }), false);
+  assert.equal(solutionRefinementCandidateMatches(previous, {
+    ...previous,
+    id: "drifted-diagnosis",
+    problem: "missing explanatory context",
+  }), false);
+});
 
 test("critiqueIdentityKey matches on object|problem|location|remedy", () => {
   const a = critique();
@@ -370,26 +398,42 @@ test("critiqueRefreshRequest asks the engine to refresh one issue only", () => {
   assert.match(request, /Do not start a full new review/);
 });
 
-test("solution refinement keeps the diagnosis fixed and asks for one executable alternative", () => {
+test("solution refinement keeps the diagnosis fixed and requests one member of a three-option set", () => {
   const previous = critique({
     title: "The callout dominates the analysis",
     issue: "A small supporting fact occupies most of the canvas",
     evidence: "The callout is larger than both analytical charts",
     suggestion: "Shrink the callout",
     proposal: { kind: "edit-layout", mode: "executable" },
+    requestContract: { explicitChange: false, actions: ["evaluate"] },
     revision: 2,
   });
-  const request = critiqueSolutionRefinementRequest(previous, "Keep the layout; reduce only the empty space.");
+  const request = critiqueSolutionRefinementRequest(
+    previous,
+    "Keep the layout; reduce only the empty space.",
+    { optionIndex: 2, optionCount: 3, strategy: "Use a different spacing mechanism." },
+  );
   assert.match(request, /author accepts the diagnosis/i);
   assert.match(request, /Keep the issue, evidence, target, and scope fixed/);
+  assert.match(request, /option 2 of 3/i);
+  assert.match(request, /ALTERNATIVE STRATEGY: Use a different spacing mechanism/);
   assert.match(request, /exactly one concrete executable recommendation/);
   assert.match(request, /Keep the layout; reduce only the empty space/);
+
+  const optionalAlternative = critiqueSolutionRefinementRequest(
+    previous,
+    "Keep the layout; reduce only the empty space.",
+    { optionIndex: 3, optionCount: 3, allowNoAlternative: true },
+  );
+  assert.match(optionalAlternative, /only if it is meaningfully different/);
+  assert.match(optionalAlternative, /no distinct alternative is warranted/);
 
   const refined = buildRefinedCritique(previous, {
     title: "A different title that must not replace the diagnosis",
     issue: "A different issue that must not be accepted",
     suggestion: "Tighten padding inside the callout",
     proposal: { kind: "edit-spec", mode: "executable" },
+    requestContract: { explicitChange: true, actions: ["resize"] },
   }, "Keep the layout", 4);
   assert.equal(refined.id, previous.id);
   assert.equal(refined.title, previous.title);
@@ -399,6 +443,7 @@ test("solution refinement keeps the diagnosis fixed and asks for one executable 
   assert.equal(refined.proposal.kind, "edit-spec");
   assert.equal(refined.revision, 3);
   assert.equal(refined.lastEvaluatedVersion, 4);
+  assert.deepEqual(refined.requestContract, previous.requestContract);
   assert.deepEqual(refined.revisions.at(-1), {
     rationale: "Keep the layout",
     suggestion: "Tighten padding inside the callout",
@@ -433,7 +478,7 @@ test("shorter-text refinement becomes a prompt constraint and a client acceptanc
     },
   }, "the text is too long");
   assert.equal(stillLong.aligned, false);
-  assert.match(stillLong.reason, /not materially shorter/i);
+  assert.match(stillLong.reason, /replacement text was not materially shorter/i);
 
   const dodgesTextChange = solutionRefinementAlignment(previous, {
     suggestion: "Shorten the heading to its core takeaway.",
@@ -447,6 +492,22 @@ test("shorter-text refinement becomes a prompt constraint and a client acceptanc
     proposal: { kind: "dashboard-title", label: "Britain's garden birds are declining" },
   }, "the text is too long");
   assert.deepEqual(shorter, { aligned: true, reason: "" });
+});
+
+test("shorter-text validation does not mistake recommendation prose for dashboard copy", () => {
+  const previous = critique({
+    suggestion: "Add a takeaway subtitle beneath each chart label to explain what viewers should notice.",
+    proposal: { kind: "show-chart-subtitles", mode: "executable" },
+  });
+  const replacement = {
+    suggestion: "Use concise subtitles that state only the most important takeaway for each chart.",
+    proposal: { kind: "show-chart-subtitles", mode: "concise" },
+  };
+
+  assert.deepEqual(
+    solutionRefinementAlignment(previous, replacement, "the text is too long"),
+    { aligned: true, reason: "" },
+  );
 });
 
 test("shorter-text validation checks concrete text inside edit-spec proposals", () => {

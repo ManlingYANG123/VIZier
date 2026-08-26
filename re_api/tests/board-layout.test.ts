@@ -189,6 +189,22 @@ test("named small-multiples composition computes a safe equalized grid", () => {
   assert.equal(heights.size, 1);
 });
 
+test("a named composition promotes the model-selected case-specific hero tile", () => {
+  const b = board();
+  const applied = applyBoardProposal(b, boardCritique({
+    kind: "edit-layout",
+    mode: "executable",
+    composition: "hero-left",
+    layoutTiles: b.tiles!.map((tile) => tile.id),
+    heroTileId: "project-status",
+  }));
+  assert.equal(applied, true);
+  const hero = b.tiles!.find((tile) => tile.id === "project-status")!.bounds!;
+  const formerFirst = b.tiles!.find((tile) => tile.id === "task-velocity")!.bounds!;
+  assert.ok(hero.w > formerFirst.w, "the requested hero should receive the wide primary region");
+  assert.ok(hero.h > formerFirst.h, "the requested hero should receive the full composition height");
+});
+
 test("named compositions remain executable below a top KPI band", () => {
   const b = board();
   assert.equal(applyBoardProposal(b, kpiCritique(), dashboardSpecMap()), true);
@@ -398,6 +414,34 @@ test("computeKpis computes both per-year KPIs when each carries its distinguishi
   ]);
   assert.deepEqual(resolved.map((k) => k.value), ["50", "60"]);
   assert.deepEqual(resolved.map((k) => k.computed), [true, true]);
+});
+
+test("computeKpis requires every label-named dimension and supports AND-combined filters", () => {
+  const specMap = inlineSpecMap([
+    { bird: "House Sparrow", year: 1979, index: 100 },
+    { bird: "House Sparrow", year: 2023, index: 47 },
+    { bird: "Starling", year: 1979, index: 100 },
+    { bird: "Starling", year: 2023, index: 42 },
+    { bird: "Blue Tit", year: 2020, index: 124 },
+    { bird: "Blue Tit", year: 2023, index: 123 },
+  ]);
+  const unsupported = computeKpis(specMap, [{
+    label: "House Sparrow Index 2023",
+    tile: "t",
+    field: "index",
+    agg: "max",
+    filter: { field: "bird", value: "House Sparrow" },
+  }]);
+  assert.equal(unsupported[0].computed, false);
+  assert.equal(unsupported[0].value, "—", "must not relabel the 1979 maximum as a 2023 value");
+
+  const resolved = computeKpis(specMap, [
+    { label: "House Sparrow Index 2023", tile: "t", field: "index", agg: "max", filters: [{ field: "bird", value: "House Sparrow" }, { field: "year", value: 2023 }] },
+    { label: "Starling Index 2023", tile: "t", field: "index", agg: "max", filters: [{ field: "bird", value: "Starling" }, { field: "year", value: 2023 }] },
+    { label: "Blue Tit Index 2023", tile: "t", field: "index", agg: "max", filters: [{ field: "bird", value: "Blue Tit" }, { field: "year", value: 2023 }] },
+  ]);
+  assert.deepEqual(resolved.map((kpi) => kpi.value), ["47", "42", "123"]);
+  assert.deepEqual(resolved.map((kpi) => kpi.computed), [true, true, true]);
 });
 
 test("computeKpis reports a percentage whose scale is impossible as uncomputed", () => {

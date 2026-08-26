@@ -57,7 +57,7 @@ test("context extraction shows a breathing icon and rotating text hints instead 
   assert.match(css, /context-extract-dot-pulse/);
 });
 
-test("a Gemini-style running-light ring marks the context box, design-doc uploader, region box, and focused review while generating", async () => {
+test("a Gemini-style running-light ring marks the context box, design-doc uploader, region box, focused review, and Refine Solution while generating", async () => {
   const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
   const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 
@@ -69,12 +69,14 @@ test("a Gemini-style running-light ring marks the context box, design-doc upload
   assert.match(css, /\.doc-uploader\[data-state="loading"\]::before/);
   assert.match(css, /\.draft-marker\.is-generating::before/);
   assert.match(css, /\.focused-review-input-wrap\.is-generating::before/);
+  assert.match(css, /\.focus-action\.refine\.is-generating::before/);
   // The context field lights up on manual regenerate and on auto-inference.
   assert.match(source, /function setContextInferring\(/);
   assert.match(source, /\.context-box-field/);
   // The region selection box keeps its ring toggled by the submit lifecycle.
   assert.match(source, /\.draft-marker"\)\?\.classList\.toggle\("is-generating"/);
   assert.match(source, /function setFocusedReviewGenerating\(/);
+  assert.match(source, /function setRefineSolutionGenerating\(/);
 });
 
 test("a focused review send lights the input, then clears it and opens the generated critique", async () => {
@@ -232,6 +234,9 @@ test("group study routes boot the neutral runner before VIZier", async () => {
   assert.match(runner, /scale_response_recorded/);
   assert.match(runner, /questionResponses: serializeQuestionResponses/);
   assert.match(runner, /scaleResponses: serializeScaleResponses/);
+  assert.doesNotMatch(runner, /study-runner-state\.json/);
+  assert.doesNotMatch(runner, /questionnaires\//);
+  assert.match(runner, /scale-post-\$\{studyFileStamp/);
   assert.doesNotMatch(runner, /<textarea id="studyQuestion-/);
   assert.match(runner, /class="study-scale-interview-question"/);
   assert.doesNotMatch(runner, /study-interview-section/);
@@ -243,6 +248,8 @@ test("group study routes boot the neutral runner before VIZier", async () => {
   assert.match(app, /data-doc-preview>Preview PDF/);
   assert.match(app, /function previewDesignDocument\(\)/);
   assert.match(app, /window\.open\(url, "_blank", "noopener,noreferrer"\)/);
+  assert.match(app, /function iterableIds\(/);
+  assert.doesNotMatch(runner, /Retry finish task/);
   assert.match(styles, /\.study-assessment-layout/);
   assert.match(styles, /\.study-dashboard-wrap\s*\{[^}]*display:\s*flex/);
   assert.match(styles, /\.study-dashboard-world/);
@@ -377,7 +384,7 @@ test("focused critique details render before preview hydration", async () => {
   // relocated toggle visible on the canvas.
   assert.match(
     source,
-    /const descriptor = await focusPreviewDescriptor\(critique\);[\s\S]*?if \(state\.selectedCritiqueId !== critique\.id\) return;/,
+    /const \[descriptor\] = await Promise\.all\(\[[\s\S]*?focusPreviewDescriptor\(critique\)[\s\S]*?if \(state\.selectedCritiqueId !== critique\.id\) return;/,
   );
 });
 
@@ -584,6 +591,19 @@ test("learned context surfaces the top two suggestions and collapses the rest be
   assert.doesNotMatch(styles, /\.context-evidence/);
 });
 
+test("Saved Rationale shows the latest two and collapses older entries behind More", async () => {
+  const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+
+  assert.match(source, /Date\.parse\(rationale\.updatedAt \|\| rationale\.createdAt \|\| ""\)/);
+  assert.match(source, /const visibleRationales = orderedRationales\.slice\(0, 2\)/);
+  assert.match(source, /const overflowRationales = orderedRationales\.slice\(2\)/);
+  assert.match(source, /class="rationale-more context-suggestion-more"/);
+  assert.match(source, /Show \$\{overflowRationales\.length\} more saved/);
+  assert.match(styles, /\.rationale-more \{/);
+  assert.match(styles, /\.rationale-more-list \{/);
+});
+
 test("Saved Rationale and Learned Context stay hidden until earned, and a shown-but-empty Learned Context is compressed", async () => {
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
@@ -601,6 +621,9 @@ test("Saved Rationale and Learned Context stay hidden until earned, and a shown-
   assert.doesNotMatch(source, /const contextHasBeenInferred = /);
   assert.match(source, /class="rationale-memory"[^>]*\$\{showSavedRationale \? "" : "hidden"\}/);
   assert.match(source, /class="context-memory"[^>]*\$\{showLearnedContext \? "" : "hidden"\}/);
+  assert.match(styles, /--rationale-body-indent: 10px;/);
+  assert.match(styles, /\.rationale-source strong \{\s*margin-left: var\(--rationale-body-indent\);/);
+  assert.match(styles, /margin: 5px 0 6px var\(--rationale-body-indent\);/);
 
   // Learned Context can still be shown-but-empty (preference agent analyzing, no
   // suggestions yet); that waiting state stays compressed via :has(), and the
@@ -702,6 +725,30 @@ test("a stale-context critique disables Accept and offers an inline regenerate r
   // Distinct styling for the recovery notice and its inline action button.
   assert.match(styles, /\.focus-decision-notice\.needs-regenerate/);
   assert.match(styles, /\.focus-notice-action/);
+});
+
+test("overlapping critiques refresh independently in the background after Apply", async () => {
+  const [source, styles] = await Promise.all([
+    readFile(new URL("../src/app.js", import.meta.url), "utf8"),
+    readFile(new URL("../src/styles.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(source, /backgroundCritiqueRefreshes: new Map\(\)/);
+  assert.match(source, /function queueAffectedCritiqueRefreshes/);
+  assert.match(source, /void Promise\.allSettled\(promises\)/);
+  assert.match(source, /\{ persistReviewMeta: false, trace: false, focusPurpose: "stale-refresh" \}/);
+  assert.match(source, /activeJob\?\.token !== token/);
+  assert.match(source, /Number\(state\.version\) !== baseVersion/);
+  assert.match(source, /cancelBackgroundCritiqueRefresh\(critique\.id\)/);
+  assert.match(source, /Updating this fix for the current dashboard/);
+  assert.match(source, /Accept and Refine will unlock automatically/);
+  assert.match(source, /aria-describedby="focusActionUpdate"/);
+  assert.match(source, /focusRetryBackgroundRefresh/);
+  assert.match(styles, /\.background-refresh-chip/);
+  assert.match(styles, /\.background-refresh-chip \{[\s\S]*?color: var\(--brand\)/);
+  assert.match(styles, /\.focus-update-status \{/);
+  assert.match(styles, /\.focus-action-update \{/);
+  assert.match(styles, /background-critique-refresh-spin/);
 });
 
 test("the KPI band renders real engine-computed values, not a hardcoded placeholder set", async () => {

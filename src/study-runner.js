@@ -19,6 +19,7 @@ import {
   saveStudySessionToServer,
   setStudyPhase,
   startStudySession,
+  studyFileStamp,
   studySessionInfo,
   studyTaskCapture,
 } from "./study-session.js";
@@ -315,10 +316,17 @@ async function captureCurrentInterfaceState() {
     captureAssessmentInterfaceState(screen);
   }
   if (screen.view === "workspace") {
-    const app = await import("./app.js");
-    if (typeof app.captureStudyRunnerWorkspaceState === "function") {
-      runnerState.workspaces ||= {};
-      runnerState.workspaces[screen.phase] = app.captureStudyRunnerWorkspaceState();
+    try {
+      const app = await import("./app.js");
+      if (typeof app.captureStudyRunnerWorkspaceState === "function") {
+        runnerState.workspaces ||= {};
+        runnerState.workspaces[screen.phase] = app.captureStudyRunnerWorkspaceState();
+      }
+    } catch (error) {
+      recordStudyAction("workspace_capture_failed", "Could not snapshot the study workspace", {
+        phase: screen.phase,
+        error: error?.message || String(error),
+      });
     }
   }
   persistRunnerState();
@@ -1326,24 +1334,21 @@ async function completeRunnerSession() {
   persistRunnerState();
 }
 
-function questionnaireBackupArtifact(key) {
-  const assessment = ensureAssessmentState(key);
+function questionnaireBackupArtifact() {
+  const assessment = ensureAssessmentState("post");
   const questions = POST_QUESTIONS;
-  const sections = scaleSectionsForAssessment(key);
+  const sections = scaleSectionsForAssessment("post");
   return {
-    path: `questionnaires/${key}.json`,
+    path: `scale-post-${studyFileStamp(assessment.submittedAt)}.json`,
     contentType: "application/json",
     text: JSON.stringify({
       schema: "vizier-study-questionnaire/1",
-      assessment: key,
+      assessment: "post",
       submittedAt: assessment.submittedAt,
       openQuestionResponseMode: "spoken-interview",
       questionsPresented: questions,
       questionResponses: serializeQuestionResponses(questions, assessment.answers),
       scaleResponses: serializeScaleResponses(sections, assessment.scales),
-      annotations: assessment.annotations,
-      dashboardFilters: assessment.filters,
-      submissionHistory: assessment.submissions,
     }, null, 2),
   };
 }
@@ -1354,12 +1359,7 @@ function buildRunnerBackup() {
     snapshot: capture.snapshot,
     artifacts: [
       ...capture.artifacts,
-      {
-        path: "study-runner-state.json",
-        contentType: "application/json",
-        text: JSON.stringify(runnerState, null, 2),
-      },
-      questionnaireBackupArtifact("post"),
+      questionnaireBackupArtifact(),
     ],
   };
 }
@@ -1467,8 +1467,16 @@ async function mountVizierPhase() {
       materialCode: material.code,
     });
     runnerState.workspaces ||= {};
-    const finishedWorkspace = app.captureStudyRunnerWorkspaceState();
-    runnerState.workspaces[runnerState.phase] = finishedWorkspace;
+    let finishedWorkspace = null;
+    try {
+      finishedWorkspace = app.captureStudyRunnerWorkspaceState();
+      runnerState.workspaces[runnerState.phase] = finishedWorkspace;
+    } catch (error) {
+      recordStudyAction("workspace_capture_failed", "Could not snapshot the study workspace", {
+        phase: runnerState.phase,
+        error: error?.message || String(error),
+      });
+    }
     runnerState.workspaceSubmissions ||= {};
     runnerState.workspaceSubmissions[runnerState.phase] ||= [];
     runnerState.workspaceSubmissions[runnerState.phase].push({
@@ -1483,24 +1491,26 @@ async function mountVizierPhase() {
       try {
         await app.captureStudyRunnerTaskDashboard();
       } catch (error) {
-        button.disabled = false;
-        button.textContent = "Retry finish task";
-        startStageTimerTicker();
         recordStudyAction("task_backup_failed", "Could not capture the dashboard task backup", {
           groupId: runnerGroup.id,
           materialCode: material.code,
           error: error?.message || String(error),
         });
-        window.alert("The task backup could not be prepared. Your work is still open; please try again.");
-        return;
       }
     }
     stopPhaseTimer(runnerState.phase, completedAt);
     const nextPhase = nextStudyPhase(runnerState.phase);
-    await navigateToStudyScreen(`${nextPhase}:intro`, {
-      source: isTask ? "dashboard-task-complete" : "training-complete",
-      capture: false,
-    });
+    try {
+      await navigateToStudyScreen(`${nextPhase}:intro`, {
+        source: isTask ? "dashboard-task-complete" : "training-complete",
+        capture: false,
+      });
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = isTask ? "Finish formal use" : "Finish practice";
+      startStageTimerTicker();
+      window.alert(error?.message || "Could not finish this stage. Please try again.");
+    }
   });
 }
 

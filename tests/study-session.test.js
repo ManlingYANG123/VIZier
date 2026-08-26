@@ -68,12 +68,12 @@ test("buildStudyDashboardArtifacts writes PNG and JSON for every checkpoint plus
   });
   const paths = artifacts.map((item) => item.path);
   assert.deepEqual(paths, [
-    "dashboards/checkpoint-01.json",
-    "dashboards/checkpoint-01.png",
-    "dashboards/checkpoint-02.json",
-    "dashboards/checkpoint-02.png",
-    "dashboards/final.json",
-    "dashboards/final.png",
+    "checkpoint-01.json",
+    "checkpoint-01.png",
+    "checkpoint-02.json",
+    "checkpoint-02.png",
+    "final.json",
+    "final.png",
   ]);
   const firstJson = JSON.parse(artifacts[0].text);
   assert.equal(firstJson.dashboard.title, "Dashboard 1");
@@ -89,7 +89,7 @@ test("buildStudyDashboardArtifacts accepts PNG data URLs with extra parameters",
     finalDocument: { dashboard: { id: "final", title: "Live board" }, tiles: [] },
     finalPng: "data:image/png;base64,iVBORw0KGgo=",
   });
-  const png = artifacts.find((item) => item.path === "dashboards/checkpoint-01.png");
+  const png = artifacts.find((item) => item.path === "checkpoint-01.png");
   assert.equal(png?.data, "iVBORw0KGgo=");
 });
 
@@ -101,10 +101,10 @@ test("buildStudyDashboardArtifacts falls back to SVG when PNG capture is missing
   });
   const paths = artifacts.map((item) => item.path);
   assert.deepEqual(paths, [
-    "dashboards/checkpoint-01.json",
-    "dashboards/checkpoint-01.svg",
-    "dashboards/final.json",
-    "dashboards/final.svg",
+    "checkpoint-01.json",
+    "checkpoint-01.svg",
+    "final.json",
+    "final.svg",
   ]);
 });
 
@@ -140,29 +140,29 @@ test("study events carry schema v2 envelope fields and request parent links", ()
   assert.equal(linkB.parentRequestId, "req-a");
 });
 
-test("study records use readable phase and scale file names", () => {
+test("study records use one session log and a post scale file", () => {
   startStudySession({ participantId: "P03" });
   assert.equal(
-    studyRecordFileName({ phase: "pre_assessment", savedAt: "2026-08-23T22:21:41.333Z" }),
-    "01-pre-assessment-2026-08-23T22-21-41Z.json",
+    studyRecordFileName({ savedAt: "2026-08-23T22:21:41.333Z" }),
+    "session-2026-08-23T22-21-41Z.json",
   );
   assert.equal(
-    studyRecordFileName({ recordKind: "scale", assessment: "post", savedAt: "2026-08-23T22:22:12.000Z" }),
+    studyRecordFileName({ recordKind: "scale", savedAt: "2026-08-23T22:22:12.000Z" }),
     "scale-post-2026-08-23T22-22-12Z.json",
   );
-  const bundle = buildStudyBundle(null, "pre-assessment-complete", { recordKind: "phase-log", phase: "pre_assessment" });
+  const bundle = buildStudyBundle(null, "runner-complete", { recordKind: "phase-log", phase: "complete" });
   assert.equal(bundle.recordKind, "phase-log");
-  assert.match(bundle.fileName, /^01-pre-assessment-/);
-  const scale = buildStudyScaleRecord({ assessment: "pre", scaleResponses: [{ itemId: "a", value: 7 }] });
+  assert.match(bundle.fileName, /^session-/);
+  const scale = buildStudyScaleRecord({ scaleResponses: [{ itemId: "a", value: 7 }] });
   assert.equal(scale.recordKind, "scale");
-  assert.equal(scale.assessment, "pre");
-  assert.match(scale.fileName, /^scale-pre-/);
+  assert.equal(scale.assessment, "post");
+  assert.match(scale.fileName, /^scale-post-/);
   assert.equal(studyFileStamp("2026-08-23T22:21:41.333Z"), "2026-08-23T22-21-41Z");
 });
 
 test("the task dashboard can be reused when writing the dashboard-task record", () => {
   startStudySession({ participantId: "P03" });
-  stashStudyTaskCapture({ dashboardTitle: "Task board" }, [{ path: "dashboards/final.json", text: "{}" }]);
+  stashStudyTaskCapture({ dashboardTitle: "Task board" }, [{ path: "final.json", text: "{}" }]);
   const capture = studyTaskCapture();
   assert.equal(capture.snapshot.dashboardTitle, "Task board");
   assert.equal(capture.artifacts.length, 1);
@@ -183,34 +183,30 @@ test("ending a session records session_ended then stops logging", () => {
 
 test("buildUncompressedZip stores named files that start with a ZIP signature", () => {
   const zip = buildUncompressedZip([
-    { name: "dashboards/final.json", bytes: new TextEncoder().encode('{"ok":true}') },
-    { name: "dashboards/final.png", bytes: new Uint8Array([137, 80, 78, 71]) },
+    { name: "final.json", bytes: new TextEncoder().encode('{"ok":true}') },
+    { name: "final.png", bytes: new Uint8Array([137, 80, 78, 71]) },
   ]);
   assert.equal(zip[0], 0x50);
   assert.equal(zip[1], 0x4b);
   assert.equal(zip[2], 0x03);
   assert.equal(zip[3], 0x04);
   const asText = new TextDecoder().decode(zip);
-  assert.match(asText, /dashboards\/final\.json/);
-  assert.match(asText, /dashboards\/final\.png/);
+  assert.match(asText, /final\.json/);
+  assert.match(asText, /final\.png/);
 });
 
-test("a complete backup contains the session record and every autosaved artifact", () => {
+test("a complete backup contains the session record and flat study artifacts", () => {
   const files = buildStudyBackupFiles([
-    { path: "study-runner-state.json", text: '{"phase":"complete"}' },
-    { path: "questionnaires/pre.json", text: '{"assessment":"pre"}' },
-    { path: "questionnaires/post.json", text: '{"assessment":"post"}' },
+    { path: "scale-post-2026-08-21T17-00-00Z.json", text: '{"assessment":"post"}' },
     { path: "dashboards/final.json", text: '{"dashboard":{}}' },
-    { path: "dashboards/final.png", encoding: "base64", data: "iVBORw0KGgo=" },
+    { path: "final.png", encoding: "base64", data: "iVBORw0KGgo=" },
   ], { participantId: "P01", events: [{ eventName: "session_ended" }] });
   assert.deepEqual(files.map((file) => file.name), [
     "session.json",
-    "study-runner-state.json",
-    "questionnaires/pre.json",
-    "questionnaires/post.json",
-    "dashboards/final.json",
-    "dashboards/final.png",
+    "scale-post-2026-08-21T17-00-00Z.json",
+    "final.json",
+    "final.png",
   ]);
   assert.match(new TextDecoder().decode(files[0].bytes), /session_ended/);
-  assert.equal(files[5].bytes[0], 0x89);
+  assert.equal(files[3].bytes[0], 0x89);
 });

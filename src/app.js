@@ -3,6 +3,7 @@ import "./styles.css";
 import {
   buildApplicationPlan,
   enrichRecommendations,
+  largestCompatibleSelection,
   relationshipSummary,
   retainRecommendationFreshness,
 } from "./recommendation-engine.js";
@@ -119,6 +120,7 @@ import {
   isDecidedCritique,
   mergeAskResults,
   pickCritiqueRefreshReplacement,
+  solutionRefinementCandidateMatches,
   solutionRefinementAlignment,
   solutionAttemptChanged,
 } from "./critique-merge.js";
@@ -429,6 +431,7 @@ const state = {
   // stays outside context so a one-off question does not become durable memory.
   reviewRequest: "",
   focusedReviewRunning: false,
+  solutionRefinementRunning: false,
   reviewInFlight: false,
   // The most recent direct answer to a focused/region ask. Surfaced in its own
   // panel so a narrow question always gets a visible response, even when the
@@ -458,6 +461,10 @@ const state = {
   rationaleEditId: null,
   rationaleIntent: "save",
   refinementRequestToken: 0,
+  // On-demand alternatives for one accepted diagnosis. These stay transient
+  // until the author explicitly chooses one; generation alone never mutates
+  // the visible critique or dashboard.
+  refinementAlternatives: null,
   interactionJournal: [],
   nextInteractionEventId: 1,
   preferenceAgent: {
@@ -496,17 +503,26 @@ const state = {
   // an unresolved conflict blocks Apply until one of the pair is unchecked.
   batchMode: false,
   batchSelection: new Set(),
-  // A combined revision is still an author decision, not an automatic
-  // recommendation. Each included critique must be opened and explicitly
-  // accepted before the merged Apply action becomes available.
-  batchReviewedIds: new Set(),
-  // Applying is permitted only when the exact current selection has produced a
-  // valid combined preview. A full review also records how many recommendations
-  // the automatic safe-subset pass had to leave out.
+  // Combined preview is explicit and temporary. Selecting recommendations never
+  // changes the canvas until the author turns Preview on; Apply stays gated on
+  // the exact selected set passing the transaction and rendered-layout checks.
+  batchPreviewEnabled: false,
   batchPreviewValidated: false,
   batchPreviewFailure: null,
-  batchAutoSummary: null,
-  batchAutoPreviewToken: 0,
+  // Selection is the author's intent; these describe the exact compatible
+  // subset represented on the canvas and the checked items held outside it.
+  batchPreviewIds: new Set(),
+  batchPreviewExcluded: new Map(),
+  // A validated combined preview is expensive to rebuild. Keep its exact canvas
+  // result while the author opens individual critiques, and reuse it when they
+  // return without changing the selection, dashboard version, or fix specs.
+  batchCanvasPreview: null,
+  batchCanvasPreviewKey: null,
+  batchPreviewPending: false,
+  // A safe combined canvas is still only a proposal. Track which of the exact
+  // fixes shown in that preview the author has opened and explicitly approved;
+  // the combined Apply action stays locked until every shown fix is reviewed.
+  batchReviewedIds: new Set(),
   // Monotonic token guarding the async combined preview against out-of-order
   // resolution when the selection changes faster than the engine responds.
   batchPreviewToken: 0,
@@ -516,6 +532,11 @@ const state = {
   // After a single-critique refresh finds the issue gone: keep the focus card
   // open with a confirmation, then return to the main list on Back to Critiques.
   critiqueRefreshNotice: null,
+  // Automatic stale-recovery is isolated per critique. Each entry owns its own
+  // request token and dashboard version so parallel responses cannot overwrite
+  // one another or commit after the author rejects/switches dashboards.
+  backgroundCritiqueRefreshes: new Map(),
+  nextBackgroundCritiqueRefreshToken: 0,
 };
 
 let preferenceAgentTimer = null;
@@ -645,6 +666,20 @@ document.querySelector("#app").innerHTML = `
         title="Drag or use the arrow keys to resize. Press Enter or double-click to reset."
       ></div>
       <main class="canvas-viewport" id="canvasViewport">
+        <div class="combined-preview-banner" id="combinedPreviewBanner" role="status" aria-live="polite" hidden>
+          <span class="combined-preview-banner-dot" aria-hidden="true"></span>
+          <strong id="combinedPreviewBannerTitle">PREVIEW MODE</strong>
+          <span id="combinedPreviewBannerMeta">Temporary · Nothing applied</span>
+        </div>
+        <div class="canvas-preview-updating" id="canvasPreviewUpdating" role="status" aria-live="polite" aria-atomic="true" hidden>
+          <div class="canvas-preview-updating-card">
+            <span class="preview-bouncing-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span class="canvas-preview-updating-copy">
+              <strong>Updating preview</strong>
+              <span id="canvasPreviewUpdatingMeta">Combining selected changes · Nothing applied</span>
+            </span>
+          </div>
+        </div>
         <div class="canvas-action-strip" role="group" aria-label="Canvas review tools">
           <button class="local-review-button" id="localReviewButton" type="button" aria-label="Confirm context before starting a local critique" data-tooltip="Confirm context first to review an area" aria-pressed="false" disabled>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H4a1 1 0 0 0-1 1v4M16 3h4a1 1 0 0 1 1 1v4M8 21H4a1 1 0 0 1-1-1v-4M16 21h4a1 1 0 0 0 1-1v-4"/><path d="m8 16 8-8M13 7l4 4"/></svg>
@@ -779,25 +814,41 @@ document.querySelector("#app").innerHTML = `
           <div class="empty-state">No critiques yet.</div>
         </div>
         <div class="batch-apply-bar" id="batchApplyBar" role="group" aria-label="Apply selected recommendations" hidden>
-          <button class="batch-enter-button" id="batchSelectToggle" type="button" aria-label="Review recommendations as one combined revision">
+          <button class="batch-enter-button" id="batchSelectToggle" type="button" aria-label="Select multiple recommendations to preview or apply together">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><path d="m14.5 17 2 2 4-4.5"/></svg>
-            <span>Review combined changes</span>
+            <span>Select multiple</span>
           </button>
           <div class="batch-apply-active">
             <div class="batch-apply-head">
               <strong id="batchApplyCount">0 selected</strong>
-              <button class="button ghost small" id="batchExitButton" type="button" aria-label="Exit combined revision preview">Exit preview</button>
+              <button class="button ghost small" id="batchExitButton" type="button" aria-label="Done selecting recommendations">Done</button>
             </div>
+            <button class="batch-preview-toggle" id="batchPreviewToggle" type="button" role="switch" aria-checked="false" aria-label="Preview selected changes" disabled>
+              <span class="batch-preview-toggle-copy">
+                <strong>Preview selected</strong>
+                <small>Temporary · nothing applied</small>
+              </span>
+              <span class="batch-preview-switch-track" aria-hidden="true"><span class="batch-preview-switch-thumb"></span></span>
+            </button>
             <span id="batchApplyNote"></span>
+            <div class="batch-exclusion-notice" id="batchExclusionNotice" role="status" hidden>
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5 18 17H2L10 2.5Z"/><path d="M10 7v4.5M10 14.3v.2"/></svg>
+              <span class="batch-exclusion-copy">
+                <strong id="batchExclusionTitle"></strong>
+                <span>They conflict with, depend on, or did not pass checks alongside the previewed changes.</span>
+              </span>
+              <button type="button" id="batchShowExcludedButton">Show excluded</button>
+            </div>
             <span class="batch-preview-status" id="batchPreviewStatus" aria-live="polite" hidden>
-              <span class="batch-preview-spinner" aria-hidden="true"></span>Building combined preview…
+              <span class="preview-bouncing-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <strong>Updating preview…</strong>
             </span>
             <div class="batch-apply-actions">
-              <button class="button ghost small" id="batchSelectAllButton" type="button">Include all</button>
-              <button class="button ghost small" id="batchClearButton" type="button">Remove all</button>
+              <button class="button ghost small" id="batchSelectAllButton" type="button">Select all</button>
+              <button class="button ghost small" id="batchClearButton" type="button">Clear all</button>
               <button class="button primary small" id="batchApplyButton" type="button" disabled>
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7"/></svg>
-                <span>Review next</span>
+                <span>Apply selected</span>
               </button>
             </div>
           </div>
@@ -850,7 +901,11 @@ document.querySelector("#app").innerHTML = `
         <textarea id="contextInput" rows="2" maxlength="600" required placeholder="e.g. Keep labels readable from across the room."></textarea>
         <p class="rationale-hint" id="rationaleHint" hidden></p>
         <p class="rationale-error" id="rationaleError" role="alert" hidden></p>
-        <div class="modal-actions"><button class="button primary small rationale-submit" id="saveRationaleButton" type="submit">Keep this in mind</button></div>
+        <div class="refinement-choices" id="refinementChoices" role="radiogroup" aria-label="Alternative solutions" hidden></div>
+        <div class="modal-actions">
+          <button class="button ghost small refinement-regenerate" id="regenerateRefinementChoices" type="button" hidden>Edit Direction</button>
+          <button class="button primary small rationale-submit" id="saveRationaleButton" type="submit">Keep this in mind</button>
+        </div>
       </form>
     </div>
   </div>
@@ -2740,7 +2795,16 @@ function renderRationaleMemory() {
       </div>`;
     return;
   }
-  host.innerHTML = state.rationales.map((rationale) => {
+  const orderedRationales = state.rationales
+    .map((rationale, index) => {
+      const timestamp = Date.parse(rationale.updatedAt || rationale.createdAt || "");
+      return { rationale, index, timestamp: Number.isFinite(timestamp) ? timestamp : 0 };
+    })
+    .sort((a, b) => (b.timestamp - a.timestamp) || (b.index - a.index))
+    .map((item) => item.rationale);
+  const visibleRationales = orderedRationales.slice(0, 2);
+  const overflowRationales = orderedRationales.slice(2);
+  const rationaleItem = (rationale) => {
     const presentation = critiqueGroupPresentation(rationale.dimension);
     return `
       <article class="rationale-memory-item" style="--rationale-accent:${presentation.color}">
@@ -2754,7 +2818,18 @@ function renderRationaleMemory() {
           <button type="button" data-rationale-remove="${escapeHTML(rationale.id)}">Remove</button>
         </div>
       </article>`;
-  }).join("");
+  };
+  const overflowMarkup = overflowRationales.length
+    ? `<details class="rationale-more context-suggestion-more">
+        <summary aria-label="Show ${overflowRationales.length} more saved ${overflowRationales.length === 1 ? "rationale" : "rationales"}" title="More saved rationale">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg>
+          <span>More</span>
+          <b>${overflowRationales.length}</b>
+        </summary>
+        <div class="rationale-more-list">${overflowRationales.map(rationaleItem).join("")}</div>
+      </details>`
+    : "";
+  host.innerHTML = visibleRationales.map(rationaleItem).join("") + overflowMarkup;
   host.querySelectorAll("[data-rationale-open]").forEach((button) => {
     button.addEventListener("click", async () => {
       const rationale = state.rationales.find((item) => item.id === button.dataset.rationaleOpen);
@@ -3501,6 +3576,21 @@ function setFocusedReviewGenerating(active) {
   wrap?.classList.toggle("is-generating", active);
   if (wrap) wrap.setAttribute("aria-busy", String(active));
   if (input) input.disabled = active;
+}
+
+function setRefineSolutionGenerating(active) {
+  state.solutionRefinementRunning = Boolean(active);
+  const button = document.getElementById("focusRefineSolution");
+  button?.classList.toggle("is-generating", state.solutionRefinementRunning);
+  if (!button) return;
+  button.toggleAttribute("aria-busy", state.solutionRefinementRunning);
+  if (state.solutionRefinementRunning) {
+    button.disabled = true;
+    return;
+  }
+  // Generation starts only from an enabled Refine control; restore it unless a
+  // later renderInspector pass decides it should stay locked.
+  button.disabled = false;
 }
 
 // Context is read live into state and reflected by the left-rail status dot.
@@ -4305,7 +4395,10 @@ function openRationaleModal(critique, rationale = null, anchor = null, { intent 
   const prompt = document.getElementById("rationalePrompt");
   const hint = document.getElementById("rationaleHint");
   const error = document.getElementById("rationaleError");
+  const choices = document.getElementById("refinementChoices");
+  const regenerate = document.getElementById("regenerateRefinementChoices");
   const submit = document.getElementById("saveRationaleButton");
+  state.refinementAlternatives = null;
   modal.dataset.intent = intent;
   modal.setAttribute("aria-label", refiningSolution
     ? `Refine the solution for ${title}`
@@ -4314,19 +4407,23 @@ function openRationaleModal(critique, rationale = null, anchor = null, { intent 
     ? "What should change about this solution?"
     : "What should VIZier keep in mind here?";
   hint.textContent = refiningSolution
-    ? "The identified issue stays fixed. VIZier will generate a different solution from your direction."
+    ? "The identified issue stays fixed. VIZier will generate 1–3 meaningful alternatives from your direction."
     : "";
   hint.hidden = !refiningSolution;
   error.hidden = true;
   error.textContent = "";
+  choices.hidden = true;
+  choices.innerHTML = "";
+  regenerate.hidden = true;
   submit.textContent = refiningSolution
-    ? "Generate Another Fix"
+    ? "Generate Alternative(s)"
     : rationale
       ? "Save thought"
       : "Keep this in mind";
   const ta = document.getElementById("contextInput");
   ta.value = rationale?.text || "";
   ta.disabled = false;
+  ta.hidden = false;
   ta.placeholder = refiningSolution
     ? "e.g. Keep the current layout and reduce only the empty space."
     : rationalePlaceholderFor(rationaleContext);
@@ -4341,6 +4438,8 @@ function openRationaleModal(critique, rationale = null, anchor = null, { intent 
 function closeContextModal({ cancelPending = true } = {}) {
   const modal = document.getElementById("contextModal");
   const input = document.getElementById("contextInput");
+  const restoreCritiquePreview = state.rationaleIntent === "refine-solution"
+    && state.canvasPreview?.alternativePreview;
   if (cancelPending && state.rationaleIntent === "refine-solution" && input.disabled) {
     // The engine request may still finish, but its token becomes stale so the
     // late response cannot replace the critique after the author closes here.
@@ -4352,14 +4451,133 @@ function closeContextModal({ cancelPending = true } = {}) {
   modal.removeAttribute("aria-label");
   document.getElementById("contextInjectForm").reset();
   input.disabled = false;
+  input.hidden = false;
   document.getElementById("saveRationaleButton").disabled = false;
+  document.getElementById("saveRationaleButton").textContent = "Keep this in mind";
   document.getElementById("rationaleHint").hidden = true;
   document.getElementById("rationaleError").hidden = true;
+  const choices = document.getElementById("refinementChoices");
+  choices.hidden = true;
+  choices.innerHTML = "";
+  document.getElementById("regenerateRefinementChoices").hidden = true;
   modal.removeAttribute("data-intent");
   state.contextTargetId = null;
   state.rationaleEditId = null;
   state.rationaleIntent = "save";
+  state.refinementAlternatives = null;
   rationaleAnchorElement = null;
+  if (restoreCritiquePreview) void renderInspector();
+}
+
+function refinementProposalLabel(alternative) {
+  const raw = alternative?.proposal?.kind || alternative?.recommendation || "Alternative fix";
+  return String(raw)
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+async function previewRefinementAlternative(critique, alternative, index) {
+  const pending = state.refinementAlternatives;
+  if (!pending || pending.critiqueId !== critique.id) return false;
+  const previewToken = (pending.previewToken || 0) + 1;
+  pending.previewToken = previewToken;
+  const candidate = buildRefinedCritique(critique, alternative, pending.rationale, state.version);
+  const candidateCritiques = state.critiques.map((item) => item.id === critique.id ? candidate : item);
+  try {
+    const result = pending.previewResults?.[index] || await streamApplyForCurrentMode({
+        version: state.version,
+        context: reviewContextForEngine(),
+        specMap: buildEngineSpecMap(),
+        board: buildEngineBoardMeta(),
+        critiques: candidateCritiques,
+        selectedRecommendationIds: [candidate.id],
+      });
+    if (!state.refinementAlternatives || state.refinementAlternatives.previewToken !== previewToken) return false;
+    if (result?.rollback?.rolledBack) {
+      throw new Error(result.rollback.reason || "This alternative did not pass the preview checks.");
+    }
+    state.canvasPreview = {
+      critiqueId: critique.id,
+      critiqueTitle: critique.title,
+      phase: "after",
+      result,
+      hasExecutableProposal: true,
+      alternativePreview: true,
+      alternativeIndex: index,
+      accent: critiqueGroupPresentation(critique.dimension).color,
+    };
+    renderCanvasPreviewControl();
+    renderDashboardChrome({ renderContext: false });
+    await renderTiles();
+    renderMarkers();
+    return true;
+  } catch (error) {
+    if (!state.refinementAlternatives || state.refinementAlternatives.previewToken !== previewToken) return false;
+    const message = error instanceof Error ? error.message : String(error);
+    const errorElement = document.getElementById("rationaleError");
+    errorElement.textContent = `This option could not be previewed: ${message}`;
+    errorElement.hidden = false;
+    return false;
+  }
+}
+
+function renderRefinementAlternatives(critique, alternatives, rationale, meta = {}) {
+  const choices = document.getElementById("refinementChoices");
+  const input = document.getElementById("contextInput");
+  const prompt = document.getElementById("rationalePrompt");
+  const hint = document.getElementById("rationaleHint");
+  const error = document.getElementById("rationaleError");
+  const submit = document.getElementById("saveRationaleButton");
+  const regenerate = document.getElementById("regenerateRefinementChoices");
+  state.refinementAlternatives = {
+    critiqueId: critique.id,
+    rationale,
+    alternatives: clone(alternatives),
+    previewResults: clone(meta.previewResults || []),
+    selectedIndex: null,
+    requestId: meta.requestId || null,
+    latencyMs: meta.latencyMs ?? null,
+    previewToken: 0,
+  };
+  prompt.textContent = "Choose another solution";
+  hint.textContent = `${alternatives.length} executable options follow your direction. The issue and evidence stay unchanged.`;
+  hint.hidden = false;
+  error.hidden = true;
+  input.hidden = true;
+  input.disabled = false;
+  choices.innerHTML = alternatives.map((alternative, index) => `
+    <label class="refinement-choice">
+      <input type="radio" name="refinementAlternative" value="${index}" />
+      <span class="refinement-choice-body">
+        <span class="refinement-choice-head">
+          <strong>Option ${index + 1}</strong>
+          <span>${escapeHTML(refinementProposalLabel(alternative))}</span>
+        </span>
+        <span class="refinement-choice-suggestion">${escapeHTML(alternative.suggestion || "Alternative executable solution")}</span>
+      </span>
+    </label>`).join("");
+  choices.hidden = false;
+  choices.querySelectorAll('input[name="refinementAlternative"]').forEach((radio) => {
+    radio.addEventListener("change", async () => {
+      state.refinementAlternatives.selectedIndex = Number(radio.value);
+      submit.disabled = true;
+      submit.textContent = "Previewing…";
+      error.hidden = true;
+      const previewed = await previewRefinementAlternative(
+        critique,
+        alternatives[Number(radio.value)],
+        Number(radio.value),
+      );
+      if (!state.refinementAlternatives || state.refinementAlternatives.critiqueId !== critique.id) return;
+      submit.textContent = "Choose this fix";
+      submit.disabled = !previewed;
+    });
+  });
+  regenerate.hidden = false;
+  submit.textContent = "Choose this fix";
+  submit.disabled = true;
+  choices.querySelector("input")?.focus();
+  positionRationalePopover(rationaleAnchorElement);
 }
 
 function renderRevisions(critique) {
@@ -4965,42 +5183,30 @@ function groupCritiquesWithStrengths(critiqueItems, strengthItems) {
   });
 }
 
-function batchExclusionReason(critiqueId) {
-  return state.batchAutoSummary?.exclusionReasons?.[critiqueId]
-    || "Its current solution could not be combined safely with this revision.";
-}
-
-function batchReviewMarkup(critique) {
-  if (!state.batchMode) return { className: "", badge: "", reason: "" };
-  const included = state.batchSelection.has(critique.id);
-  const reviewed = included && state.batchReviewedIds.has(critique.id);
-  const excluded = state.batchAutoSummary?.excludedIds?.includes(critique.id);
-  if (reviewed) {
-    return {
-      className: " revision-reviewed",
-      badge: '<span class="revision-state reviewed"><span aria-hidden="true">✓</span> Reviewed</span>',
-      reason: "",
-    };
-  }
-  if (included) {
-    return {
-      className: " revision-needs-review",
-      badge: '<span class="revision-state needs-review"><span aria-hidden="true">○</span> Review</span>',
-      reason: "",
-    };
-  }
-  if (excluded) {
-    return {
-      className: " revision-excluded",
-      badge: '<span class="revision-state excluded"><span aria-hidden="true">!</span> Not in this revision</span>',
-      reason: `<span class="revision-exclusion-reason">${escapeHTML(batchExclusionReason(critique.id))}</span>`,
-    };
-  }
-  return { className: " revision-outside", badge: "", reason: "" };
-}
-
 function critiqueCardMarkup(critique, directAnswer = false) {
-  const revision = batchReviewMarkup(critique);
+  const refreshJob = state.backgroundCritiqueRefreshes.get(critique.id);
+  const refreshChip = refreshJob?.status === "updating"
+    ? `<span class="background-refresh-chip"><span aria-hidden="true"></span>Updating</span>`
+    : refreshJob?.status === "failed"
+      ? `<span class="background-refresh-chip failed">Update failed</span>`
+      : "";
+  const batchEligible = state.batchMode && critiqueBatchEligible(critique);
+  const batchChecked = state.batchMode && state.batchSelection.has(critique.id);
+  const batchExcluded = batchChecked
+    && state.batchPreviewEnabled
+    && state.batchPreviewExcluded.has(critique.id);
+  const batchInPreview = batchChecked
+    && state.batchPreviewEnabled
+    && state.batchPreviewIds.has(critique.id);
+  const batchReviewed = batchInPreview && state.batchReviewedIds.has(critique.id);
+  const batchClass = state.batchMode
+    ? ` batch-mode${batchEligible ? "" : " batch-ineligible"}${batchChecked ? " batch-checked" : ""}${batchExcluded ? " batch-excluded" : ""}`
+    : "";
+  const checkboxMarkup = state.batchMode
+    ? `<span class="critique-checkbox" aria-hidden="true">${batchEligible
+        ? `<svg viewBox="0 0 16 16"><path d="m3.5 8.5 3 3 6-7"/></svg>`
+        : ""}</span>`
+    : "";
   // Guidance-only cards still read as a distinct kind — a warm surface and a
   // lighter title — but the fix/guidance distinction is now named explicitly by a
   // capsule chip (icon + "Fixable"/"Guidance") on both kinds, rather than a
@@ -5012,20 +5218,22 @@ function critiqueCardMarkup(critique, directAnswer = false) {
   // here so the wrapper is omitted entirely when empty — no stray gap.
   const summaryChips = [
     critiqueFixBadgeMarkup(critique),
-    revision.badge,
+    batchExcluded ? `<span class="batch-excluded-label">Not in preview</span>` : "",
+    batchInPreview ? `<span class="batch-review-label${batchReviewed ? " reviewed" : ""}">${batchReviewed ? "✓ Reviewed" : "Review"}</span>` : "",
+    refreshChip,
     directAnswer ? `<span class="request-match-label">Direct Answer</span>` : "",
     ["critical", "high"].includes(critique.priority)
       ? `<span class="priority-label priority-${escapeHTML(critique.priority)}">${escapeHTML(critiquePriorityShort(critique))}</span>`
       : "",
   ].join("");
   return `
-    <button class="critique-card priority-${escapeHTML(critique.priority || "normal")} ${directAnswer ? "direct-answer-card" : ""} ${guidance ? "guidance" : ""} ${state.selectedCritiqueId === critique.id ? "selected" : ""} ${critique.status}${state.batchMode ? ` revision-mode${revision.className}` : ""}" data-critique-id="${escapeHTML(critique.id)}">
+    <button class="critique-card priority-${escapeHTML(critique.priority || "normal")} ${directAnswer ? "direct-answer-card" : ""} ${guidance ? "guidance" : ""} ${state.selectedCritiqueId === critique.id ? "selected" : ""} ${critique.status}${batchClass}" data-critique-id="${escapeHTML(critique.id)}"${refreshJob?.status === "updating" ? ' aria-busy="true"' : ""}${state.batchMode ? ` role="checkbox" aria-checked="${batchChecked}"${batchEligible ? "" : " aria-disabled=\"true\""}` : ""}>
+      ${checkboxMarkup}
       <span class="diagnostic-body">
         <span class="critique-title">${escapeHTML(critique.title)}</span>
         ${summaryChips ? `<span class="critique-summary">${summaryChips}</span>` : ""}
-        ${revision.reason}
         <span class="visually-hidden">${["critical", "high", "medium", "low"].includes(critique.priority)
-          ? escapeHTML(critiquePriorityLabel(critique)) + ". " : ""}${escapeHTML(critiqueTargetLabel(critique))}. ${escapeHTML(critique.status)}. Open critique details.</span>
+          ? escapeHTML(critiquePriorityLabel(critique)) + ". " : ""}${escapeHTML(critiqueTargetLabel(critique))}. ${escapeHTML(critique.status)}. ${state.batchMode ? "Toggle selection." : "Open critique details."}</span>
       </span>
       ${critiqueCardAffordance(critique)}
     </button>`;
@@ -5033,6 +5241,10 @@ function critiqueCardMarkup(critique, directAnswer = false) {
 
 async function openCritiqueDetail(critique) {
   if (!critique) return;
+  if (
+    critiqueNeedsBackgroundRefresh(critique)
+    && !state.backgroundCritiqueRefreshes.has(critique.id)
+  ) startBackgroundCritiqueRefresh(critique, { render: false });
   state.selectedCritiqueId = critique.id;
   state.selectedTileId = critique.tileId || null;
   appendInteractionEvent({
@@ -5044,7 +5256,6 @@ async function openCritiqueDetail(critique) {
     data: { dwellFromMs: Date.now() },
   });
   markCritiqueInspected(critique.id);
-  await renderTiles();
   renderCritiques();
   renderMarkers();
   await renderInspector();
@@ -5158,9 +5369,33 @@ function renderCritiques() {
     node.addEventListener("click", async () => {
       const critique = critiqueById(node.dataset.critiqueId);
       if (!critique) return;
-      // A revision proposal must still be understood one critique at a time.
-      // Cards always open their diagnosis/evidence/solution detail; they never
-      // act as opaque recommendation checkboxes.
+      if (state.batchMode) {
+        if (!critiqueBatchEligible(critique)) return;
+        state.batchPreviewToken += 1;
+        state.batchPreviewValidated = false;
+        state.batchPreviewFailure = null;
+        state.batchPreviewIds = new Set();
+        state.batchPreviewExcluded = new Map();
+        invalidateBatchCanvasPreview();
+        // Changing the composition changes the proposed revision. Require a
+        // fresh pass through the fixes that survive the next preview.
+        state.batchReviewedIds = new Set();
+        if (state.batchSelection.has(critique.id)) state.batchSelection.delete(critique.id);
+        else state.batchSelection.add(critique.id);
+        if (!state.batchSelection.size) state.batchPreviewEnabled = false;
+        renderCritiques();
+        if (state.batchPreviewEnabled) await refreshBatchPreview();
+        else {
+          await clearBatchPreview();
+          renderBatchApplyBar();
+        }
+        emitPracticeAction("batch:selected", {
+          critiqueId: critique.id,
+          selectedIds: [...state.batchSelection],
+          count: state.batchSelection.size,
+        });
+        return;
+      }
       await openCritiqueDetail(critique);
     });
   });
@@ -5189,6 +5424,43 @@ function syncBatchToggle() {
   renderBatchApplyBar();
 }
 
+function batchPreviewCacheKey() {
+  return JSON.stringify({
+    version: Number(state.version) || 1,
+    context: state.lastReviewContextFingerprint || null,
+    selection: [...state.batchSelection].map((id) => {
+      const critique = critiqueById(id);
+      return [
+        id,
+        critique?.status || null,
+        Number(critique?.revision) || 0,
+        critique?.suggestion || "",
+        critique?.proposal || null,
+      ];
+    }),
+  });
+}
+
+function invalidateBatchCanvasPreview() {
+  state.batchCanvasPreview = null;
+  state.batchCanvasPreviewKey = null;
+}
+
+function cacheCurrentBatchCanvasPreview() {
+  if (!state.batchPreviewValidated || !state.canvasPreview?.batch) return;
+  state.batchCanvasPreview = clone(state.canvasPreview);
+  state.batchCanvasPreviewKey = batchPreviewCacheKey();
+}
+
+function cachedBatchPreviewIsCurrent() {
+  return Boolean(
+    state.batchPreviewValidated
+    && state.batchPreviewIds.size
+    && state.batchCanvasPreview?.batch
+    && state.batchCanvasPreviewKey === batchPreviewCacheKey(),
+  );
+}
+
 // Reset ALL batch state to off — the single source of truth for leaving batch
 // mode. Synchronous and render-free: it drops the selection, invalidates any
 // in-flight preview via the token, discards a batch combined preview, and syncs
@@ -5198,11 +5470,14 @@ function syncBatchToggle() {
 function resetBatchState() {
   state.batchMode = false;
   state.batchSelection = new Set();
-  state.batchReviewedIds = new Set();
+  state.batchPreviewEnabled = false;
   state.batchPreviewValidated = false;
   state.batchPreviewFailure = null;
-  state.batchAutoSummary = null;
-  state.batchAutoPreviewToken += 1;
+  state.batchPreviewIds = new Set();
+  state.batchPreviewExcluded = new Map();
+  state.batchReviewedIds = new Set();
+  invalidateBatchCanvasPreview();
+  state.batchPreviewPending = false;
   state.batchPreviewToken += 1; // invalidate any in-flight preview
   if (state.canvasPreview?.batch) state.canvasPreview = null;
   setBatchPreviewPending(false);
@@ -5227,15 +5502,17 @@ async function setBatchMode(on) {
   if (on) {
     state.batchMode = true;
     state.batchSelection = new Set();
-    state.batchReviewedIds = new Set();
+    state.batchPreviewEnabled = false;
     state.batchPreviewValidated = false;
     state.batchPreviewFailure = null;
-    state.batchAutoSummary = null;
-    state.batchAutoPreviewToken += 1;
+    state.batchPreviewIds = new Set();
+    state.batchPreviewExcluded = new Map();
+    state.batchReviewedIds = new Set();
+    invalidateBatchCanvasPreview();
+    state.batchPreviewPending = false;
     state.batchPreviewToken += 1; // invalidate any in-flight preview
     syncBatchToggle();
     renderCritiques();
-    await refreshBatchPreview();
     emitPracticeAction("batch:entered");
     return;
   }
@@ -5260,23 +5537,26 @@ async function setBatchMode(on) {
 // all (or a toggle that adds many fixes) can sit silent for a beat — this makes
 // the wait legible. Idempotent; safe to call on every preview entry/exit.
 function setBatchPreviewPending(pending) {
+  state.batchPreviewPending = Boolean(pending);
   const el = document.getElementById("batchPreviewStatus");
   if (el) el.hidden = !pending;
+  renderCanvasPreviewControl();
 }
 
 async function computeBatchPreview(selectedIds, source = null) {
   if (!selectedIds.length || !reviewResultsMatchContext() || !state.artifact.hasExecutableSpecs) {
     return { ok: false, plan: null, result: null, reason: null };
   }
-  const plan = buildApplicationPlan(selectedIds, state.critiques);
-  if (!plan.canApply) {
+  const compatible = largestCompatibleSelection(selectedIds, state.critiques);
+  const plan = compatible.plan;
+  if (!plan?.canApply) {
     return {
       ok: false,
       plan,
       result: null,
-      reason: plan.cyclic
-        ? "These suggestions depend on each other. Remove one and try again."
-        : "This selection contains conflicting suggestions. Remove one and try again.",
+      previewedIds: [],
+      excluded: compatible.excluded,
+      reason: "None of the selected suggestions could form a safe preview.",
     };
   }
   if (batchPlanGuidanceBlock(plan)) {
@@ -5284,6 +5564,8 @@ async function computeBatchPreview(selectedIds, source = null) {
       ok: false,
       plan,
       result: null,
+      previewedIds: [],
+      excluded: compatible.excluded,
       reason: "A required suggestion is guidance-only and cannot join the canvas preview.",
     };
   }
@@ -5301,29 +5583,47 @@ async function computeBatchPreview(selectedIds, source = null) {
         ok: false,
         plan,
         result,
+        previewedIds: [],
+        excluded: selectedIds.map((id) => ({ id, reason: "Did not pass the combined quality checks." })),
         reason: result?.rollback?.reason || "The combined result did not pass the dashboard quality check.",
       };
     }
-    // The canvas must represent the exact checked set. The engine may safely
-    // isolate a bad edit, but silently previewing only part of a checked set
-    // would make the later Apply ambiguous, so partial success is not validated.
+    // The engine may isolate another unsafe edit after the deterministic
+    // compatibility pass. Keep successful fixes, but expose every omitted
+    // selection so the canvas and later Apply remain exact and author-visible.
     const appliedIds = new Set(result.applicationOrder || []);
-    const omitted = plan.requested.filter((id) => !appliedIds.has(id));
-    if (omitted.length || result.unresolvedConflicts?.length) {
+    const previewedIds = compatible.selectedIds.filter((id) => appliedIds.has(id));
+    const omitted = compatible.selectedIds.filter((id) => !appliedIds.has(id));
+    const excluded = [
+      ...compatible.excluded,
+      ...omitted.map((id) => ({ id, reason: "Did not pass the combined quality checks." })),
+    ];
+    if (!previewedIds.length || result.unresolvedConflicts?.length) {
       return {
         ok: false,
         plan,
         result,
-        reason: "One or more selected suggestions could not be safely combined.",
+        previewedIds: [],
+        excluded,
+        reason: "None of the selected suggestions produced a safe combined preview.",
       };
     }
-    return { ok: true, plan, result, reason: null };
+    return {
+      ok: true,
+      plan: buildApplicationPlan(previewedIds, state.critiques),
+      result,
+      previewedIds,
+      excluded,
+      reason: null,
+    };
   } catch (error) {
     console.warn("[batch preview]", error);
     return {
       ok: false,
       plan,
       result: null,
+      previewedIds: [],
+      excluded: compatible.excluded,
       reason: error instanceof Error ? error.message : String(error),
     };
   }
@@ -5398,7 +5698,7 @@ function afterDashboardPaint() {
   return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 }
 
-async function presentBatchPreview(outcome, { renderBar = true } = {}) {
+async function presentBatchPreview(outcome, { renderBar = true, baselineErrors = [] } = {}) {
   state.batchPreviewValidated = false;
   state.batchPreviewFailure = null;
   state.canvasPreview = {
@@ -5416,7 +5716,8 @@ async function presentBatchPreview(outcome, { renderBar = true } = {}) {
   await renderTiles();
   renderMarkers();
   await afterDashboardPaint();
-  const renderedErrors = renderedBatchPreviewErrors();
+  const baseline = new Set(baselineErrors);
+  const renderedErrors = renderedBatchPreviewErrors().filter((error) => !baseline.has(error));
   if (renderedErrors.length) {
     state.batchPreviewFailure = `Preview failed the rendered layout check: ${renderedErrors[0]}`;
     await clearBatchPreview();
@@ -5428,182 +5729,148 @@ async function presentBatchPreview(outcome, { renderBar = true } = {}) {
   return { ok: true, errors: [] };
 }
 
+// A structurally compatible set can still reveal a new browser-rendered defect.
+// Add its candidates back one at a time so one bad transformation does not erase
+// every other safe preview. Selection stays untouched; rejected candidates are
+// named in the same excluded map as deterministic conflicts.
+async function recoverRenderedBatchPreview(selectedIds, initialOutcome, baselineErrors, token) {
+  let acceptedIds = [];
+  let bestOutcome = null;
+  const excluded = new Map(initialOutcome.excluded.map((item) => [item.id, item.reason]));
+
+  for (const id of initialOutcome.previewedIds) {
+    const trial = await computeBatchPreview([...acceptedIds, id]);
+    if (token !== state.batchPreviewToken) return null;
+    if (!trial.ok || !trial.previewedIds.includes(id)) {
+      excluded.set(id, "Could not safely join the rendered preview.");
+      continue;
+    }
+    state.batchPreviewIds = new Set(trial.previewedIds);
+    const presented = await presentBatchPreview(trial, { renderBar: false, baselineErrors });
+    if (presented.ok) {
+      acceptedIds = [...trial.previewedIds];
+      bestOutcome = trial;
+    } else {
+      excluded.set(id, `Introduced a rendered layout issue: ${presented.errors[0]}`);
+    }
+  }
+
+  if (!bestOutcome || !acceptedIds.length) return null;
+  for (const id of selectedIds) {
+    if (!acceptedIds.includes(id) && !excluded.has(id)) {
+      excluded.set(id, "Could not safely join the rendered preview.");
+    }
+  }
+  state.batchPreviewIds = new Set(acceptedIds);
+  state.batchPreviewExcluded = excluded;
+  const finalPresentation = await presentBatchPreview(bestOutcome, {
+    renderBar: false,
+    baselineErrors,
+  });
+  if (!finalPresentation.ok) return null;
+  const recovered = {
+    ...bestOutcome,
+    previewedIds: acceptedIds,
+    excluded: [...excluded].map(([id, reason]) => ({ id, reason })),
+  };
+  renderCritiques();
+  renderBatchApplyBar(recovered.plan);
+  return recovered;
+}
+
+// A whole-set rollback does not identify one culprit. Rebuild a safe transaction
+// incrementally so independent fixes survive while the first combination that
+// violates the engine quality gate is held outside the preview.
+async function recoverEngineBatchPreview(selectedIds, token) {
+  const compatible = largestCompatibleSelection(selectedIds, state.critiques);
+  let acceptedIds = [];
+  let bestOutcome = null;
+  const excluded = new Map(compatible.excluded.map((item) => [item.id, item.reason]));
+
+  for (const id of compatible.selectedIds) {
+    const trial = await computeBatchPreview([...acceptedIds, id]);
+    if (token !== state.batchPreviewToken) return null;
+    if (!trial.ok || !trial.previewedIds.includes(id)) {
+      excluded.set(id, trial.reason || "Did not pass the combined quality checks.");
+      continue;
+    }
+    acceptedIds = [...trial.previewedIds];
+    bestOutcome = trial;
+  }
+
+  if (!bestOutcome || !acceptedIds.length) return null;
+  for (const id of selectedIds) {
+    if (!acceptedIds.includes(id) && !excluded.has(id)) {
+      excluded.set(id, "Did not pass the combined quality checks.");
+    }
+  }
+  return {
+    ...bestOutcome,
+    previewedIds: acceptedIds,
+    excluded: [...excluded].map(([id, reason]) => ({ id, reason })),
+  };
+}
+
 async function refreshBatchPreview() {
   const token = ++state.batchPreviewToken;
   const selectedIds = [...state.batchSelection];
+  invalidateBatchCanvasPreview();
   state.batchPreviewValidated = false;
   state.batchPreviewFailure = null;
-  if (!selectedIds.length || !reviewResultsMatchContext() || !state.artifact.hasExecutableSpecs) {
+  state.batchPreviewIds = new Set();
+  state.batchPreviewExcluded = new Map();
+  if (!state.batchPreviewEnabled || !selectedIds.length || !reviewResultsMatchContext() || !state.artifact.hasExecutableSpecs) {
     setBatchPreviewPending(false);
     await clearBatchPreview();
     renderBatchApplyBar();
     return;
   }
-  renderBatchApplyBar();
   setBatchPreviewPending(true);
-  const outcome = await computeBatchPreview(selectedIds);
+  // Compare the proposed render against the committed dashboard so a known,
+  // pre-existing clipping/overlap issue does not block an unrelated preview.
+  await clearBatchPreview();
+  await afterDashboardPaint();
+  const baselineErrors = renderedBatchPreviewErrors();
+  renderBatchApplyBar();
+  let outcome = await computeBatchPreview(selectedIds);
   if (token !== state.batchPreviewToken) return; // superseded by a newer selection
-  setBatchPreviewPending(false);
   if (!outcome.ok) {
-    await failBatchPreview(outcome.reason);
-    renderBatchApplyBar(outcome.plan);
+    const recovered = await recoverEngineBatchPreview(selectedIds, token);
+    if (token !== state.batchPreviewToken) return;
+    if (!recovered) {
+      setBatchPreviewPending(false);
+      state.batchPreviewEnabled = false;
+      await failBatchPreview(outcome.reason);
+      renderBatchApplyBar(outcome.plan);
+      return outcome;
+    }
+    outcome = recovered;
+  }
+  state.batchPreviewIds = new Set(outcome.previewedIds);
+  state.batchPreviewExcluded = new Map(outcome.excluded.map((item) => [item.id, item.reason]));
+  if (state.batchPreviewValidated) {
+    state.batchReviewedIds = new Set(
+      [...state.batchReviewedIds].filter((id) => state.batchPreviewIds.has(id)),
+    );
+  }
+  renderCritiques();
+  const presentation = await presentBatchPreview(outcome, { baselineErrors });
+  if (presentation.ok) {
+    cacheCurrentBatchCanvasPreview();
+    setBatchPreviewPending(false);
     return outcome;
   }
-  const presentation = await presentBatchPreview(outcome);
-  return presentation.ok
-    ? outcome
-    : { ...outcome, ok: false, reason: state.batchPreviewFailure };
-}
-
-function explainRevisionExclusion(reason = "") {
-  const message = String(reason || "").toLowerCase();
-  if (message.includes("heading") && message.includes("kpi")) {
-    return "Its current fix makes the heading compete with the KPI area and would damage the page hierarchy.";
+  const recovered = await recoverRenderedBatchPreview(selectedIds, outcome, baselineErrors, token);
+  if (recovered) {
+    cacheCurrentBatchCanvasPreview();
+    setBatchPreviewPending(false);
+    return recovered;
   }
-  if (message.includes("clip") || message.includes("outside its chart frame")) {
-    return "Its current fix clips chart content when combined with the other changes.";
-  }
-  if (message.includes("overlap")) {
-    return "Its current fix overlaps another dashboard element in the combined layout.";
-  }
-  if (message.includes("conflict")) {
-    return "Its current fix conflicts with another change in this revision.";
-  }
-  if (message.includes("render") || message.includes("visible data")) {
-    return "Its current fix leaves part of the dashboard unreadable in the combined preview.";
-  }
-  return "Its current fix could not be combined safely with the other changes in this revision.";
-}
-
-// Full reviews open directly into the broadest combined result that passes the
-// same transaction and whole-dashboard quality gate as Apply. Try the complete
-// structurally compatible set first; only when that fails, rebuild greedily in
-// ranked order so a single unsafe recommendation cannot erase every useful
-// improvement. This changes preview state only — the Working Draft is untouched.
-async function startAutomaticCombinedPreview() {
-  const candidates = filteredCritiques().filter(critiqueBatchEligible);
-  if (!candidates.length) {
-    if (state.batchMode) await setBatchMode(false);
-    return;
-  }
-  const autoToken = ++state.batchAutoPreviewToken;
-  state.batchPreviewToken += 1;
-  state.batchMode = true;
-  state.batchPreviewValidated = false;
-  state.batchPreviewFailure = null;
-  state.batchAutoSummary = null;
-  state.batchReviewedIds = new Set();
-
-  const structurallySafe = [];
-  const exclusionReasons = {};
-  for (const critique of candidates) {
-    const trialIds = [...structurallySafe, critique.id];
-    const plan = buildApplicationPlan(trialIds, state.critiques);
-    if (!plan.canApply || batchPlanGuidanceBlock(plan)) {
-      const conflict = plan.unresolvedConflicts?.find((item) =>
-        item.recommendationIds?.includes(critique.id));
-      const otherId = conflict?.recommendationIds?.find((id) => id !== critique.id);
-      const other = critiqueById(otherId);
-      exclusionReasons[critique.id] = other
-        ? `Its current fix conflicts with “${other.title}”; both cannot be applied in the same revision.`
-        : explainRevisionExclusion(plan.cyclic ? "dependency conflict" : "conflict");
-      continue;
-    }
-    structurallySafe.push(critique.id);
-  }
-  state.batchSelection = new Set(structurallySafe);
-  renderCritiques();
-  renderBatchApplyBar();
-  setBatchPreviewPending(true);
-
-  // Every retry must start from the committed dashboard, not a previously
-  // painted trial. Otherwise a rejected preview can contaminate the next
-  // engine request and appear safe only because its changes were already staged.
-  const source = {
-    specMap: buildEngineSpecMap(),
-    board: buildEngineBoardMeta(),
-  };
-  const validateCandidate = async (ids) => {
-    const outcome = await computeBatchPreview(ids, source);
-    if (!outcome.ok) return outcome;
-    state.batchSelection = new Set(ids);
-    const presentation = await presentBatchPreview(outcome, { renderBar: false });
-    if (presentation.ok) return outcome;
-    return { ...outcome, ok: false, reason: state.batchPreviewFailure };
-  };
-
-  let safeIds = structurallySafe;
-  let finalOutcome = safeIds.length ? await validateCandidate(safeIds) : null;
-  if (autoToken !== state.batchAutoPreviewToken) return;
-
-  if (!finalOutcome?.ok) {
-    safeIds = [];
-    finalOutcome = null;
-    for (const critiqueId of structurallySafe) {
-      const trialIds = [...safeIds, critiqueId];
-      const trial = await validateCandidate(trialIds);
-      if (autoToken !== state.batchAutoPreviewToken) return;
-      if (trial.ok) {
-        safeIds = trialIds;
-        finalOutcome = trial;
-        delete exclusionReasons[critiqueId];
-      } else {
-        exclusionReasons[critiqueId] = explainRevisionExclusion(trial.reason);
-      }
-    }
-    // A layout fix can be unsafe in isolation yet become balanced once a
-    // complementary higher-priority fix is present. Retry the deferred items
-    // against the validated base, accepting each only when the enlarged set
-    // still passes. The result is maximal for single additions without forcing
-    // the system back to tiny, isolated tweaks.
-    for (const critiqueId of structurallySafe.filter((id) => !safeIds.includes(id))) {
-      const trialIds = [...safeIds, critiqueId];
-      const trial = await validateCandidate(trialIds);
-      if (autoToken !== state.batchAutoPreviewToken) return;
-      if (trial.ok) {
-        safeIds = trialIds;
-        finalOutcome = trial;
-        delete exclusionReasons[critiqueId];
-      } else {
-        exclusionReasons[critiqueId] = explainRevisionExclusion(trial.reason);
-      }
-    }
-  }
-
   setBatchPreviewPending(false);
-  const finalExcludedIds = candidates
-    .map((critique) => critique.id)
-    .filter((id) => !safeIds.includes(id));
-  finalExcludedIds.forEach((id) => {
-    if (!exclusionReasons[id]) exclusionReasons[id] = explainRevisionExclusion();
-  });
-  state.batchSelection = new Set(safeIds);
-  state.batchReviewedIds = new Set();
-  state.batchAutoSummary = {
-    requested: candidates.length,
-    included: safeIds.length,
-    excluded: finalExcludedIds.length,
-    excludedIds: finalExcludedIds,
-    exclusionReasons,
-  };
-  renderCritiques();
-  if (finalOutcome?.ok && safeIds.length) {
-    const presentation = await presentBatchPreview(finalOutcome);
-    if (!presentation.ok) {
-      await failBatchPreview(state.batchPreviewFailure);
-      renderBatchApplyBar(finalOutcome.plan);
-    }
-  } else {
-    await failBatchPreview("No combined set passed the dashboard quality check. Try previewing one suggestion at a time.");
-    renderBatchApplyBar();
-  }
-  recordStudyAction("combined_preview_built", `Previewed ${safeIds.length} safely combined recommendations`, {
-    requestedCritiqueIds: candidates.map((critique) => critique.id),
-    previewedCritiqueIds: safeIds,
-    excludedCritiqueIds: finalExcludedIds,
-    dashboardVersion: state.version,
-    committed: false,
-  });
+  state.batchPreviewEnabled = false;
+  await failBatchPreview(state.batchPreviewFailure);
+  renderBatchApplyBar(outcome.plan);
+  return { ...outcome, ok: false, reason: state.batchPreviewFailure };
 }
 
 // Drop a batch combined preview from the canvas and repaint to the committed
@@ -5620,8 +5887,13 @@ async function clearBatchPreview() {
 // A failed preview blocks Apply: the exact checked combination has not earned a
 // validated canvas state, so committing it would violate preview-before-apply.
 async function failBatchPreview(reason = null) {
+  invalidateBatchCanvasPreview();
+  setBatchPreviewPending(false);
   state.batchPreviewValidated = false;
   state.batchPreviewFailure = reason || "The combined result did not pass the dashboard quality check.";
+  state.batchPreviewIds = new Set();
+  state.batchPreviewExcluded = new Map();
+  state.batchReviewedIds = new Set();
   await clearBatchPreview();
 }
 
@@ -5631,6 +5903,12 @@ async function failBatchPreview(reason = null) {
 function renderBatchApplyBar(plan = null) {
   const bar = document.getElementById("batchApplyBar");
   if (!bar) return;
+  const focusDocked = Boolean(state.batchMode && state.selectedCritiqueId);
+  const listHost = document.getElementById("critiqueListView");
+  const panelHost = document.getElementById("critiquesPanelFixed");
+  const desiredHost = focusDocked ? panelHost : listHost;
+  if (desiredHost && bar.parentElement !== desiredHost) desiredHost.appendChild(bar);
+  bar.classList.toggle("focus-docked", focusDocked);
   // Show the bar when the list offers something to batch (the idle "Select
   // multiple" entry) OR we are already in batch mode. The second clause matters:
   // the only exit control (Done) lives in the active face, so once in batch mode
@@ -5647,34 +5925,48 @@ function renderBatchApplyBar(plan = null) {
   const applyButton = document.getElementById("batchApplyButton");
   const clearButton = document.getElementById("batchClearButton");
   const selectAllButton = document.getElementById("batchSelectAllButton");
-  const includedIds = [...state.batchSelection];
-  const reviewedIds = includedIds.filter((id) => state.batchReviewedIds.has(id));
-  const unreviewedIds = includedIds.filter((id) => !state.batchReviewedIds.has(id));
-  const isCuratedRevision = Boolean(state.batchAutoSummary);
-  if (countEl) countEl.textContent = `${reviewedIds.length} of ${count} reviewed`;
-  // Once the system has built and quality-checked a revision, it is no longer
-  // an arbitrary checkbox set. Keep the author in the critique-review loop so
-  // excluded fixes cannot be silently reintroduced without their explanation.
+  const previewToggle = document.getElementById("batchPreviewToggle");
+  const exclusionNotice = document.getElementById("batchExclusionNotice");
+  const exclusionTitle = document.getElementById("batchExclusionTitle");
+  if (countEl) countEl.textContent = `${count} selected`;
   if (clearButton) {
-    clearButton.hidden = isCuratedRevision;
     clearButton.disabled = count === 0;
   }
   // "Select all" adds every batch-eligible critique; disable it once nothing new
   // remains to add (no eligible critiques, or all of them are already selected).
   if (selectAllButton) {
-    selectAllButton.hidden = isCuratedRevision;
     const eligibleIds = filteredCritiques().filter(critiqueBatchEligible).map((c) => c.id);
     selectAllButton.disabled = !eligibleIds.length || eligibleIds.every((id) => state.batchSelection.has(id));
   }
-  const resolvedPlan = plan || (count ? buildApplicationPlan([...state.batchSelection], state.critiques) : null);
+  if (previewToggle) {
+    previewToggle.disabled = count === 0;
+    previewToggle.setAttribute("aria-checked", String(state.batchPreviewEnabled));
+    previewToggle.classList.toggle("is-on", state.batchPreviewEnabled);
+  }
+  const previewCount = state.batchPreviewIds.size;
+  const excludedCount = state.batchPreviewExcluded.size;
+  if (state.batchPreviewValidated) {
+    state.batchReviewedIds = new Set(
+      [...state.batchReviewedIds].filter((id) => state.batchPreviewIds.has(id)),
+    );
+  }
+  const reviewIds = [...state.batchPreviewIds];
+  const reviewedCount = reviewIds.filter((id) => state.batchReviewedIds.has(id)).length;
+  const nextReviewId = reviewIds.find((id) => !state.batchReviewedIds.has(id)) || null;
+  const resolvedPlan = plan || (previewCount
+    ? buildApplicationPlan([...state.batchPreviewIds], state.critiques)
+    : count ? buildApplicationPlan([...state.batchSelection], state.critiques) : null);
   const autoIncluded = resolvedPlan ? resolvedPlan.order.length - resolvedPlan.requested.length : 0;
-  let note = "Build a combined preview, then review every included critique before applying it.";
+  let note = count
+    ? "Turn on Preview to see these changes together before applying."
+    : "Select recommendations to preview or apply together.";
   if (count === 0) {
     note = state.batchPreviewFailure
       ? `${state.batchPreviewFailure} Nothing was applied.`
-      : "";
+      : note;
   }
   let canApply = false;
+  let canReview = false;
   if (count) {
     if (!reviewResultsMatchContext()) {
       // Staleness keeps the button disabled; no note — the reason is transient
@@ -5683,6 +5975,12 @@ function renderBatchApplyBar(plan = null) {
       note = "";
     } else if (state.batchPreviewFailure) {
       note = `${state.batchPreviewFailure} Nothing was applied.`;
+    } else if (state.batchPreviewEnabled && previewCount && state.batchPreviewValidated) {
+      canReview = Boolean(nextReviewId);
+      canApply = reviewedCount === previewCount;
+      note = canApply
+        ? "All previewed changes are reviewed. Nothing is applied yet."
+        : "Review each previewed change before applying.";
     } else if (resolvedPlan?.unresolvedConflicts.length) {
       note = `${resolvedPlan.unresolvedConflicts.length === 1 ? "One current fix conflicts" : `${resolvedPlan.unresolvedConflicts.length} current fixes conflict`} with this revision. Open the marked critique to refine it.`;
     } else if (resolvedPlan?.cyclic) {
@@ -5690,36 +5988,48 @@ function renderBatchApplyBar(plan = null) {
     } else if (resolvedPlan && batchPlanGuidanceBlock(resolvedPlan)) {
       note = "A prerequisite is guidance-only — apply it first.";
     } else if (resolvedPlan?.canApply && state.batchPreviewValidated) {
-      const excluded = state.batchAutoSummary?.excluded || 0;
       note = autoIncluded > 0
-        ? `This revision combines ${resolvedPlan.order.length} changes, including ${autoIncluded} prerequisite. Nothing is applied yet.`
-        : `The canvas shows the complete effect of ${resolvedPlan.order.length} combined ${resolvedPlan.order.length === 1 ? "change" : "changes"}. Nothing is applied yet.`;
-      if (excluded) {
-        note += ` ${excluded} valid ${excluded === 1 ? "issue is" : "issues are"} marked “Not in this revision” with an explanation.`;
-      }
-      if (unreviewedIds.length) {
-        note += ` Review ${unreviewedIds.length} ${unreviewedIds.length === 1 ? "critique" : "critiques"} before applying.`;
-      } else {
-        note += " Every included critique has been reviewed.";
-        canApply = true;
-      }
+        ? `Previewing ${resolvedPlan.order.length} combined changes, including ${autoIncluded} prerequisite. Temporary — nothing applied.`
+        : `Previewing ${resolvedPlan.order.length} selected ${resolvedPlan.order.length === 1 ? "change" : "changes"}. Temporary — nothing applied.`;
+      canReview = Boolean(nextReviewId);
+      canApply = state.batchPreviewEnabled && reviewedCount === previewCount;
     }
+  }
+  if (exclusionNotice) exclusionNotice.hidden = !(state.batchPreviewEnabled && excludedCount > 0);
+  if (exclusionTitle) {
+    exclusionTitle.textContent = `${excludedCount} selected ${excludedCount === 1 ? "change is" : "changes are"} not included in this preview.`;
   }
   if (noteEl) noteEl.textContent = note;
   if (applyButton) {
-    const canReview = unreviewedIds.length > 0 && reviewResultsMatchContext();
-    applyButton.dataset.action = canReview ? "review" : "apply";
-    applyButton.dataset.nextCritiqueId = unreviewedIds[0] || "";
     const label = applyButton.querySelector("span");
-    if (label) {
-      label.textContent = canReview
-        ? `Review next (${reviewedIds.length}/${count})`
-        : `Apply ${count} reviewed ${count === 1 ? "change" : "changes"}`;
+    const icon = applyButton.querySelector("svg");
+    if (nextReviewId && state.batchPreviewValidated) {
+      applyButton.dataset.action = "review";
+      applyButton.dataset.nextCritiqueId = nextReviewId;
+      applyButton.style.setProperty(
+        "--batch-review-progress",
+        String(previewCount ? reviewedCount / previewCount : 0),
+      );
+      applyButton.setAttribute(
+        "aria-label",
+        `Review next, ${reviewedCount} of ${previewCount} confirmed`,
+      );
+      if (label) label.textContent = `Review next (${reviewedCount}/${previewCount})`;
+      if (icon) icon.innerHTML = '<path d="m5.5 3.5 5 4.5-5 4.5"/>';
+    } else {
+      applyButton.dataset.action = "apply";
+      delete applyButton.dataset.nextCritiqueId;
+      applyButton.style.removeProperty("--batch-review-progress");
+      applyButton.removeAttribute("aria-label");
+      if (label) label.textContent = state.batchPreviewEnabled && previewCount
+        ? `Apply ${previewCount} previewed`
+        : `Apply ${count} selected`;
+      if (icon) icon.innerHTML = '<path d="m3.5 8.5 3 3 6-7"/>';
     }
-    applyButton.disabled = canReview ? false : !canApply;
+    applyButton.disabled = !(canReview || canApply);
   }
   bar.classList.toggle("ready", canApply);
-  bar.classList.toggle("reviewing", unreviewedIds.length > 0);
+  bar.classList.toggle("reviewing", canReview);
 }
 
 function proposedSpecFor(critique, preview = null) {
@@ -6120,6 +6430,10 @@ async function applyRecommendationSelection(selectedIds, conflictChoices = {}, {
   state.selectedCritiqueId = null;
   state.selectedTileId = null;
   state.canvasPreview = null;
+  // Refresh every still-active recommendation whose transformation overlaps the
+  // accepted change. Independent critiques were advanced to nextVersion above
+  // and are intentionally left alone.
+  queueAffectedCritiqueRefreshes({ render: false });
 
   renderCanvasPreviewControl();
   renderDashboardChrome();
@@ -6819,9 +7133,15 @@ async function focusPreviewDescriptor(critique) {
   const actionable = ["pending", "updated"].includes(critique.status);
   const checkpoint = revisionCheckpointForCritique(critique.id);
   const livePreview = actionable ? await enginePreviewFor(critique) : null;
+  const expectsLivePreview = actionable
+    && critique.proposal?.mode !== "guidance_only"
+    && critique.proposal?.kind !== "manual"
+    && state.artifact.hasExecutableSpecs;
   const previewFailure = livePreview?.rollback?.rolledBack
     ? (livePreview.rollback.reason || "This recommendation did not pass the apply quality checks.")
-    : null;
+    : expectsLivePreview && !livePreview
+      ? "VIZier could not produce a verified proposed dashboard for this recommendation. Nothing has been previewed or applied."
+      : null;
   const executable = actionable && !previewFailure &&
     critique.proposal?.mode !== "guidance_only" &&
     critique.proposal?.kind !== "manual" &&
@@ -7085,6 +7405,36 @@ function rescueCanvasPreviewControl() {
 function renderCanvasPreviewControl() {
   const control = document.getElementById("canvasPreviewControl");
   if (!control) return;
+  const combinedBanner = document.getElementById("combinedPreviewBanner");
+  const combinedPreviewVisible = Boolean(
+    state.batchPreviewEnabled && (
+      state.batchPreviewPending
+      || (state.canvasPreview?.batch && state.canvasPreview.phase === "after")
+    ),
+  );
+  if (combinedBanner) {
+    combinedBanner.hidden = !combinedPreviewVisible;
+    combinedBanner.classList.toggle("is-updating", state.batchPreviewPending);
+  }
+  const combinedTitle = document.getElementById("combinedPreviewBannerTitle");
+  if (combinedTitle && combinedPreviewVisible) {
+    combinedTitle.textContent = state.batchPreviewPending ? "UPDATING PREVIEW" : "PREVIEW MODE";
+  }
+  const combinedMeta = document.getElementById("combinedPreviewBannerMeta");
+  if (combinedMeta && combinedPreviewVisible) {
+    combinedMeta.textContent = state.batchPreviewPending
+      ? "Your current dashboard remains unchanged"
+      : `${state.batchPreviewIds.size} of ${state.batchSelection.size} selected changes shown · Nothing applied`;
+  }
+  const updatingOverlay = document.getElementById("canvasPreviewUpdating");
+  if (updatingOverlay) updatingOverlay.hidden = !state.batchPreviewPending;
+  const updatingMeta = document.getElementById("canvasPreviewUpdatingMeta");
+  if (updatingMeta && state.batchPreviewPending) {
+    const count = state.batchSelection.size;
+    updatingMeta.textContent = `Combining ${count} selected ${count === 1 ? "change" : "changes"} · Nothing applied`;
+  }
+  const canvasViewport = document.getElementById("canvasViewport");
+  if (canvasViewport) canvasViewport.setAttribute("aria-busy", String(state.batchPreviewPending));
   const desiredHost = canvasPreviewControlHome();
   if (desiredHost && control.parentElement !== desiredHost) desiredHost.appendChild(control);
   // While a single critique is focused but its detail card (and slot) has not been
@@ -7097,6 +7447,7 @@ function renderCanvasPreviewControl() {
     && state.canvasPreview.guidanceOnly,
   );
   control.hidden = !state.canvasPreview || awaitingFocusSlot || guidanceOnlyFocus;
+  if (state.canvasPreview?.batch) control.hidden = true;
   control.style.setProperty("--preview-accent", state.canvasPreview?.accent || COLORS.visual);
   const phase = state.canvasPreview?.phase || "before";
   const toggle = document.getElementById("canvasPreviewToggle");
@@ -7128,7 +7479,8 @@ function fallbackCanvasTarget(critique) {
 function configureCanvasPreview(critique, descriptor) {
   const actionable = ["pending", "updated"].includes(critique.status);
   const usableLivePreview = descriptor.previewFailure ? null : descriptor.livePreview;
-  const fallbackResult = actionable && !usableLivePreview
+  const fallbackResult = actionable && !usableLivePreview && !descriptor.previewFailure
+      && !critiqueIsExecutable(critique)
     ? {
         specMap: buildEngineSpecMap(),
         board: buildEngineBoardMeta(),
@@ -7181,11 +7533,15 @@ async function setCanvasPreviewPhase(phase) {
 }
 
 async function closeCritiqueFocus() {
-  const restoreCombinedRevision = state.batchMode && state.batchSelection.size > 0;
+  const restoreCombinedRevision = state.batchMode
+    && state.batchPreviewEnabled
+    && state.batchSelection.size > 0;
   state.selectedCritiqueId = null;
   state.selectedTileId = null;
   state.critiqueRefreshNotice = null;
-  state.canvasPreview = null;
+  state.canvasPreview = restoreCombinedRevision && cachedBatchPreviewIsCurrent()
+    ? clone(state.batchCanvasPreview)
+    : null;
   renderCanvasPreviewControl();
   renderDashboardChrome({ renderContext: false });
 
@@ -7196,10 +7552,21 @@ async function closeCritiqueFocus() {
   await renderInspector();
   renderMarkers();
 
-  // A focused critique temporarily owns the canvas preview. Returning to the
-  // revision list must restore the exact combined after-state so the author can
-  // see how their individual decisions accumulate before the final Apply.
+  // If a focused critique temporarily displaced an explicitly enabled combined
+  // preview, restore the already validated canvas immediately. Only a real
+  // selection/spec/version change earns another engine round-trip.
   if (restoreCombinedRevision) {
+    if (cachedBatchPreviewIsCurrent()) {
+      try {
+        await renderTiles();
+      } catch (error) {
+        console.warn("[combined preview] cached canvas restore failed", error);
+      } finally {
+        renderMarkers();
+        renderBatchApplyBar();
+      }
+      return;
+    }
     await refreshBatchPreview();
     return;
   }
@@ -7211,6 +7578,37 @@ async function closeCritiqueFocus() {
   } finally {
     renderMarkers();
   }
+}
+
+function batchReviewContext(critiqueId) {
+  const ids = [...state.batchPreviewIds];
+  const currentIndex = ids.indexOf(critiqueId);
+  const reviewedCount = ids.filter((id) => state.batchReviewedIds.has(id)).length;
+  const nextId = ids.find((id) => id !== critiqueId && !state.batchReviewedIds.has(id)) || null;
+  return {
+    active: Boolean(
+      state.batchMode
+      && state.batchPreviewEnabled
+      && state.batchPreviewValidated
+      && currentIndex >= 0
+    ),
+    ids,
+    currentIndex,
+    reviewedCount,
+    nextId,
+  };
+}
+
+function focusedCritiqueUpdateMarkup(job) {
+  if (job?.status !== "updating") return "";
+  return `
+    <div class="focus-update-status" role="status" aria-live="polite" aria-atomic="true">
+      <span class="focus-update-spinner" aria-hidden="true"></span>
+      <span>
+        <strong>Updating this fix for the current dashboard</strong>
+        <small>The issue stays visible while VIZier regenerates its solution.</small>
+      </span>
+    </div>`;
 }
 
 async function renderInspector() {
@@ -7246,14 +7644,16 @@ async function renderInspector() {
     focusView.innerHTML = "";
     return;
   }
+  let displacedCanvasPaint = Promise.resolve();
   if (state.canvasPreview && state.canvasPreview.critiqueId !== critique.id) {
     const wasShowingProposed = state.canvasPreview.phase === "after";
     state.canvasPreview = null;
     renderCanvasPreviewControl();
     renderDashboardChrome({ renderContext: false });
     if (wasShowingProposed) {
-      await renderTiles();
-      renderMarkers();
+      displacedCanvasPaint = renderTiles()
+        .then(() => renderMarkers())
+        .catch((error) => console.warn("[critique focus] original canvas paint failed", error));
     }
   }
 
@@ -7285,6 +7685,7 @@ async function renderInspector() {
     : isFocusedQuestion
       ? "Focused Question"
       : "Criteria-aware Review";
+  const initialRefreshJob = state.backgroundCritiqueRefreshes.get(critique.id);
 
   // Show the critique itself before requesting an executable canvas preview.
   // Preview generation can involve the engine and must never leave navigation
@@ -7292,6 +7693,7 @@ async function renderInspector() {
   focusView.innerHTML = `
     <article class="focus-card focus-card-loading" style="--accent:${critiqueGroupPresentation(critique.dimension).color}" aria-busy="true">
       <header class="focus-card-header">
+        ${focusedCritiqueUpdateMarkup(initialRefreshJob)}
         <div class="focus-chip-row">
           <span class="dimension-tag">${escapeHTML(critique.dimension)}</span>
           <span class="focus-source-chip">${sourceLabel}</span>
@@ -7306,12 +7708,15 @@ async function renderInspector() {
         ${problemField ? `<section class="focus-problem"><h3 class="visually-hidden">What Needs Attention</h3><p>${escapeHTML(problemField.value)}</p></section>` : ""}
         ${changeField ? `<section class="focus-recommendation"><h3 class="visually-hidden">Recommended Change</h3><p>${escapeHTML(changeField.value)}</p></section>` : ""}
       </div>
-      <div class="focus-preview-loading" role="status">
+      ${initialRefreshJob?.status === "updating" ? "" : `<div class="focus-preview-loading" role="status">
         <span class="focus-preview-spinner" aria-hidden="true"></span>
         <div><strong>Preparing canvas comparison</strong><p>The critique details are ready while VIZier prepares the proposed view.</p></div>
-      </div>
+      </div>`}
     </article>`;
-  const descriptor = await focusPreviewDescriptor(critique);
+  const [descriptor] = await Promise.all([
+    focusPreviewDescriptor(critique),
+    displacedCanvasPaint,
+  ]);
   // focusPreviewDescriptor can suspend on a real engine round-trip (uncached
   // executable preview). If the author navigated away (Back/Escape → selection
   // cleared) or switched critiques while it was in flight, this continuation is
@@ -7319,6 +7724,10 @@ async function renderInspector() {
   // and strand the relocated Original/Proposed toggle visible on the canvas. Bail
   // out — the newer selection (or closeCritiqueFocus) already owns the render.
   if (state.selectedCritiqueId !== critique.id) return;
+  if (critiqueById(critique.id) !== critique) return;
+  const backgroundRefreshJob = state.backgroundCritiqueRefreshes.get(critique.id);
+  const backgroundRefreshActive = backgroundRefreshJob?.status === "updating";
+  const backgroundRefreshFailed = backgroundRefreshJob?.status === "failed";
   const applicationPlan = buildApplicationPlan([critique.id], state.critiques);
   // The critiques were built for a specific confirmed context. If the author
   // edited and re-confirmed the context afterward, these results are stale and
@@ -7327,19 +7736,33 @@ async function renderInspector() {
   const resultsMatchContext = reviewResultsMatchContext();
   const recommendationMatchesDashboard = !Number.isFinite(Number(critique.lastEvaluatedVersion))
     || Number(critique.lastEvaluatedVersion) === state.version;
+  const needsManualDashboardRefresh = !recommendationMatchesDashboard ? actionable
+      && descriptor.executable
+      && resultsMatchContext
+      && !backgroundRefreshActive
+      && !backgroundRefreshFailed
+    : false;
   const canApplyIndividually = descriptor.executable
     && applicationPlan.canApply
     && resultsMatchContext
-    && recommendationMatchesDashboard;
+    && recommendationMatchesDashboard
+    && !backgroundRefreshActive;
   const canAcceptGuidance = actionable
     && (critique.proposal?.mode === "guidance_only" || critique.proposal?.kind === "manual");
   const canAcceptIndividually = canApplyIndividually || canAcceptGuidance;
-  const includedInRevision = state.batchMode && state.batchSelection.has(critique.id);
-  const reviewedForRevision = includedInRevision && state.batchReviewedIds.has(critique.id);
-  const excludedFromRevision = state.batchMode
-    && state.batchAutoSummary?.excludedIds?.includes(critique.id);
-  const canAcceptForRevision = includedInRevision && actionable && critiqueIsExecutable(critique);
-  const acceptEnabled = state.batchMode ? canAcceptForRevision && !reviewedForRevision : canAcceptIndividually;
+  const includedInBatchPreview = state.batchMode
+    && state.batchPreviewEnabled
+    && state.batchPreviewIds.has(critique.id);
+  const reviewedForBatch = includedInBatchPreview && state.batchReviewedIds.has(critique.id);
+  const batchReview = batchReviewContext(critique.id);
+  const canAcceptForBatch = includedInBatchPreview
+    && actionable
+    && critiqueIsExecutable(critique)
+    && resultsMatchContext
+    && recommendationMatchesDashboard
+    && !backgroundRefreshActive
+    && !reviewedForBatch;
+  const acceptEnabled = state.batchMode ? canAcceptForBatch : canAcceptIndividually;
   const canvasWasShowingProposal = Boolean(activeCanvasPreviewResult());
   configureCanvasPreview(critique, descriptor);
   const runtimeReport = state.interactionObservations.get(critique.id);
@@ -7369,6 +7792,7 @@ async function renderInspector() {
   focusView.innerHTML = `
     <article class="focus-card" style="--accent:${critiqueGroupPresentation(critique.dimension).color}">
       <header class="focus-card-header">
+        ${focusedCritiqueUpdateMarkup(backgroundRefreshJob)}
         <div class="focus-chip-row">
           <span class="dimension-tag">${escapeHTML(critique.dimension)}</span>
           <span class="focus-source-chip">${sourceLabel}</span>
@@ -7486,21 +7910,16 @@ async function renderInspector() {
           <span aria-hidden="true">!</span>
           <div><strong>Cannot safely apply this recommendation</strong><p>${escapeHTML(descriptor.previewFailure)}</p></div>
         </section>` : ""}
-      ${excludedFromRevision ? `
-        <section class="focus-decision-notice revision-exclusion" role="status">
+      ${actionable && descriptor.executable && resultsMatchContext && backgroundRefreshFailed ? `
+        <section class="focus-decision-notice needs-regenerate" role="alert">
           <span aria-hidden="true">!</span>
           <div>
-            <strong>Not included in this revision</strong>
-            <p>The issue is still valid. ${escapeHTML(batchExclusionReason(critique.id))}</p>
-            <p>Add rationale and refine the solution if you want VIZier to try a compatible fix.</p>
+            <strong>Couldn’t update this recommendation</strong>
+            <p>${escapeHTML(backgroundRefreshJob.error || "The background request failed. Try again without leaving this critique.")}</p>
+            <button type="button" id="focusRetryBackgroundRefresh" class="focus-notice-action">Try again</button>
           </div>
         </section>` : ""}
-      ${reviewedForRevision ? `
-        <section class="focus-decision-notice revision-reviewed-notice" role="status">
-          <span aria-hidden="true">✓</span>
-          <div><strong>Reviewed for this revision</strong><p>This critique is included in the combined preview. It will be applied only with the other reviewed changes.</p></div>
-        </section>` : ""}
-      ${actionable && descriptor.executable && resultsMatchContext && !recommendationMatchesDashboard ? `
+      ${needsManualDashboardRefresh ? `
         <section class="focus-decision-notice needs-regenerate" role="status">
           <span aria-hidden="true">↻</span>
           <div>
@@ -7534,17 +7953,30 @@ async function renderInspector() {
             : ""}
         </section>` : ""}
       ${renderRevisions(critique)}
-      <footer class="focus-actions">
-        <button class="focus-action ${canAcceptGuidance && !state.batchMode ? "consider" : "accept"}" id="focusAccept" type="button" ${acceptEnabled ? "" : "disabled"}>
-          ${canAcceptGuidance
+      <footer class="focus-actions${backgroundRefreshActive ? " is-updating" : ""}"${backgroundRefreshActive ? ' aria-busy="true"' : ""}>
+        ${backgroundRefreshActive ? `
+          <div class="focus-action-update" id="focusActionUpdate" role="status">
+            <span class="focus-update-spinner" aria-hidden="true"></span>
+            <span><strong>Updating this fix…</strong><small>Accept and Refine will unlock automatically.</small></span>
+          </div>` : ""}
+        <button class="focus-action ${canAcceptGuidance && !state.batchMode ? "consider" : "accept"}" id="focusAccept" type="button"${backgroundRefreshActive ? ' aria-busy="true" aria-describedby="focusActionUpdate"' : ""} ${acceptEnabled ? "" : "disabled"}>
+          ${backgroundRefreshActive
+            ? '<span class="focus-action-spinner" aria-hidden="true"></span>'
+            : canAcceptGuidance
             ? `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.4a3.8 3.8 0 0 0-2.3 6.8c.4.3.6.7.6 1.1v.4h3.4v-.4c0-.4.2-.8.6-1.1A3.8 3.8 0 0 0 8 2.4Z"/><path d="M6.6 12.4h2.8M7 13.7h2"/></svg>`
             : `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7"/></svg>`}
-          <span>${state.batchMode
-            ? reviewedForRevision ? "Reviewed" : includedInRevision ? "Accept for Revision" : "Not in Revision"
+          <span>${backgroundRefreshActive
+            ? "Updating Fix…"
+            : state.batchMode
+            ? reviewedForBatch
+              ? "Reviewed"
+              : includedInBatchPreview
+                ? batchReview.nextId ? "Keep & Review Next" : "Finish Review"
+                : "Not in Preview"
             : canAcceptGuidance ? "Mark as Considered" : "Accept Change"}</span>
         </button>
         ${critiqueIsExecutable(critique) ? `
-        <button class="focus-action refine" id="focusRefineSolution" type="button" aria-haspopup="dialog" ${actionable ? "" : "disabled"}>
+        <button class="focus-action refine${state.solutionRefinementRunning ? " is-generating" : ""}" id="focusRefineSolution" type="button" aria-haspopup="dialog"${state.solutionRefinementRunning || backgroundRefreshActive ? ` aria-busy="true"` : ""}${backgroundRefreshActive ? ' aria-describedby="focusActionUpdate"' : ""} ${actionable && recommendationMatchesDashboard && !backgroundRefreshActive && !state.solutionRefinementRunning ? "" : "disabled"}>
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12.7 5.6A5.2 5.2 0 0 0 3.3 4.3"/><path d="M3.3 2.2v2.1h2.1"/><path d="M3.3 10.4a5.2 5.2 0 0 0 9.4 1.3"/><path d="M12.7 13.8v-2.1h-2.1"/></svg>
           <span>Refine Solution</span>
         </button>` : ""}
@@ -7628,6 +8060,9 @@ async function renderInspector() {
       button.textContent = "Regenerate this critique";
     }
   });
+  document.getElementById("focusRetryBackgroundRefresh")?.addEventListener("click", () => {
+    startBackgroundCritiqueRefresh(critique);
+  });
   document.getElementById("focusRefreshDone")?.addEventListener("click", () => {
     closeCritiqueFocus();
   });
@@ -7641,27 +8076,32 @@ async function renderInspector() {
   });
   document.getElementById("focusAccept").addEventListener("click", async () => {
     if (state.batchMode) {
-      if (!canAcceptForRevision || reviewedForRevision) return;
+      if (!canAcceptForBatch) return;
       state.batchReviewedIds.add(critique.id);
       appendInteractionEvent({
         kind: "recommendation_reviewed",
-        summary: `Reviewed recommendation for combined revision: ${critique.title}`,
+        summary: `Reviewed recommendation for combined preview: ${critique.title}`,
         detail: critique.suggestion,
         critiqueId: critique.id,
         dimension: critique.dimension,
         proposalKind: critique.proposal?.kind,
         data: {
-          decision: "accept_for_revision",
+          decision: "keep_in_preview",
           committed: false,
           dashboardVersion: Number(state.version) || 1,
         },
       });
-      recordStudyAction("critique_reviewed_for_revision", `Accepted for revision: ${critique.title}`, {
+      recordStudyAction("critique_reviewed_for_preview", `Kept in preview: ${critique.title}`, {
         critiqueId: critique.id,
         dimension: critique.dimension,
         reviewedCount: state.batchReviewedIds.size,
-        includedCount: state.batchSelection.size,
+        previewCount: state.batchPreviewIds.size,
       });
+      const nextCritique = critiqueById(batchReviewContext(critique.id).nextId);
+      if (nextCritique) {
+        await openCritiqueDetail(nextCritique);
+        return;
+      }
       await closeCritiqueFocus();
       return;
     }
@@ -7701,14 +8141,12 @@ async function renderInspector() {
     document.getElementById("guidanceAcceptedNotice")?.focus();
   });
   document.getElementById("focusReject").addEventListener("click", async () => {
+    // Remove this critique's job token before changing its status. The network
+    // request may still resolve, but its late result can no longer commit.
+    cancelBackgroundCritiqueRefresh(critique.id);
     if (state.batchMode) {
-      state.batchSelection.delete(critique.id);
       state.batchReviewedIds.delete(critique.id);
-      if (state.batchAutoSummary?.excludedIds) {
-        state.batchAutoSummary.excludedIds = state.batchAutoSummary.excludedIds
-          .filter((id) => id !== critique.id);
-        state.batchAutoSummary.excluded = state.batchAutoSummary.excludedIds.length;
-      }
+      invalidateBatchCanvasPreview();
     }
     critique.status = "rejected";
     critique.lifecycle = "rejected";
@@ -7759,6 +8197,109 @@ function buildEngineSpecMap() {
     specMap[tile.id] = clone(tile.spec);
   });
   return specMap;
+}
+
+function canvasBoundsForElement(element) {
+  if (!element || !els.dashboardArtboard) return null;
+  const frame = els.dashboardArtboard.getBoundingClientRect();
+  const rect = element.getBoundingClientRect();
+  if (!frame.width || !frame.height || !rect.width || !rect.height) return null;
+  const scaleX = state.canvasSize.width / frame.width;
+  const scaleY = state.canvasSize.height / frame.height;
+  const x1 = Math.max(0, Math.min(state.canvasSize.width, (rect.left - frame.left) * scaleX));
+  const y1 = Math.max(0, Math.min(state.canvasSize.height, (rect.top - frame.top) * scaleY));
+  const x2 = Math.max(0, Math.min(state.canvasSize.width, (rect.right - frame.left) * scaleX));
+  const y2 = Math.max(0, Math.min(state.canvasSize.height, (rect.bottom - frame.top) * scaleY));
+  if (x2 <= x1 || y2 <= y1) return null;
+  return {
+    x: Math.round(x1 * 10) / 10,
+    y: Math.round(y1 * 10) / 10,
+    w: Math.round((x2 - x1) * 10) / 10,
+    h: Math.round((y2 - y1) * 10) / 10,
+  };
+}
+
+function boundsIntersectionRatio(selection, target) {
+  const left = Math.max(selection.x, target.x);
+  const top = Math.max(selection.y, target.y);
+  const right = Math.min(selection.x + selection.w, target.x + target.w);
+  const bottom = Math.min(selection.y + selection.h, target.y + target.h);
+  if (right <= left || bottom <= top) return 0;
+  return Math.round((((right - left) * (bottom - top)) / (target.w * target.h)) * 1000) / 1000;
+}
+
+function unionElementBounds(elements) {
+  const boxes = [...elements].map(canvasBoundsForElement).filter(Boolean);
+  if (!boxes.length) return null;
+  const x = Math.min(...boxes.map((box) => box.x));
+  const y = Math.min(...boxes.map((box) => box.y));
+  const right = Math.max(...boxes.map((box) => box.x + box.w));
+  const bottom = Math.max(...boxes.map((box) => box.y + box.h));
+  return { x, y, w: right - x, h: bottom - y };
+}
+
+/** Convert a raw Review Area rectangle into the rendered objects it actually
+ * intersects. The engine still sanitizes every id/path, so DOM observations are
+ * useful targeting evidence rather than trusted application instructions. */
+function semanticTargetsForRegion(selection) {
+  const candidates = [];
+  const add = (kind, path, element, extra = {}) => {
+    const bounds = canvasBoundsForElement(element);
+    if (!bounds) return;
+    const overlapRatio = boundsIntersectionRatio(selection, bounds);
+    if (overlapRatio <= 0) return;
+    const text = String(element.textContent || "").replace(/\s+/g, " ").trim().slice(0, 180);
+    candidates.push({ kind, path, bounds, overlapRatio, ...(text ? { text } : {}), ...extra });
+  };
+  const addGroup = (kind, path, elements, extra = {}) => {
+    const list = [...elements];
+    const bounds = unionElementBounds(list);
+    if (!bounds) return;
+    const overlapRatio = boundsIntersectionRatio(selection, bounds);
+    if (overlapRatio <= 0) return;
+    const text = list.map((element) => element.textContent || "").join(" ")
+      .replace(/\s+/g, " ").trim().slice(0, 180);
+    candidates.push({ kind, path, bounds, overlapRatio, ...(text ? { text } : {}), ...extra });
+  };
+
+  add("dashboard-title", "board.title", els.dashboardTitle);
+  if (!els.dashboardSubtitle.hidden) add("dashboard-subtitle", "board.subtitle", els.dashboardSubtitle);
+  [...els.dashboardFilterBar.querySelectorAll(".dashboard-filter-control")].forEach((element, index) => {
+    const filter = canvasBoardState().filters[index];
+    if (filter) add("filter-control", `board.filters.${filter.id}`, element, { filterId: filter.id });
+  });
+
+  for (const tile of state.tiles) {
+    const article = els.tilesLayer.querySelector(`[data-tile-id="${CSS.escape(tile.id)}"]`);
+    if (!article) continue;
+    add("tile", `board.tiles.${tile.id}`, article, { tileId: tile.id });
+    add("tile-title", `board.tiles.${tile.id}.title`, article.querySelector(".tile-label"), { tileId: tile.id });
+    add("tile-subtitle", `board.tiles.${tile.id}.subtitle`, article.querySelector(".tile-subtitle"), { tileId: tile.id });
+    add("chart", `tile.${tile.id}`, article.querySelector(".vega-host"), { tileId: tile.id });
+    const svg = article.querySelector(".vega-host svg");
+    if (!svg) continue;
+    addGroup("axis", `tile.${tile.id}.encoding`, svg.querySelectorAll('[class*="role-axis"]'), { tileId: tile.id });
+    addGroup("legend", `tile.${tile.id}.encoding`, svg.querySelectorAll('[class*="role-legend"]'), { tileId: tile.id });
+    addGroup("annotation", `tile.${tile.id}.mark`, svg.querySelectorAll('.mark-text, [class*="mark-text"]'), { tileId: tile.id });
+    addGroup("mark", `tile.${tile.id}.mark`, svg.querySelectorAll('.mark-rect, .mark-line, .mark-symbol, .mark-area, [class*="mark-rect"], [class*="mark-line"], [class*="mark-symbol"], [class*="mark-area"]'), { tileId: tile.id });
+  }
+
+  const kindPriority = {
+    "dashboard-title": 10,
+    "dashboard-subtitle": 10,
+    "tile-title": 9,
+    "tile-subtitle": 9,
+    "filter-control": 9,
+    axis: 8,
+    legend: 8,
+    annotation: 8,
+    mark: 7,
+    chart: 4,
+    tile: 2,
+  };
+  return candidates
+    .sort((a, b) => (b.overlapRatio - a.overlapRatio) || ((kindPriority[b.kind] || 0) - (kindPriority[a.kind] || 0)))
+    .slice(0, 16);
 }
 
 // Read the rendered board title/subtitle font sizes (in px) off the live DOM so
@@ -7898,6 +8439,345 @@ function readReviewStrengths(resp, reviewScope) {
   }));
 }
 
+const REFINEMENT_ALTERNATIVE_STRATEGIES = [
+  "Make the smallest safe change. Preserve the current composition and alter only what the author's direction requires.",
+  "Use a different executable mechanism from the current fix. Prefer a clear content or encoding change over the same layout operation.",
+  "Offer a more structural but still safe solution. Rebalance hierarchy or composition without changing the accepted diagnosis.",
+];
+
+function refinementAlternativeKey(alternative) {
+  return JSON.stringify({
+    suggestion: String(alternative?.suggestion || "").replace(/\s+/g, " ").trim().toLowerCase(),
+    proposal: alternative?.proposal || null,
+  });
+}
+
+async function generateRefinementAlternatives(critique, rationale, isCancelled) {
+  setRefineSolutionGenerating(true);
+  try {
+    const request = critiqueSolutionRefinementRequest(critique, rationale, {
+      optionCount: REFINEMENT_ALTERNATIVE_STRATEGIES.length,
+      strategy: REFINEMENT_ALTERNATIVE_STRATEGIES
+        .map((strategy, index) => `${index + 1}. ${strategy}`)
+        .join("\n"),
+      allowNoAlternative: true,
+      joint: true,
+    });
+    const result = await generateCritiquesFromEngine(request, {
+      persistReviewMeta: false,
+      trace: false,
+      focusPurpose: "solution-refinement",
+      // Practice's fixed first-round preset cannot produce a new proposal.
+      // Refinement is explicitly on demand, so it must use the live engine.
+      allowPracticePreset: false,
+    });
+    if (isCancelled()) return "cancelled";
+    const alternatives = [];
+    const seen = new Set();
+    const failureMessages = [];
+    for (const candidate of (result.critiques || []).slice(0, 3)) {
+      const replacement = candidate;
+      if (!critiqueIsExecutable(replacement)) continue;
+      if (!solutionRefinementCandidateMatches(critique, replacement)) {
+        failureMessages.push("A generated option changed the accepted diagnosis or target.");
+        continue;
+      }
+      const alignment = solutionRefinementAlignment(critique, replacement, rationale);
+      if (!alignment.aligned) {
+        failureMessages.push(alignment.reason);
+        continue;
+      }
+      if (!solutionAttemptChanged(critique, replacement)) continue;
+      const key = refinementAlternativeKey(replacement);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      alternatives.push(replacement);
+    }
+    // Do not make the author discover a dead option by clicking it. Exercise
+    // every candidate through the real Apply/rollback pipeline first and cache
+    // the successful preview so switching options remains immediate.
+    const preflighted = await Promise.all(alternatives.map(async (replacement) => {
+      const refined = buildRefinedCritique(critique, replacement, rationale, state.version);
+      const candidateCritiques = state.critiques.map((item) => item.id === critique.id ? refined : item);
+      try {
+        const previewResult = await streamApplyForCurrentMode({
+          version: state.version,
+          context: reviewContextForEngine(),
+          specMap: buildEngineSpecMap(),
+          board: buildEngineBoardMeta(),
+          critiques: candidateCritiques,
+          selectedRecommendationIds: [refined.id],
+        });
+        if (previewResult?.rollback?.rolledBack) {
+          throw new Error(previewResult.rollback.reason || "The option failed its preview checks.");
+        }
+        if (!previewResult?.changedTargets?.length) {
+          throw new Error("The option did not change the current dashboard.");
+        }
+        return { replacement, previewResult };
+      } catch (error) {
+        failureMessages.push(error instanceof Error ? error.message : String(error));
+        return null;
+      }
+    }));
+    const viable = preflighted.filter(Boolean);
+    if (viable.length >= 1) {
+      return {
+        status: "choices",
+        alternatives: viable.map((item) => item.replacement),
+        previewResults: viable.map((item) => item.previewResult),
+      };
+    }
+    const reason = failureMessages.find(Boolean)
+      || "The engine did not return a distinct executable alternative.";
+    const message = `${reason} VIZier kept the current solution unchanged.`;
+    tracePanel.fail(message);
+    return { status: "error", message };
+  } finally {
+    setRefineSolutionGenerating(false);
+  }
+}
+
+async function commitRefinementAlternative(critique, replacement, rationale, meta = {}) {
+  const index = state.critiques.findIndex((item) => item.id === critique?.id);
+  if (index < 0 || !replacement) return false;
+  const current = state.critiques[index];
+  const refreshed = buildRefinedCritique(current, replacement, rationale, state.version);
+  const next = [...state.critiques];
+  next[index] = refreshed;
+  state.critiques = scopeRank(enrichRecommendations(next, state.version));
+  state.previewCache.delete(current.id);
+  state.interactionObservations.delete(current.id);
+  state.critiqueRefreshNotice = null;
+  state.selectedCritiqueId = current.id;
+  const refreshCombinedPreview = state.batchMode && state.batchSelection.has(current.id);
+  if (refreshCombinedPreview) {
+    state.batchReviewedIds.delete(current.id);
+    state.batchPreviewValidated = false;
+  }
+  recordStudyAction("critique_regenerated", `Selected a refined solution for: ${current.title}`, {
+    requestId: meta.requestId || null,
+    critiqueId: current.id,
+    outcome: "selected",
+    requestMode: "solution_refinement",
+    refinementRationale: rationale,
+    alternativeCount: meta.alternativeCount || null,
+    selectedAlternative: Number.isInteger(meta.selectedIndex) ? meta.selectedIndex + 1 : null,
+    dimension: current.dimension,
+    latencyMs: meta.latencyMs ?? null,
+  });
+  renderMarkers();
+  renderCritiques();
+  await renderInspector();
+  if (refreshCombinedPreview) await refreshBatchPreview();
+  return true;
+}
+
+function invalidateCritiquePreviewCache(critiqueId) {
+  if (!critiqueId) return;
+  const segment = `:${critiqueId}:`;
+  const suffix = `:${critiqueId}`;
+  [...state.previewCache.keys()].forEach((key) => {
+    const serialized = String(key);
+    if (serialized === critiqueId || serialized.includes(segment) || serialized.endsWith(suffix)) {
+      state.previewCache.delete(key);
+    }
+  });
+}
+
+function critiqueNeedsBackgroundRefresh(critique) {
+  return Boolean(
+    critique
+    && ["pending", "updated"].includes(critique.status)
+    && critiqueIsExecutable(critique)
+    && reviewResultsMatchContext()
+    && Number.isFinite(Number(critique.lastEvaluatedVersion))
+    && Number(critique.lastEvaluatedVersion) !== Number(state.version),
+  );
+}
+
+function cancelBackgroundCritiqueRefresh(critiqueId) {
+  if (!critiqueId) return;
+  state.backgroundCritiqueRefreshes.delete(critiqueId);
+}
+
+function cancelAllBackgroundCritiqueRefreshes() {
+  state.backgroundCritiqueRefreshes.clear();
+}
+
+async function renderBackgroundCritiqueRefreshState(critiqueId) {
+  renderCritiques();
+  renderMarkers();
+  if (state.selectedCritiqueId === critiqueId) await renderInspector();
+}
+
+function startBackgroundCritiqueRefresh(critiqueOrId, { render = true } = {}) {
+  const critique = typeof critiqueOrId === "string"
+    ? critiqueById(critiqueOrId)
+    : critiqueOrId;
+  if (!critiqueNeedsBackgroundRefresh(critique)) return Promise.resolve("skipped");
+  const existing = state.backgroundCritiqueRefreshes.get(critique.id);
+  if (existing?.status === "updating" && existing.baseVersion === state.version) {
+    return existing.promise || Promise.resolve("updating");
+  }
+
+  const critiqueSnapshot = clone(critique);
+  const critiqueId = critique.id;
+  const baseVersion = Number(state.version);
+  const token = ++state.nextBackgroundCritiqueRefreshToken;
+  const requestId = newStudyId();
+  const requestStartedAt = Date.now();
+  const job = {
+    critiqueId,
+    token,
+    baseVersion,
+    requestId,
+    status: "updating",
+    error: null,
+    promise: null,
+  };
+  state.backgroundCritiqueRefreshes.set(critiqueId, job);
+  if (render) void renderBackgroundCritiqueRefreshState(critiqueId);
+
+  recordStudyAction(
+    "critique_requested",
+    `Background refresh for one critique: ${critique.title}`,
+    critiqueRequestStudyData({
+      requestId,
+      requestMode: "stale_recovery",
+      scope: "critique",
+      queryText: null,
+      trigger: "automatic-stale-recovery",
+      critiqueId,
+    }),
+  );
+
+  const promise = (async () => {
+    try {
+      const { critiques: incoming, answer } = await generateCritiquesFromEngine(
+        critiqueRefreshRequest(critiqueSnapshot),
+        { persistReviewMeta: false, trace: false, focusPurpose: "stale-refresh" },
+      );
+      const activeJob = state.backgroundCritiqueRefreshes.get(critiqueId);
+      if (activeJob?.token !== token) return "discarded";
+      if (Number(state.version) !== baseVersion) {
+        state.backgroundCritiqueRefreshes.delete(critiqueId);
+        const latest = critiqueById(critiqueId);
+        if (critiqueNeedsBackgroundRefresh(latest)) {
+          return startBackgroundCritiqueRefresh(latest);
+        }
+        return "discarded";
+      }
+      const current = critiqueById(critiqueId);
+      if (!current || !["pending", "updated"].includes(current.status)) {
+        state.backgroundCritiqueRefreshes.delete(critiqueId);
+        return "discarded";
+      }
+
+      const replacement = pickCritiqueRefreshReplacement(critiqueSnapshot, incoming, answer);
+      const currentIndex = state.critiques.findIndex((item) => item.id === critiqueId);
+      if (currentIndex < 0) {
+        state.backgroundCritiqueRefreshes.delete(critiqueId);
+        return "discarded";
+      }
+      if (replacement) {
+        const refreshed = {
+          ...replacement,
+          id: critiqueId,
+          status: "pending",
+          askId: current.askId,
+          askScope: current.askScope || "full",
+          requestRelevance: current.requestRelevance,
+          reviewRequest: current.reviewRequest,
+          origin: current.origin,
+          localReview: current.localReview,
+          introducedInVersion: current.introducedInVersion || baseVersion,
+          lastEvaluatedVersion: baseVersion,
+          revision: (Number(current.revision) || 1) + 1,
+        };
+        const next = [...state.critiques];
+        next[currentIndex] = refreshed;
+        state.critiques = scopeRank(enrichRecommendations(next, baseVersion));
+        invalidateCritiquePreviewCache(critiqueId);
+        state.interactionObservations.delete(critiqueId);
+        state.backgroundCritiqueRefreshes.delete(critiqueId);
+        recordStudyAction("critique_regenerated", `Automatically updated solution for: ${current.title}`, {
+          requestId,
+          critiqueId,
+          outcome: "updated",
+          requestMode: "stale_recovery",
+          dimension: current.dimension,
+          latencyMs: Date.now() - requestStartedAt,
+        });
+        await renderBackgroundCritiqueRefreshState(critiqueId);
+        return "updated";
+      }
+
+      const retired = {
+        ...current,
+        status: "superseded",
+        lifecycle: "superseded",
+        lastEvaluatedVersion: baseVersion,
+      };
+      const next = [...state.critiques];
+      next[currentIndex] = retired;
+      state.critiques = next;
+      invalidateCritiquePreviewCache(critiqueId);
+      state.interactionObservations.delete(critiqueId);
+      state.backgroundCritiqueRefreshes.delete(critiqueId);
+      if (state.selectedCritiqueId === critiqueId) {
+        state.canvasPreview = null;
+        state.critiqueRefreshNotice = {
+          critiqueId,
+          kind: "retired",
+          message: answer || "This issue was resolved by a change you already applied.",
+        };
+      }
+      recordStudyAction("critique_regenerated", `Critique no longer applies: ${current.title}`, {
+        requestId,
+        critiqueId,
+        outcome: "retired",
+        requestMode: "stale_recovery",
+        dimension: current.dimension,
+        latencyMs: Date.now() - requestStartedAt,
+      });
+      await renderBackgroundCritiqueRefreshState(critiqueId);
+      return "retired";
+    } catch (error) {
+      const activeJob = state.backgroundCritiqueRefreshes.get(critiqueId);
+      if (activeJob?.token !== token) return "discarded";
+      activeJob.status = "failed";
+      activeJob.error = error instanceof Error ? error.message : String(error);
+      recordStudyAction("critique_request_failed", "Automatic stale-critique recovery failed", {
+        requestId,
+        requestMode: "stale_recovery",
+        scope: "critique",
+        critiqueId,
+        latencyMs: Date.now() - requestStartedAt,
+        reason: activeJob.error,
+      });
+      await renderBackgroundCritiqueRefreshState(critiqueId);
+      return "error";
+    }
+  })();
+  job.promise = promise;
+  return promise;
+}
+
+function queueAffectedCritiqueRefreshes({ render = true } = {}) {
+  const affected = state.critiques.filter(critiqueNeedsBackgroundRefresh);
+  const promises = affected.map((critique) =>
+    startBackgroundCritiqueRefresh(critique, { render: false }));
+  if (render && affected.length) {
+    renderCritiques();
+    if (state.selectedCritiqueId && affected.some((item) => item.id === state.selectedCritiqueId)) {
+      void renderInspector();
+    }
+  }
+  void Promise.allSettled(promises);
+  return affected.map((critique) => critique.id);
+}
+
 async function regenerateOneCritique(critique, {
   refinementRationale = "",
   isCancelled = () => false,
@@ -7922,56 +8802,52 @@ async function regenerateOneCritique(critique, {
     }),
   );
   try {
-    const refinementRequest = isSolutionRefinement
-      ? critiqueSolutionRefinementRequest(critique, refinementRationale)
-      : "";
-    let { critiques: incoming, answer } = await generateCritiquesFromEngine(
-      isSolutionRefinement ? refinementRequest : critiqueRefreshRequest(critique),
+    if (isSolutionRefinement) {
+      const outcome = await generateRefinementAlternatives(
+        critique,
+        refinementRationale,
+        isCancelled,
+      );
+      if (outcome === "cancelled" || isCancelled()) return "cancelled";
+      if (outcome.status === "choices") {
+        recordStudyAction("critique_regenerated", `Generated solution options for: ${critique.title}`, {
+          requestId,
+          critiqueId: targetId,
+          outcome: "choices_generated",
+          requestMode: "solution_refinement",
+          refinementRationale,
+          alternativeCount: outcome.alternatives.length,
+          dimension: critique.dimension,
+          latencyMs: Date.now() - requestStartedAt,
+        });
+        return {
+          ...outcome,
+          requestId,
+          latencyMs: Date.now() - requestStartedAt,
+        };
+      }
+      recordStudyAction("critique_request_failed", "Solution refinement did not produce multiple executable alternatives", {
+        requestId,
+        requestMode: "solution_refinement",
+        scope: "critique",
+        critiqueId: targetId,
+        latencyMs: Date.now() - requestStartedAt,
+        reason: outcome.message,
+      });
+      return outcome;
+    }
+    const { critiques: incoming, answer } = await generateCritiquesFromEngine(
+      critiqueRefreshRequest(critique),
       {
         persistReviewMeta: false,
-        traceTitle: isSolutionRefinement
-          ? "Generating another solution for this critique"
-          : "Refreshing this critique for the current dashboard",
+        traceTitle: "Refreshing this critique for the current dashboard",
+        focusPurpose: "stale-refresh",
       },
     );
     if (isCancelled()) return "cancelled";
-    let replacement = pickCritiqueRefreshReplacement(critique, incoming, answer);
-    let alignment = isSolutionRefinement && replacement
-      ? solutionRefinementAlignment(critique, replacement, refinementRationale)
-      : { aligned: true, reason: "" };
-    const firstAttemptIsOtherwiseUsable = Boolean(
-      isSolutionRefinement
-      && replacement
-      && critiqueIsExecutable(replacement)
-      && solutionAttemptChanged(critique, replacement),
-    );
-    if (firstAttemptIsOtherwiseUsable && !alignment.aligned) {
-      // Give the engine one automatic repair attempt with the failed acceptance
-      // check spelled out. The client still validates the second result before
-      // it is allowed to replace anything visible.
-      ({ critiques: incoming, answer } = await generateCritiquesFromEngine(
-        `${refinementRequest}\n\nThe previous candidate failed this acceptance check: ${alignment.reason} Return a corrected candidate that passes it.`,
-        {
-          persistReviewMeta: false,
-          traceTitle: "Aligning the new solution with your direction",
-        },
-      ));
-      if (isCancelled()) return "cancelled";
-      replacement = pickCritiqueRefreshReplacement(critique, incoming, answer);
-      alignment = replacement
-        ? solutionRefinementAlignment(critique, replacement, refinementRationale)
-        : { aligned: true, reason: "" };
-    }
-    const usableReplacement = isSolutionRefinement
-      ? replacement
-        && critiqueIsExecutable(replacement)
-        && solutionAttemptChanged(critique, replacement)
-        && alignment.aligned
-      : replacement;
-    if (usableReplacement) {
-      const refreshed = isSolutionRefinement
-        ? buildRefinedCritique(critique, replacement, refinementRationale, state.version)
-        : {
+    const replacement = pickCritiqueRefreshReplacement(critique, incoming, answer);
+    if (replacement) {
+      const refreshed = {
         ...replacement,
         id: targetId,
         status: "pending",
@@ -7988,30 +8864,11 @@ async function regenerateOneCritique(critique, {
       const next = [...state.critiques];
       next[index] = refreshed;
       state.critiques = scopeRank(enrichRecommendations(next, state.version));
-      if (isSolutionRefinement && state.batchMode) {
-        // A new solution is a new decision: it must be reviewed again. If the
-        // old attempt was excluded, tentatively add the replacement so the
-        // combined preview can test it when the author returns to the list.
-        state.batchReviewedIds.delete(targetId);
-        if (!state.batchSelection.has(targetId)) {
-          state.batchSelection.add(targetId);
-          if (state.batchAutoSummary?.excludedIds) {
-            state.batchAutoSummary.excludedIds = state.batchAutoSummary.excludedIds
-              .filter((id) => id !== targetId);
-            state.batchAutoSummary.excluded = state.batchAutoSummary.excludedIds.length;
-            state.batchAutoSummary.included = state.batchSelection.size;
-            if (state.batchAutoSummary.exclusionReasons) {
-              delete state.batchAutoSummary.exclusionReasons[targetId];
-            }
-          }
-        }
-      }
       state.previewCache.delete(targetId);
       state.interactionObservations.delete(targetId);
       state.critiqueRefreshNotice = null;
       state.selectedCritiqueId = targetId;
       const refreshCombinedPreview = state.batchMode && state.batchSelection.has(targetId);
-      if (state.batchReviewedIds instanceof Set) state.batchReviewedIds.delete(targetId);
       if (refreshCombinedPreview) state.batchPreviewValidated = false;
       recordStudyAction(
         "critique_regenerated",
@@ -8020,15 +8877,14 @@ async function regenerateOneCritique(critique, {
           requestId,
           critiqueId: targetId,
           outcome: "updated",
-          requestMode: isSolutionRefinement ? "solution_refinement" : "stale_recovery",
-          refinementRationale: isSolutionRefinement ? refinementRationale : null,
+          requestMode: "stale_recovery",
           dimension: critique.dimension,
           latencyMs: Date.now() - requestStartedAt,
         },
       );
       recordCritiquesDisplayed("focused", critique.askId || null, {
         requestId,
-        requestMode: isSolutionRefinement ? "solution_refinement" : "stale_recovery",
+        requestMode: "stale_recovery",
         latencyMs: Date.now() - requestStartedAt,
       });
       renderMarkers();
@@ -8036,21 +8892,6 @@ async function regenerateOneCritique(critique, {
       await renderInspector();
       if (refreshCombinedPreview) await refreshBatchPreview();
       return "updated";
-    }
-    if (isSolutionRefinement) {
-      const message = !alignment.aligned
-        ? `${alignment.reason} VIZier kept the current solution unchanged.`
-        : answer || "VIZier did not return a different executable solution. Adjust your direction and try again.";
-      tracePanel.fail(message);
-      recordStudyAction("critique_request_failed", "Solution refinement did not produce an executable alternative", {
-        requestId,
-        requestMode: "solution_refinement",
-        scope: "critique",
-        critiqueId: targetId,
-        latencyMs: Date.now() - requestStartedAt,
-        reason: message,
-      });
-      return { status: "error", message };
     }
     const retired = {
       ...state.critiques[index],
@@ -8110,18 +8951,23 @@ async function generateCritiquesFromEngine(focusedRequest = "", options = {}) {
   const board = buildEngineBoardMeta();
   const normalizedRequest = focusedRequest.replace(/\s+/g, " ").trim();
   const reviewScope = normalizedRequest ? "focused" : "full";
-  tracePanel.start(options.traceTitle
-    || (normalizedRequest
-      ? "Focused Review — answering your request"
-      : "AI Assist — criteria-aware full review"));
-  const resp = practiceUsesPreset()
+  const traceEnabled = options.trace !== false;
+  if (traceEnabled) {
+    tracePanel.start(options.traceTitle
+      || (normalizedRequest
+        ? "Focused Review — answering your request"
+        : "AI Assist — criteria-aware full review"));
+  }
+  const resp = practiceUsesPreset() && options.allowPracticePreset !== false
     ? await (async () => {
-        tracePanel.event({
-          type: "practice_preset",
-          materialCode: practiceRuntime.materialCode,
-          scope: reviewScope,
-          version: PRACTICE_PRESET_VERSION,
-        });
+        if (traceEnabled) {
+          tracePanel.event({
+            type: "practice_preset",
+            materialCode: practiceRuntime.materialCode,
+            scope: reviewScope,
+            version: PRACTICE_PRESET_VERSION,
+          });
+        }
         await practicePause(180);
         return practiceReviewResponse(practiceRuntime.preset, { scope: reviewScope });
       })()
@@ -8138,12 +8984,15 @@ async function generateCritiquesFromEngine(focusedRequest = "", options = {}) {
           savedRationales: savedRationalesForEngine(),
           ...designDocumentForEngine(),
           ...(normalizedRequest
-            ? { focus: { request: normalizedRequest } }
+            ? { focus: {
+                request: normalizedRequest,
+                purpose: options.focusPurpose || "author-request",
+              } }
             : {}),
         },
-        (event) => tracePanel.event(event),
+        (event) => { if (traceEnabled) tracePanel.event(event); },
       );
-  tracePanel.done();
+  if (traceEnabled) tracePanel.done();
   if (!resp) throw new Error("The review engine returned no result.");
   if (options.persistReviewMeta !== false) {
     state.reviewScope = resp.reviewScope || reviewScope;
@@ -8183,6 +9032,7 @@ async function generateLocalCritiques({ bounds, request, dimension }) {
   if (!contextReadyForReview()) {
     throw new Error("Confirm the context before starting a local review.");
   }
+  const semanticTargets = semanticTargetsForRegion(bounds);
   tracePanel.start("Local review — selected area");
   const resp = practiceUsesPreset()
     ? await (async () => {
@@ -8210,6 +9060,7 @@ async function generateLocalCritiques({ bounds, request, dimension }) {
           region: {
             bounds,
             request,
+            semanticTargets,
             ...(dimension ? { dimension } : {}),
           },
         },
@@ -8228,7 +9079,7 @@ async function generateLocalCritiques({ bounds, request, dimension }) {
     id: `local-${state.nextLocalReviewId++}-${critique.id}`,
     bounds: clone(bounds),
     origin: "local-review",
-    localReview: { request, dimension: dimension || null, bounds: clone(bounds) },
+    localReview: { request, dimension: dimension || null, bounds: clone(bounds), semanticTargets: clone(semanticTargets) },
     target: {
       ...(critique.target || {}),
       granularity: "selected-region",
@@ -8392,15 +9243,10 @@ async function runAIAssist(options = {}) {
     renderMarkers();
     renderCritiques();
     await renderInspector();
-    // A regenerate rebuilt state.critiques: the batch combined preview on the
-    // canvas was computed from the old selection/critiques and no longer matches
-    // the (now pruned) selection. Recompute it — or clear it if the selection is
-    // empty — so the canvas never shows a stale merged result.
-    if (attemptedScope === "full") {
-      await startAutomaticCombinedPreview();
-    } else if (state.batchMode) {
-      await refreshBatchPreview();
-    }
+    // Overall Review only produces recommendations. It never changes the canvas
+    // or forces the author into a prescribed review path; combined selection and
+    // preview remain explicit follow-up actions.
+    if (attemptedScope === "full" && state.batchMode) await setBatchMode(false);
     // Study telemetry: the set the participant was shown after this review. Paired
     // with critique_opened, this yields the reliable "displayed vs inspected" split
     // (which available critiques were never opened) without any gaze/scroll signal.
@@ -8494,6 +9340,7 @@ async function resetDemo() {
   if (state.workingDraft.dirty && !window.confirm(
     "Reset this dashboard? Unsaved Working Draft changes will be discarded.",
   )) return;
+  cancelAllBackgroundCritiqueRefreshes();
   state.demoPlaying = false;
   demoCursorEl = null;
   document.querySelector(".app-shell")?.classList.remove("demo-playing");
@@ -8961,26 +9808,59 @@ document.getElementById("batchExitButton").addEventListener("click", async () =>
   document.getElementById("batchSelectToggle")?.focus();
 });
 document.getElementById("batchSelectAllButton").addEventListener("click", async () => {
-  state.batchAutoPreviewToken += 1;
-  state.batchAutoSummary = null;
   state.batchSelection = new Set(filteredCritiques().filter(critiqueBatchEligible).map((c) => c.id));
-  state.batchReviewedIds = new Set(
-    [...state.batchReviewedIds].filter((id) => state.batchSelection.has(id)),
-  );
+  invalidateBatchCanvasPreview();
+  state.batchReviewedIds = new Set();
+  state.batchPreviewValidated = false;
+  state.batchPreviewFailure = null;
+  state.batchPreviewIds = new Set();
+  state.batchPreviewExcluded = new Map();
   renderCritiques();
-  await refreshBatchPreview();
+  if (state.batchPreviewEnabled) await refreshBatchPreview();
+  else renderBatchApplyBar();
   emitPracticeAction("batch:selected", {
     selectedIds: [...state.batchSelection],
     count: state.batchSelection.size,
   });
 });
 document.getElementById("batchClearButton").addEventListener("click", async () => {
-  state.batchAutoPreviewToken += 1;
-  state.batchAutoSummary = null;
+  state.batchPreviewToken += 1;
   state.batchSelection = new Set();
+  invalidateBatchCanvasPreview();
+  setBatchPreviewPending(false);
   state.batchReviewedIds = new Set();
+  state.batchPreviewEnabled = false;
+  state.batchPreviewValidated = false;
+  state.batchPreviewFailure = null;
+  state.batchPreviewIds = new Set();
+  state.batchPreviewExcluded = new Map();
   renderCritiques();
-  await refreshBatchPreview();
+  await clearBatchPreview();
+  renderBatchApplyBar();
+});
+document.getElementById("batchPreviewToggle").addEventListener("click", async () => {
+  if (!state.batchSelection.size) return;
+  invalidateBatchCanvasPreview();
+  state.batchPreviewEnabled = !state.batchPreviewEnabled;
+  state.batchPreviewValidated = false;
+  state.batchPreviewFailure = null;
+  state.batchPreviewIds = new Set();
+  state.batchPreviewExcluded = new Map();
+  state.batchReviewedIds = new Set();
+  if (state.batchPreviewEnabled) {
+    renderBatchApplyBar();
+    await refreshBatchPreview();
+    emitPracticeAction("batch:preview-on", {
+      selectedIds: [...state.batchSelection],
+      count: state.batchSelection.size,
+    });
+    return;
+  }
+  state.batchPreviewToken += 1;
+  setBatchPreviewPending(false);
+  await clearBatchPreview();
+  renderBatchApplyBar();
+  emitPracticeAction("batch:preview-off");
 });
 document.getElementById("batchApplyButton").addEventListener("click", async () => {
   const button = document.getElementById("batchApplyButton");
@@ -8990,7 +9870,9 @@ document.getElementById("batchApplyButton").addEventListener("click", async () =
     if (critique) await openCritiqueDetail(critique);
     return;
   }
-  const selectedIds = [...state.batchSelection];
+  const selectedIds = state.batchPreviewValidated
+    ? [...state.batchPreviewIds]
+    : [];
   if (!selectedIds.length) return;
   if (selectedIds.some((id) => !state.batchReviewedIds.has(id))) {
     renderBatchApplyBar();
@@ -9010,6 +9892,13 @@ document.getElementById("batchApplyButton").addEventListener("click", async () =
   // A successful apply commits a new version and clears pending selection; leave
   // batch mode so the author sees the settled Working Draft.
   await setBatchMode(false);
+});
+document.getElementById("batchShowExcludedButton").addEventListener("click", () => {
+  const firstExcludedId = state.batchPreviewExcluded.keys().next().value;
+  if (!firstExcludedId) return;
+  const card = document.querySelector(`.critique-card[data-critique-id="${CSS.escape(firstExcludedId)}"]`);
+  card?.scrollIntoView({ behavior: "smooth", block: "center" });
+  card?.focus({ preventScroll: true });
 });
 document.getElementById("canvasPreviewToggle").addEventListener("click", () => {
   const nextPhase = state.canvasPreview?.phase === "after" ? "before" : "after";
@@ -9384,6 +10273,23 @@ document.getElementById("contextInput").addEventListener("input", (event) => {
   document.getElementById("saveRationaleButton").disabled = !event.currentTarget.value.trim();
   document.getElementById("rationaleError").hidden = true;
 });
+document.getElementById("regenerateRefinementChoices").addEventListener("click", () => {
+  const input = document.getElementById("contextInput");
+  const choices = document.getElementById("refinementChoices");
+  const submit = document.getElementById("saveRationaleButton");
+  state.refinementAlternatives = null;
+  document.getElementById("rationalePrompt").textContent = "What should change about this solution?";
+  document.getElementById("rationaleHint").textContent = "Edit your direction, then generate 1–3 meaningful alternatives. The identified issue stays fixed.";
+  choices.hidden = true;
+  choices.innerHTML = "";
+  input.hidden = false;
+  input.disabled = false;
+  submit.textContent = "Generate Alternative(s)";
+  submit.disabled = !input.value.trim();
+  document.getElementById("regenerateRefinementChoices").hidden = true;
+  input.focus();
+  positionRationalePopover(rationaleAnchorElement);
+});
 document.getElementById("contextInjectForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const rationaleIntent = state.rationaleIntent;
@@ -9391,6 +10297,40 @@ document.getElementById("contextInjectForm").addEventListener("submit", async (e
   const critique = critiqueById(state.contextTargetId);
   const text = document.getElementById("contextInput").value.trim();
   if ((!critique && !existingRationale) || !text) return;
+  const pendingAlternatives = state.refinementAlternatives;
+  if (
+    rationaleIntent === "refine-solution"
+    && critique
+    && pendingAlternatives?.critiqueId === critique.id
+  ) {
+    const selectedIndex = pendingAlternatives.selectedIndex;
+    const replacement = Number.isInteger(selectedIndex)
+      ? pendingAlternatives.alternatives[selectedIndex]
+      : null;
+    if (!replacement) return;
+    const submit = document.getElementById("saveRationaleButton");
+    submit.disabled = true;
+    submit.textContent = "Using Solution…";
+    const committed = await commitRefinementAlternative(
+      critique,
+      replacement,
+      pendingAlternatives.rationale,
+      {
+        requestId: pendingAlternatives.requestId,
+        latencyMs: pendingAlternatives.latencyMs,
+        alternativeCount: pendingAlternatives.alternatives.length,
+        selectedIndex,
+      },
+    );
+    if (committed) {
+      closeContextModal({ cancelPending: false });
+      document.getElementById("focusRefineSolution")?.focus();
+      return;
+    }
+    submit.disabled = false;
+    submit.textContent = "Choose this fix";
+    return;
+  }
   const critiqueReference = critique || {
     id: existingRationale.critiqueId,
     title: existingRationale.critiqueTitle,
@@ -9440,8 +10380,8 @@ document.getElementById("contextInjectForm").addEventListener("submit", async (e
     const requestToken = ++state.refinementRequestToken;
     input.disabled = true;
     submit.disabled = true;
-    submit.textContent = "Generating Another Fix…";
-    hint.textContent = "Generating a new solution from your direction. You can close this window to cancel this attempt.";
+    submit.textContent = "Generating Alternatives…";
+    hint.textContent = "Generating alternatives from your direction. You can close this window to cancel this attempt.";
     error.hidden = true;
     renderFixedContextPanel();
     const outcome = await regenerateOneCritique(critique, {
@@ -9449,9 +10389,9 @@ document.getElementById("contextInjectForm").addEventListener("submit", async (e
       isCancelled: () => requestToken !== state.refinementRequestToken,
     });
     if (requestToken !== state.refinementRequestToken || outcome === "cancelled") return;
-    if (outcome === "updated") {
-      closeContextModal({ cancelPending: false });
-      document.getElementById("focusRefineSolution")?.focus();
+    if (typeof outcome === "object" && outcome?.status === "choices") {
+      state.rationaleEditId = rationale.id;
+      renderRefinementAlternatives(critique, outcome.alternatives, text, outcome);
       return;
     }
     // Keep the author's direction in place after a failed generation so they
@@ -9460,7 +10400,7 @@ document.getElementById("contextInjectForm").addEventListener("submit", async (e
     input.disabled = false;
     submit.disabled = false;
     submit.textContent = "Try Again";
-    hint.textContent = "The identified issue stays fixed. Edit your direction, then try another solution.";
+    hint.textContent = "The identified issue stays fixed. Edit your direction, then generate a new set of options.";
     error.textContent = typeof outcome === "object" && outcome?.message
       ? outcome.message
       : "VIZier could not generate a different executable solution. Adjust your direction and try again.";
@@ -9765,6 +10705,7 @@ function disablePracticeRuntime() {
 }
 
 function clearPracticeTutorialCritiques() {
+  cancelAllBackgroundCritiqueRefreshes();
   state.reviewScope = "full";
   state.criterionEvaluations = [];
   state.strengths = [];
@@ -10014,6 +10955,7 @@ function practiceTutorialMilestones(preset) {
 }
 
 async function resetPracticeWorkspace() {
+  cancelAllBackgroundCritiqueRefreshes();
   const original = state.versions[0];
   if (original?.afterSnapshot) applyLiveSnapshot(original.afterSnapshot);
   state.version = 1;
@@ -10111,64 +11053,83 @@ export async function startGuidedPracticeTutorial(materialCode) {
 /** A serializable, phase-local workspace snapshot used only by the study runner.
  * Training and the controlled task keep separate copies, so returning to one
  * phase can never load the other phase's dashboard, critiques, or checkpoints. */
+function iterableIds(value) {
+  if (!value) return [];
+  if (Array.isArray(value) || value instanceof Set) return [...value];
+  if (typeof value[Symbol.iterator] === "function") return [...value];
+  return [];
+}
+
 export function captureStudyRunnerWorkspaceState() {
-  return clone({
-    schema: "vizier-study-workspace/1",
-    capturedAt: new Date().toISOString(),
-    dashboard: buildDashboardCaptureSnapshot(),
-    workspace: {
-      artifactLibraryId: state.artifact?.libraryId || null,
-      version: state.version,
-      view: state.view,
-      mode: state.mode,
-      drawers: state.drawers,
-      filters: state.filters,
-      search: state.search,
-      expandedCritiqueGroups: state.expandedCritiqueGroups,
-      selectedCritiqueId: state.selectedCritiqueId,
-      selectedTileId: state.selectedTileId,
-      context: state.context,
-      contextWorkflow: state.contextWorkflow,
-      studyContextGenerated: state.studyContextGenerated,
-      studyContextVersion: state.studyContextVersion,
-      constraintSet: state.constraintSet,
-      constraintSelection: state.constraintSelection,
-      designDoc: state.designDoc,
-      activeDesignDocId,
-      critiques: state.critiques,
-      strengths: state.strengths,
-      askAnswer: state.askAnswer,
-      criterionEvaluations: state.criterionEvaluations,
-      rationales: state.rationales,
-      nextRationaleId: state.nextRationaleId,
-      interactionJournal: state.interactionJournal,
-      nextInteractionEventId: state.nextInteractionEventId,
-      lastReviewContextFingerprint: state.lastReviewContextFingerprint,
-      reviewScope: state.reviewScope,
-      reviewRequest: state.reviewRequest,
-      reviewTemperature: state["reviewTemperature"],
-      nextAskId: state.nextAskId,
-      nextLocalReviewId: state.nextLocalReviewId,
-      versions: stripVersionMedia(state.versions),
-      selectedVersionId: state.selectedVersionId,
-      checkpointComparison: state.checkpointComparison,
-      workingDraft: state.workingDraft,
-      batchMode: state.batchMode,
-      batchSelection: [...state.batchSelection],
-      batchReviewedIds: [...state.batchReviewedIds],
-      crossFilterEnabled: state.crossFilterEnabled,
-      crossFilterSelection: state.crossFilterSelection,
-      scroll: {
-        context: document.getElementById("contextPanelContent")?.scrollTop || 0,
-        critiques: document.getElementById("critiqueList")?.scrollTop || 0,
+  try {
+    return clone({
+      schema: "vizier-study-workspace/1",
+      capturedAt: new Date().toISOString(),
+      dashboard: buildDashboardCaptureSnapshot(),
+      workspace: {
+        artifactLibraryId: state.artifact?.libraryId || null,
+        version: state.version,
+        view: state.view,
+        mode: state.mode,
+        drawers: state.drawers,
+        filters: state.filters,
+        search: state.search,
+        expandedCritiqueGroups: state.expandedCritiqueGroups,
+        selectedCritiqueId: state.selectedCritiqueId,
+        selectedTileId: state.selectedTileId,
+        context: state.context,
+        contextWorkflow: state.contextWorkflow,
+        studyContextGenerated: state.studyContextGenerated,
+        studyContextVersion: state.studyContextVersion,
+        constraintSet: state.constraintSet,
+        constraintSelection: state.constraintSelection,
+        designDoc: state.designDoc,
+        activeDesignDocId,
+        critiques: state.critiques,
+        strengths: state.strengths,
+        askAnswer: state.askAnswer,
+        criterionEvaluations: state.criterionEvaluations,
+        rationales: state.rationales,
+        nextRationaleId: state.nextRationaleId,
+        interactionJournal: state.interactionJournal,
+        nextInteractionEventId: state.nextInteractionEventId,
+        lastReviewContextFingerprint: state.lastReviewContextFingerprint,
+        reviewScope: state.reviewScope,
+        reviewRequest: state.reviewRequest,
+        reviewTemperature: state["reviewTemperature"],
+        nextAskId: state.nextAskId,
+        nextLocalReviewId: state.nextLocalReviewId,
+        versions: stripVersionMedia(state.versions),
+        selectedVersionId: state.selectedVersionId,
+        checkpointComparison: state.checkpointComparison,
+        workingDraft: state.workingDraft,
+        batchMode: state.batchMode,
+        batchSelection: iterableIds(state.batchSelection),
+        batchReviewedIds: iterableIds(state.batchReviewedIds),
+        crossFilterEnabled: state.crossFilterEnabled,
+        crossFilterSelection: state.crossFilterSelection,
+        scroll: {
+          context: document.getElementById("contextPanelContent")?.scrollTop || 0,
+          critiques: document.getElementById("critiqueList")?.scrollTop || 0,
+        },
       },
-    },
-    tutorial: practiceRuntime.tutorial?.getState?.() || practiceRuntime.tutorialState,
-  });
+      tutorial: practiceRuntime.tutorial?.getState?.() || practiceRuntime.tutorialState,
+    });
+  } catch (error) {
+    console.warn("[study] workspace snapshot failed", error);
+    return {
+      schema: "vizier-study-workspace/1",
+      capturedAt: new Date().toISOString(),
+      dashboard: null,
+      workspace: {},
+      captureError: String(error?.message || error),
+    };
+  }
 }
 
 export async function restoreStudyRunnerWorkspaceState(snapshot) {
   if (!snapshot || snapshot.schema !== "vizier-study-workspace/1") return false;
+  cancelAllBackgroundCritiqueRefreshes();
   const saved = snapshot.workspace || {};
   applyLiveSnapshot(snapshot.dashboard);
   const assignClone = (key, fallback = state[key]) => {
@@ -10202,10 +11163,16 @@ export async function restoreStudyRunnerWorkspaceState(snapshot) {
   state.selectedVersionId = Number(saved.selectedVersionId) || state.versions.at(-1)?.id || 1;
   state.batchMode = Boolean(saved.batchMode);
   state.batchSelection = new Set(Array.isArray(saved.batchSelection) ? saved.batchSelection : []);
-  state.batchReviewedIds = new Set(
-    (Array.isArray(saved.batchReviewedIds) ? saved.batchReviewedIds : [])
-      .filter((id) => state.batchSelection.has(id)),
-  );
+  // Preview state is intentionally ephemeral and is not restored across study
+  // phase snapshots, so review approval cannot outlive the preview it described.
+  state.batchReviewedIds = new Set();
+  state.batchPreviewEnabled = false;
+  state.batchPreviewValidated = false;
+  state.batchPreviewFailure = null;
+  state.batchPreviewIds = new Set();
+  state.batchPreviewExcluded = new Map();
+  invalidateBatchCanvasPreview();
+  state.batchPreviewPending = false;
   state.crossFilterEnabled = Boolean(saved.crossFilterEnabled);
   state.artifact.libraryId = saved.artifactLibraryId || state.artifact.libraryId;
   activeDesignDocId = saved.activeDesignDocId || "";
@@ -11190,6 +12157,7 @@ async function loadJsonDashboard(data, fileName = "dashboard.json", { skipContex
   // Guards the design-doc clear so a doc attached during onboarding survives the
   // initial dashboard load but is dropped when the author switches dashboards.
   const switchingDashboard = Boolean(state.artifact && state.artifact.source);
+  cancelAllBackgroundCritiqueRefreshes();
   const normalized = normalizeDashboardDocument(data, fileName);
   state.dashboardTitle = normalized.dashboard.title;
   state.dashboardSubtitle = normalized.dashboard.subtitle;

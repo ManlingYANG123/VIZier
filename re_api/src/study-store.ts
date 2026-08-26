@@ -7,9 +7,10 @@
  * local-fallback path works even when `@aws-sdk/client-s3` is not installed and
  * no upload is ever attempted.
  *
- * On End & save the client also sends dashboard artifacts (high-resolution PNG
- * + reloadable JSON), protocol questionnaire records, and runner state. Those
- * are stored as sibling files rather than embedded in the event-log JSON.
+ * Each participant gets one folder under `studies/`. Dashboard captures, the
+ * session log, and the post-session scale sit together in that folder. Filenames
+ * still start with the session id so two visits from the same person do not
+ * overwrite each other.
  *
  * Credentials come only from environment variables (STUDY_S3_BUCKET, AWS_REGION,
  * AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) and are never sent to the browser.
@@ -76,24 +77,24 @@ export function studyStorageMode(): "s3" | "local" {
   return s3Config() ? "s3" : "local";
 }
 
-function safeArtifactPath(raw: unknown): string {
+function studyObjectKey(participant: string, session: string, fileName: string): string {
+  return `studies/${participant}/${session}_${fileName}`;
+}
+
+function safeArtifactFileName(raw: unknown): string {
   const text = String(raw ?? "").replace(/\\/g, "/").trim();
+  if (!text || text.includes("..")) {
+    throw new Error("INVALID_BUNDLE: study artifact path is not allowed");
+  }
   const parts = text.split("/").filter(Boolean);
-  const isRunnerState = text === "study-runner-state.json";
-  const isScopedArtifact = ["dashboards", "questionnaires"].includes(parts[0])
-    && parts.length >= 2
-    && parts.length <= 4;
-  if (!isRunnerState && !isScopedArtifact) {
-    throw new Error("INVALID_BUNDLE: study artifacts must be runner state, dashboards, or questionnaires");
-  }
-  if (parts.some((part) => part === "." || part === ".." || part.includes(".."))) {
+  if (!parts.length || parts.some((part) => part === "." || part === "..")) {
     throw new Error("INVALID_BUNDLE: study artifact path is not allowed");
   }
-  const cleaned = parts.map((part) => safeSegment(part, ""));
-  if (cleaned.some((part) => !part)) {
+  const cleaned = safeSegment(parts[parts.length - 1], "");
+  if (!cleaned || !/\.(json|png|svg)$/i.test(cleaned)) {
     throw new Error("INVALID_BUNDLE: study artifact path is not allowed");
   }
-  return cleaned.join("/");
+  return cleaned;
 }
 
 function artifactBody(artifact: StudyArtifact): { bytes: Buffer; contentType: string } {
@@ -152,25 +153,28 @@ export async function saveStudySession(bundle: unknown): Promise<StudySaveResult
   }
   delete record.artifacts;
   const prepared: { relative: string; bytes: Buffer; contentType: string }[] = [];
+  const seen = new Set<string>();
   for (const artifact of artifacts) {
-    const relative = safeArtifactPath(artifact.path);
+    const relative = safeArtifactFileName(artifact.path);
+    if (seen.has(relative)) continue;
     const { bytes, contentType } = artifactBody(artifact);
     if (bytes.length > MAX_ARTIFACT_BYTES) {
       console.warn(`[study-store] skipping oversized artifact ${relative} (${bytes.length} bytes)`);
       continue;
     }
+    seen.add(relative);
     prepared.push({ relative, bytes, contentType });
   }
   record.artifactFiles = prepared.map((item) => item.relative);
 
-  const key = `studies/${participant}/${session}/${jsonFileName(record)}`;
+  const key = studyObjectKey(participant, session, jsonFileName(record));
   const json = JSON.stringify(record);
   const bytes = Buffer.byteLength(json, "utf8");
   const files = [key];
 
   const stored = await putObject({ key, body: json, contentType: "application/json" });
   for (const artifact of prepared) {
-    const artifactKey = `studies/${participant}/${session}/${artifact.relative}`;
+    const artifactKey = studyObjectKey(participant, session, artifact.relative);
     await putObject({ key: artifactKey, body: artifact.bytes, contentType: artifact.contentType });
     files.push(artifactKey);
   }

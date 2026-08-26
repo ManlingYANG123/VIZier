@@ -1689,10 +1689,12 @@ button { font: inherit; }
 
 /* "Generating" edge light — a thin, multi-color line that runs clockwise around
  * a field while VIZier is working (Gemini-style). It appears on the context box
- * while its description is being generated (.context-box-field.is-generating)
- * and on the design-doc uploader while a document is being read
- * (.doc-uploader[data-state="loading"]). Purely decorative: a masked conic
- * gradient forms a border ring, animated by rotating the gradient's angle. */
+ * while its description is being generated (.context-box-field.is-generating),
+ * on the design-doc uploader while a document is being read
+ * (.doc-uploader[data-state="loading"]), and on Refine Solution while
+ * alternatives are being generated (.focus-action.refine.is-generating).
+ * Purely decorative: a masked conic gradient forms a border ring, animated by
+ * rotating the gradient's angle. */
 @property --viz-edge-angle {
   syntax: "<angle>";
   initial-value: 0deg;
@@ -1703,11 +1705,13 @@ button { font: inherit; }
 }
 .context-box-field.is-generating,
 .doc-uploader[data-state="loading"],
-.focused-review-input-wrap.is-generating { position: relative; }
+.focused-review-input-wrap.is-generating,
+.focus-action.refine.is-generating { position: relative; }
 .context-box-field.is-generating::before,
 .doc-uploader[data-state="loading"]::before,
 .draft-marker.is-generating::before,
-.focused-review-input-wrap.is-generating::before {
+.focused-review-input-wrap.is-generating::before,
+.focus-action.refine.is-generating::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -1737,7 +1741,14 @@ button { font: inherit; }
 .context-box-field.is-generating::before { border-radius: 8px; }
 .focused-review-input-wrap.is-generating::before { border-radius: 7px; }
 .draft-marker.is-generating::before { border-radius: 2px; }
+.focus-action.refine.is-generating::before { border-radius: 9px; }
 .draft-marker.is-generating { border-color: transparent; }
+.focus-action.refine.is-generating {
+  overflow: visible;
+  opacity: 1;
+  cursor: wait;
+  border-color: transparent;
+}
 .focused-review-input-wrap.is-generating textarea {
   border-color: transparent;
   box-shadow: none;
@@ -1746,7 +1757,8 @@ button { font: inherit; }
   .context-box-field.is-generating::before,
   .doc-uploader[data-state="loading"]::before,
   .draft-marker.is-generating::before,
-  .focused-review-input-wrap.is-generating::before { animation: none; }
+  .focused-review-input-wrap.is-generating::before,
+  .focus-action.refine.is-generating::before { animation: none; }
 }
 .context-describe-error { margin: 8px 0 0; padding: 7px 9px; border: 1px solid #f1b8b8; border-radius: 6px; background: #fff6f6; color: #9f2929; font-size: 11px; line-height: 1.4; }
 .parse-progress { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 9px 10px; border-radius: 4px; background: #f3f4f5; color: #656a72; font-size: 11px; }
@@ -2837,53 +2849,76 @@ button { font: inherit; }
   box-shadow: 0 2px 8px #1d1d1f12;
 }
 
-/* Combined revisions stay critique-first: cards carry an explicit review state
-   and always open their diagnosis/evidence detail. They never masquerade as a
-   list of recommendation checkboxes. */
-.revision-state {
+/* Multi-select uses the same familiar checkbox language as the earlier flow.
+   The control sits above the card grid so selection does not change its layout. */
+.critique-card.batch-mode { position: relative; }
+.critique-checkbox {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1.6px solid #c2c7d2;
+  border-radius: 5px;
+  background: #fff;
+  transition: background .12s ease, border-color .12s ease;
+}
+.critique-checkbox svg { width: 12px; height: 12px; fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; opacity: 0; }
+.critique-card.batch-checked .critique-checkbox { border-color: #2f6bd8; background: #2f6bd8; }
+.critique-card.batch-checked .critique-checkbox svg { opacity: 1; }
+.critique-list-view .critique-card.batch-checked {
+  border-color: #2f6bd8;
+  background: #eef3fd;
+  box-shadow: 0 2px 8px #2f6bd81f;
+}
+.critique-list-view .critique-card.batch-checked.batch-excluded {
+  border-color: #b9c3d4;
+  background: #f5f7fb;
+  box-shadow: 0 2px 8px #52658014;
+}
+.batch-excluded-label {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  min-height: 20px;
-  padding: 3px 7px;
-  border: 1px solid #d7d9de;
-  border-radius: 7px;
-  background: #f7f7f8;
-  color: #5f6269;
+  min-height: 18px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #e8edf5;
+  color: #526079;
   font-size: 9.5px;
   font-weight: 700;
-  line-height: 1.2;
+  white-space: nowrap;
 }
-.revision-state.reviewed {
-  border-color: #b9d8c5;
-  background: #f1f8f4;
-  color: #23633b;
+.batch-review-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 1px 6px;
+  border: 1px solid #c9d2e2;
+  border-radius: 999px;
+  background: #f7f9fc;
+  color: #60708b;
+  font-size: 9.5px;
+  font-weight: 700;
+  white-space: nowrap;
 }
-.revision-state.needs-review {
-  border-color: #c9c6e9;
-  background: #f5f4fc;
-  color: #514b84;
+.batch-review-label.reviewed {
+  border-color: #a9c0e8;
+  background: #eaf1fc;
+  color: #285aa8;
 }
-.revision-state.excluded {
-  border-color: #e5d3b5;
-  background: #fff9ee;
-  color: #855a18;
+.critique-card.batch-ineligible { opacity: .5; cursor: default; }
+.critique-card.batch-ineligible .critique-checkbox {
+  border-style: dashed;
+  border-color: #d3d7e0;
+  background: #f4f5f8;
 }
-.revision-exclusion-reason {
-  max-width: 48ch;
-  color: #6d604e;
-  font-size: 10.5px;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-}
-.critique-list-view .critique-card.revision-reviewed {
-  background: #fbfdfc;
-}
-.critique-list-view .critique-card.revision-excluded {
-  background: #fffdf8;
-}
-.critique-list-view .critique-card.revision-excluded:hover {
-  background: #fffaf0;
+.critique-list-view .critique-card.batch-ineligible:hover {
+  transform: none;
+  border-color: var(--priority-border);
+  background: #fff;
 }
 
 /* Bottom revision bar — pinned under the list. It is the combined-review entry
@@ -2896,6 +2931,11 @@ button { font: inherit; }
   padding: 10px 12px;
   border-top: 1px solid var(--line);
   background: var(--panel);
+}
+.batch-apply-bar.focus-docked {
+  flex: none;
+  z-index: 7;
+  box-shadow: 0 -10px 28px rgb(29 31 45 / 8%);
 }
 /* Idle face: the prominent entry button. Hidden once batch mode is on. */
 .batch-enter-button {
@@ -2925,19 +2965,162 @@ button { font: inherit; }
 .batch-apply-bar.active .batch-apply-active { display: flex; }
 .batch-apply-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .batch-apply-head strong { font-size: 12.5px; font-weight: 700; color: var(--ink); }
+.batch-preview-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 10px;
+  border: 1px solid #d9dde5;
+  border-radius: 9px;
+  background: #fff;
+  color: #353943;
+  text-align: left;
+  cursor: pointer;
+}
+.batch-preview-toggle:disabled { opacity: .48; cursor: default; }
+.batch-preview-toggle:not(:disabled):hover { border-color: #aeb6c5; background: #fafbfc; }
+.batch-preview-toggle:focus-visible { outline: 2px solid #2f6bd8; outline-offset: 2px; }
+.batch-preview-toggle-copy { display: flex; flex-direction: column; gap: 2px; }
+.batch-preview-toggle-copy strong { font-size: 11.5px; font-weight: 700; }
+.batch-preview-toggle-copy small { color: #858b97; font-size: 9.5px; line-height: 1.2; }
+.batch-preview-switch-track {
+  width: 36px;
+  height: 20px;
+  flex: none;
+  padding: 2px;
+  border: 1px solid #b9bec8;
+  border-radius: 999px;
+  background: #d8dbe1;
+  transition: background .16s ease, border-color .16s ease;
+}
+.batch-preview-switch-thumb {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px #1d1d1f40;
+  transition: transform .16s ease;
+}
+.batch-preview-toggle.is-on { border-color: #9db9ec; background: #f4f7fe; }
+.batch-preview-toggle.is-on .batch-preview-switch-track { border-color: #2f6bd8; background: #2f6bd8; }
+.batch-preview-toggle.is-on .batch-preview-switch-thumb { transform: translateX(16px); }
 #batchApplyNote { font-size: 10.5px; line-height: 1.35; color: #8b94a3; }
 #batchApplyNote:empty { display: none; }
 .batch-apply-bar.ready #batchApplyNote { color: var(--ink); }
-/* Pending affordance while the engine computes the combined preview on the
-   canvas — Select all / toggling can trigger a brief round-trip before the
-   merged result paints, and silence reads as "nothing happened". Neutral gray
-   per the card visual language; sits beside the note, hidden until in flight. */
-.batch-preview-status { display: flex; align-items: center; gap: 6px; font-size: 10.5px; line-height: 1.35; color: #8b94a3; }
+.batch-exclusion-notice {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid #c8d1df;
+  border-radius: 9px;
+  background: #f4f6fa;
+  color: #3f4b60;
+}
+.batch-exclusion-notice[hidden] { display: none; }
+.batch-exclusion-notice > svg {
+  width: 17px;
+  height: 17px;
+  margin-top: 1px;
+  fill: #dfe6f1;
+  stroke: #536682;
+  stroke-width: 1.35;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.batch-exclusion-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10px;
+  line-height: 1.35;
+}
+.batch-exclusion-copy strong { color: #344158; font-size: 10.5px; }
+.batch-exclusion-notice button {
+  align-self: center;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #315f9c;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.batch-exclusion-notice button:hover { background: #e6ebf4; }
+.batch-exclusion-notice button:focus-visible { outline: 2px solid #2f6bd8; outline-offset: 1px; }
+/* Pending affordance while the engine computes the combined preview. It uses
+   the same brand status and motion as the canvas veil, so the operation reads
+   as one continuous system state rather than a disabled control. */
+.batch-preview-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--brand) 24%, #fff);
+  border-radius: 8px;
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-size: 10.5px;
+  line-height: 1.35;
+}
 .batch-preview-status[hidden] { display: none; }
-.batch-preview-spinner { width: 10px; height: 10px; border: 1.5px solid #c7c9ce; border-top-color: #43474d; border-radius: 50%; animation: utilitySpin .7s linear infinite; }
-@media (prefers-reduced-motion: reduce) { .batch-preview-spinner { animation: none; } }
+.batch-preview-status strong { font-weight: 700; }
+.preview-bouncing-dots {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 27px;
+  height: 14px;
+  flex: none;
+}
+.preview-bouncing-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: preview-dot-bounce .9s ease-in-out infinite;
+}
+.preview-bouncing-dots i:nth-child(2) { animation-delay: .13s; }
+.preview-bouncing-dots i:nth-child(3) { animation-delay: .26s; }
+@keyframes preview-dot-bounce {
+  0%, 55%, 100% { transform: translateY(2px); opacity: .5; }
+  28% { transform: translateY(-4px); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .preview-bouncing-dots i { animation: none; opacity: 1; transform: none; }
+}
 .batch-apply-actions { display: flex; gap: 8px; }
-.batch-apply-actions #batchApplyButton { flex: 1; }
+.batch-apply-actions #batchApplyButton {
+  position: relative;
+  isolation: isolate;
+  flex: 1;
+  overflow: hidden;
+}
+.batch-apply-actions #batchApplyButton > * {
+  position: relative;
+  z-index: 1;
+}
+.batch-apply-actions #batchApplyButton[data-action="review"]::before {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  content: "";
+  background: #dbe8ff;
+  transform: scaleX(var(--batch-review-progress, 0));
+  transform-origin: left center;
+  transition: transform .22s ease;
+}
 /* Apply button reads as a white/outline control here, not a filled purple CTA:
    the batch bar is a working surface, and a solid brand fill overweighted it. */
 .batch-apply-bar .button.primary {
@@ -2950,17 +3133,13 @@ button { font: inherit; }
   border-color: var(--line);
 }
 .batch-apply-bar .button.primary:not(:disabled):hover { border-color: #b9bfcc; background: #fafbfc; }
-.batch-apply-bar.reviewing .button.primary:not(:disabled) {
-  border-color: #2c2c2e;
-  background: #2c2c2e;
-  color: #fff;
-}
-.batch-apply-bar.reviewing .button.primary:not(:disabled):hover {
-  border-color: #1d1d1f;
-  background: #1d1d1f;
-}
-.batch-apply-bar.ready .button.primary:not(:disabled) { color: var(--brand); border-color: color-mix(in srgb, var(--brand) 40%, var(--line)); }
+.batch-apply-bar.ready .button.primary:not(:disabled) { color: #2f6bd8; border-color: #9db9ec; }
+.batch-apply-bar.reviewing .button.primary:not(:disabled) { color: #2f6bd8; border-color: #7fa5ea; background: #f4f7fe; }
 .batch-apply-bar .button.primary svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+@media (prefers-reduced-motion: reduce) {
+  .batch-apply-actions #batchApplyButton[data-action="review"]::before { transition: none; }
+}
 
 .comparison-value .focus-interaction-preview {
   padding: 11px 12px;
@@ -3760,6 +3939,115 @@ body.revision-dock-resizing .revision-dock.version-history {
   gap: 10px;
 }
 
+.combined-preview-banner {
+  position: absolute;
+  z-index: 90;
+  top: 12px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: min(360px, calc(100% - 24px));
+  box-sizing: border-box;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid #2f6bd8;
+  border-radius: 10px;
+  background: #e7f0ff;
+  color: #173f86;
+  box-shadow: 0 10px 28px #1d4f9d38;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.combined-preview-banner[hidden] { display: none; }
+.combined-preview-banner strong {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .035em;
+  white-space: nowrap;
+}
+.combined-preview-banner span:last-child {
+  min-width: 0;
+  padding-left: 8px;
+  border-left: 1px solid #b8cbed;
+  color: #45628f;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.combined-preview-banner-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2f6bd8;
+  box-shadow: 0 0 0 3px #d8e5fb;
+}
+.combined-preview-banner.is-updating {
+  border-color: color-mix(in srgb, var(--brand) 46%, #fff);
+  background: var(--brand-soft);
+  color: var(--brand);
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--brand) 20%, transparent);
+}
+.combined-preview-banner.is-updating span:last-child {
+  border-left-color: color-mix(in srgb, var(--brand) 24%, #fff);
+  color: color-mix(in srgb, var(--brand) 52%, #64748b);
+}
+.combined-preview-banner.is-updating .combined-preview-banner-dot {
+  border: 2px solid color-mix(in srgb, var(--brand) 24%, #fff);
+  border-top-color: var(--brand);
+  background: transparent;
+  box-shadow: none;
+  animation: utilitySpin .7s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .combined-preview-banner.is-updating .combined-preview-banner-dot { animation: none; }
+}
+
+.canvas-preview-updating {
+  position: absolute;
+  z-index: 88;
+  inset: 0 0 44px;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(232 235 241 / 62%);
+  backdrop-filter: saturate(.7) grayscale(.18);
+  pointer-events: none;
+}
+.canvas-preview-updating[hidden] { display: none; }
+.canvas-preview-updating-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: min(360px, calc(100% - 32px));
+  box-sizing: border-box;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--brand) 42%, #fff);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 94%);
+  color: var(--brand);
+  box-shadow: 0 18px 50px rgb(29 31 45 / 18%);
+}
+.canvas-preview-updating-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+.canvas-preview-updating-copy strong {
+  color: color-mix(in srgb, var(--brand) 78%, #172033);
+  font-size: 13px;
+  font-weight: 780;
+  line-height: 1.25;
+}
+.canvas-preview-updating-copy > span {
+  color: #64748b;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
 .canvas-compare-toggle {
   min-height: 28px;
   display: inline-flex;
@@ -3954,6 +4242,89 @@ body.revision-dock-resizing .revision-dock.version-history {
   line-height: 1.4;
 }
 
+.background-refresh-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--brand);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.background-refresh-chip > span {
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid color-mix(in srgb, var(--brand) 24%, #fff);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: background-critique-refresh-spin .72s linear infinite;
+}
+
+.background-refresh-chip.failed {
+  color: #9f2631;
+}
+
+.focus-update-status {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+  margin: 0 0 12px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--brand) 28%, #fff);
+  border-radius: 9px;
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+.focus-update-status > span:last-child,
+.focus-action-update > span:last-child {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.focus-update-status strong,
+.focus-action-update strong {
+  color: color-mix(in srgb, var(--brand) 78%, #172033);
+  font-size: 10.5px;
+  font-weight: 750;
+  line-height: 1.3;
+}
+.focus-update-status small,
+.focus-action-update small {
+  color: color-mix(in srgb, var(--brand) 48%, #64748b);
+  font-size: 9.5px;
+  font-weight: 550;
+  line-height: 1.35;
+}
+.focus-update-spinner,
+.focus-action-spinner {
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  border: 2px solid color-mix(in srgb, var(--brand) 24%, #fff);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  background: transparent;
+  animation: background-critique-refresh-spin .72s linear infinite;
+}
+.focus-action-spinner {
+  border-color: rgb(255 255 255 / 42%);
+  border-top-color: #fff;
+}
+
+@keyframes background-critique-refresh-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .background-refresh-chip > span,
+  .focus-update-spinner,
+  .focus-action-spinner {
+    animation: none;
+  }
+}
+
 /* Stale-context recovery: an amber-tinted notice whose body carries an inline
    Regenerate button, so the fix for "these critiques are for the old context"
    is one click away at the point of failure. */
@@ -4026,6 +4397,17 @@ body.revision-dock-resizing .revision-dock.version-history {
   padding: 0;
 }
 
+.rationale-more {
+  margin-top: 7px;
+  padding-bottom: 4px;
+}
+
+.rationale-more-list {
+  display: flex;
+  flex-direction: column;
+  margin-top: 6px;
+}
+
 .rationale-empty {
   padding: 3px 0 5px;
   color: #6e6e73;
@@ -4034,6 +4416,7 @@ body.revision-dock-resizing .revision-dock.version-history {
 }
 
 .rationale-memory-item {
+  --rationale-body-indent: 10px;
   padding: 8px 0 10px;
   border-bottom: 1px solid #e5e5e8;
 }
@@ -4075,6 +4458,7 @@ body.revision-dock-resizing .revision-dock.version-history {
 }
 
 .rationale-source strong {
+  margin-left: var(--rationale-body-indent);
   color: #2c2c2e;
   font-size: 10.5px;
   font-weight: 650;
@@ -4084,7 +4468,7 @@ body.revision-dock-resizing .revision-dock.version-history {
 .rationale-memory-item > p {
   display: -webkit-box;
   overflow: hidden;
-  margin: 5px 0 6px 10px;
+  margin: 5px 0 6px var(--rationale-body-indent);
   color: #515154;
   font-size: 10.5px;
   line-height: 1.45;
@@ -4095,7 +4479,7 @@ body.revision-dock-resizing .revision-dock.version-history {
 .rationale-item-actions {
   display: flex;
   gap: 11px;
-  margin-left: 10px;
+  margin-left: var(--rationale-body-indent);
 }
 
 .context-modal form {
@@ -4115,12 +4499,27 @@ body.revision-dock-resizing .revision-dock.version-history {
   background: transparent;
 }
 
+.context-modal[data-intent="refine-solution"] {
+  width: min(360px, calc(100vw - 24px));
+}
+
+.context-modal[data-intent="refine-solution"] form {
+  max-height: calc(100vh - 72px);
+  padding: 10px;
+  overflow: hidden;
+}
+
 .rationale-popover-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
 }
+
+.context-modal.is-dragging .rationale-popover-head { cursor: grabbing; }
 
 .rationale-popover-head > button {
   display: grid;
@@ -4185,6 +4584,115 @@ body.revision-dock-resizing .revision-dock.version-history {
   border-radius: 7px;
   background: #fff1f1;
   color: #9f2631;
+}
+
+.refinement-choices {
+  display: grid;
+  gap: 5px;
+  max-height: min(250px, calc(100vh - 210px));
+  overflow-y: auto;
+  padding: 1px;
+}
+
+.refinement-choices[hidden] {
+  display: none;
+}
+
+.refinement-choice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid #d8d8dc;
+  border-radius: 9px;
+  background: #fff;
+  color: #1d1d1f;
+  cursor: pointer;
+  transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease;
+}
+
+.refinement-choice:hover {
+  border-color: #a9a9ae;
+  background: #f8f8fa;
+}
+
+.refinement-choice:has(input:checked) {
+  border-color: #2f6bd8;
+  background: #f2f6ff;
+  box-shadow: inset 0 0 0 1px #2f6bd8;
+}
+
+.refinement-choice.is-unavailable {
+  border-color: #e1e1e5;
+  background: #f7f7f9;
+  color: #86868b;
+  cursor: not-allowed;
+}
+
+.refinement-choice.is-unavailable .refinement-choice-head span,
+.refinement-choice.is-unavailable .refinement-choice-suggestion {
+  color: #86868b;
+}
+
+.refinement-choice input {
+  width: 15px;
+  height: 15px;
+  margin: 2px 0 0;
+  accent-color: #2f6bd8;
+}
+
+.refinement-choice input:focus-visible {
+  outline: 2px solid #2f6bd8;
+  outline-offset: 2px;
+}
+
+.refinement-choice-body {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.refinement-choice-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.refinement-choice-head strong {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.refinement-choice-head span {
+  overflow: hidden;
+  color: #6e6e73;
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.refinement-choice-suggestion {
+  display: -webkit-box;
+  overflow-wrap: anywhere;
+  overflow: hidden;
+  color: #3a3a3c;
+  font-size: 10.5px;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.context-modal[data-intent="refine-solution"] .modal-actions {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+}
+
+.context-modal[data-intent="refine-solution"] .modal-actions .rationale-submit:only-child,
+.context-modal[data-intent="refine-solution"] .refinement-regenerate[hidden] + .rationale-submit {
+  grid-column: 1 / -1;
 }
 
 .revision-dock-bar {
@@ -4686,6 +5194,20 @@ body.revision-dock-resizing .revision-dock.version-history {
   border-top: 1px solid #e7e8ec;
   background: #fbfbfcf5;
   backdrop-filter: blur(8px);
+}
+.focus-action-update {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 8px 9px;
+  border: 1px solid color-mix(in srgb, var(--brand) 24%, #fff);
+  border-radius: 8px;
+  background: var(--brand-soft);
+}
+.focus-actions.is-updating .focus-action:disabled {
+  opacity: .72;
 }
 .focus-action {
   min-width: 0;

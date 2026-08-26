@@ -40,7 +40,7 @@ export const CRITERION_REGISTRY_VERSION = "diagnostic-knowledge-v4-2026-08-23";
 // v24: six fixed, provenance-tracked end-to-end critique demonstrations teach
 // evidence→diagnosis→critique structure, genre applicability, target level,
 // recommendation choice, and focused-scope discipline.
-export const REVIEW_PROMPT_VERSION = "diagnostic-review-v24-2026-08-24";
+export const REVIEW_PROMPT_VERSION = "diagnostic-review-v27-2026-08-26";
 // v3.2: the engine now assembles and returns the grounded `strengths` array
 // alongside critiques/diagnoses (rendered as inline positive cards in the
 // critique list, grouped by dimension).
@@ -66,7 +66,7 @@ export const REVIEW_PROMPT_VERSION = "diagnostic-review-v24-2026-08-24";
 // RE_API_SECOND_PASS=0. It still costs one extra LLM call per full review.
 // Engine-library consumers (tests, scripts) that never boot the server keep the
 // flag unset and so run a single pass unless they set it themselves.
-export const REVIEW_ENGINE_VERSION = "diagnostic-engine-v3.10";
+export const REVIEW_ENGINE_VERSION = "diagnostic-engine-v3.13";
 
 /* ------------------------------------------------------------------ *
  * GROUNDING (uniform authorization / evidence gate)
@@ -341,5 +341,27 @@ export function diagnosticKnowledgePrompt(): string {
     "use as an empirical strategy scaffold; omit when no leaf precisely fits; the branch",
     "a leaf belongs to does not have to match the object):",
     recommendationCatalogPrompt(),
+  ].join("\n");
+}
+
+/** Focused/local asks already carry an explicit target and acceptance contract.
+ * They need the exact diagnostic codes but not the complete recommendation
+ * catalog and every empirical mapping example on every call. */
+export function directedDiagnosticKnowledgePrompt(): string {
+  const objects = clusteredVocabPrompt(OBJECTS);
+  const problems = clusteredVocabPrompt(PROBLEMS);
+  const grounding = JUDGMENT_BASIS_LABELS.map((label) => `  - ${label}`).join("\n");
+  return [
+    "DIRECTED REVIEW VOCABULARY",
+    "OBJECTS (choose exactly one exact code):",
+    objects,
+    "",
+    "PROBLEMS (optional; choose one exact code or omit):",
+    problems,
+    "",
+    "GROUNDING LABELS:",
+    grounding,
+    "",
+    "The author's explicit request is the solution brief. Omit recommendation when no catalog leaf is supplied; use the executable proposal kinds directly.",
   ].join("\n");
 }

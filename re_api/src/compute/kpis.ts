@@ -13,6 +13,26 @@ import type { KpiAggregate, KpiDefinition, ResolvedKpi, SpecMap, VegaLiteSpec } 
  * these explicitly (see computeValue): guessing one is a trust-invariant break. */
 const KPI_AGGREGATES = new Set<KpiAggregate>(["count", "sum", "avg", "min", "max", "distinct"]);
 
+type KpiFilter = NonNullable<KpiDefinition["filter"]>;
+
+/** Normalize the legacy singular filter and the new AND-combined filter list.
+ * Sorting makes equivalent filter sets share one deterministic signature. */
+function filtersOf(def: KpiDefinition): KpiFilter[] {
+  const candidates = [
+    ...(def.filter ? [def.filter] : []),
+    ...(Array.isArray(def.filters) ? def.filters : []),
+  ].filter((filter): filter is KpiFilter => Boolean(
+    filter && typeof filter.field === "string" && filter.field.trim() &&
+    (typeof filter.value === "string" || typeof filter.value === "number" || typeof filter.value === "boolean")
+  ));
+  const unique = new Map<string, KpiFilter>();
+  for (const filter of candidates) {
+    const normalized = { field: filter.field.trim(), value: filter.value };
+    unique.set(JSON.stringify(normalized), normalized);
+  }
+  return [...unique.values()].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+}
+
 /**
  * The compute+presentation identity of a KPI: everything that determines the
  * displayed figure (tile, field, aggregate, row filter) plus how it is shown
@@ -22,17 +42,54 @@ const KPI_AGGREGATES = new Set<KpiAggregate>(["count", "sum", "avg", "min", "max
  * where showing one number under two names is a misleading claim (see computeKpis).
  */
 function computationSignature(def: KpiDefinition): string {
-  const filter = def.filter && typeof def.filter === "object"
-    ? { field: def.filter.field, value: def.filter.value }
-    : null;
   return JSON.stringify({
     tile: def.tile ?? null,
     field: def.field ?? null,
     agg: def.agg ?? null,
-    filter,
+    filters: filtersOf(def),
     format: def.format ?? null,
     unit: typeof def.unit === "string" ? def.unit.trim() : null,
   });
+}
+
+function labelContainsValue(label: string, value: unknown): boolean {
+  const needle = String(value).trim();
+  if (!needle) return false;
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}([^\\p{L}\\p{N}]|$)`, "iu").test(label);
+}
+
+/** A label that names a real dimension member is a scoped data claim. Require
+ * that exact member to be present in the filters. This catches semantic misuse
+ * such as a label saying "House Sparrow Index 2023" while the definition only
+ * filters by bird and then takes the maximum over every year (100 from 1979).
+ * The number is real, but the claim is false, so it must remain uncomputed. */
+function labelScopeIsBacked(
+  sourceRows: Record<string, unknown>[],
+  def: KpiDefinition,
+  label: string,
+): boolean {
+  if (!sourceRows.length) return true;
+  const filters = filtersOf(def);
+  const fields = new Set(sourceRows.flatMap((row) => Object.keys(row)));
+  for (const field of fields) {
+    if (field === def.field) continue;
+    const values = new Map<string, string | number | boolean>();
+    for (const row of sourceRows) {
+      const value = row[field];
+      if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") continue;
+      values.set(`${typeof value}:${String(value)}`, value);
+      if (values.size > 100) break;
+    }
+    // A constant is not a distinguishing scope, and high-cardinality free text
+    // is too ambiguous to infer safely from copy.
+    if (values.size < 2 || values.size > 100) continue;
+    for (const value of values.values()) {
+      if (!labelContainsValue(label, value)) continue;
+      if (!filters.some((filter) => filter.field === field && filter.value === value)) return false;
+    }
+  }
+  return true;
 }
 
 function rowsOf(spec: VegaLiteSpec | undefined): Record<string, unknown>[] {
@@ -87,12 +144,15 @@ function rowsForKpi(
   // there is no source we can aggregate faithfully — treat it as no source ("—").
   if (spec && hasInlineValues(spec) && !reshapesRows(spec)) {
     const rows = rowsOf(spec);
-    if (!def.filter) return { rows, hasSource: true };
-    const { field, value } = def.filter;
-    if (!field || !rows.some((row) => Object.prototype.hasOwnProperty.call(row, field))) {
-      return { rows: [], hasSource: false };
+    const filters = filtersOf(def);
+    if (!filters.length) return { rows, hasSource: true };
+    let filtered = rows;
+    for (const { field, value } of filters) {
+      if (!field || !rows.some((row) => Object.prototype.hasOwnProperty.call(row, field))) {
+        return { rows: [], hasSource: false };
+      }
+      filtered = filtered.filter((row) => row[field] === value);
     }
-    const filtered = rows.filter((row) => row[field] === value);
     // An exact category filter that matches no real row is not a genuine
     // zero-valued KPI; it is an invalid model-authored category/value pair.
     return { rows: filtered, hasSource: filtered.length > 0 };
@@ -253,8 +313,10 @@ export function computeKpis(specMap: SpecMap, defs: KpiDefinition[] | undefined)
   for (const def of defs) {
     const label = typeof def.label === "string" ? def.label.trim() : "";
     if (!label) continue;
+    const sourceRows = rowsOf(def.tile ? specMap[def.tile] : undefined);
     const { rows, hasSource } = rowsForKpi(specMap, def);
-    const raw = collidingSignatures.has(computationSignature(def))
+    const raw = collidingSignatures.has(computationSignature(def)) ||
+        !labelScopeIsBacked(sourceRows, def, label)
       ? null
       : computeValue(rows, def, hasSource);
     const unit = ["percent", "percent-fraction", "currency"].includes(def.format || "")

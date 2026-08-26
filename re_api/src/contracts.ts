@@ -265,6 +265,60 @@ export interface CritiqueTarget {
   ref: Record<string, unknown>;
 }
 
+/** A rendered element intersecting an author-drawn review region. Unlike raw
+ * canvas pixels, this identifies what the author could actually see/select. */
+export interface RegionSemanticTarget {
+  kind:
+    | "dashboard-title"
+    | "dashboard-subtitle"
+    | "filter-control"
+    | "tile"
+    | "tile-title"
+    | "tile-subtitle"
+    | "chart"
+    | "axis"
+    | "legend"
+    | "mark"
+    | "annotation";
+  /** Canonical evidence/application address such as board.title or
+   * tile.task-velocity.encoding. */
+  path: string;
+  tileId?: string;
+  filterId?: string;
+  text?: string;
+  bounds: Bounds;
+  /** Intersection area divided by this element's rendered area. */
+  overlapRatio: number;
+}
+
+export type RequestAction =
+  | "shorten"
+  | "lengthen"
+  | "remove"
+  | "rename"
+  | "reposition"
+  | "resize"
+  | "recolor"
+  | "simplify"
+  | "emphasize"
+  | "deemphasize"
+  | "restructure"
+  | "fix"
+  | "evaluate";
+
+/** A compact, inspectable interpretation of an explicit focused/local ask.
+ * This is not hidden chain-of-thought: it is an acceptance contract used by
+ * generation, preview, Apply, telemetry, and tests. */
+export interface ReviewRequestContract {
+  request: string;
+  explicitChange: boolean;
+  actions: RequestAction[];
+  targetPaths: string[];
+  targetKinds: RegionSemanticTarget["kind"][];
+  mustPreserve: string[];
+  successCriteria: string[];
+}
+
 export interface Proposal {
   kind: ProposalKind;
   /** Guidance-only recommendations are visible but can never enter /apply. */
@@ -281,6 +335,8 @@ export interface Proposal {
    * current tiles, so ambitious reflows do not rely on brittle model arithmetic. */
   composition?: "hero-left" | "hero-top" | "asymmetric-grid" | "kpi-rail" | "small-multiples";
   layoutTiles?: string[];
+  /** Exact tile that owns the dominant slot in a named composition. */
+  heroTileId?: string;
   /** For kind "add-kpis": model-authored KPI definitions. The engine computes
    * each `value` from the real inline tile data (never fabricated) and returns
    * the resolved KPIs on `board.kpis`. */
@@ -314,6 +370,10 @@ export interface KpiDefinition {
    * "Good days" must aggregate only rows whose `band` is "Good", rather than
    * summing the entire category table and displaying a plausible wrong total. */
   filter?: { field: string; value: string | number | boolean };
+  /** Exact row filters combined with AND. Use this when a KPI is scoped by
+   * more than one dimension, such as one species in one specific year. The
+   * singular `filter` remains supported for backwards compatibility. */
+  filters?: Array<{ field: string; value: string | number | boolean }>;
   /** Set true to draw the eye to a headline / at-risk figure. */
   highlight?: boolean;
   /** Optional unit suffix ("%", "d") appended to the computed number. */
@@ -397,6 +457,8 @@ export interface Critique {
   /** Echoed review request keeps the result understandable after the input
    * changes or the critique is opened from another part of the interface. */
   reviewRequest?: string;
+  /** Deterministic acceptance contract for a direct focused/local request. */
+  requestContract?: ReviewRequestContract;
 }
 
 /** ---- Observability: the trace event stream ---- */
@@ -655,6 +717,12 @@ export interface LocalCritiqueRegion {
   /** Optional branch hint from the author (non-authoritative). */
   dimension?: Dimension;
   crosscutting?: Crosscutting[];
+  /** Rendered semantic elements intersecting the author's box. Supplied by the
+   * browser and sanitized against the current board/spec map by the engine. */
+  semanticTargets?: RegionSemanticTarget[];
+  /** Optional client interpretation. The engine always rebuilds and sanitizes
+   * its own contract before prompting or applying. */
+  requestContract?: ReviewRequestContract;
 }
 
 /** A review-scoped author question. Unlike DashboardContext, this instruction
@@ -662,6 +730,10 @@ export interface LocalCritiqueRegion {
  * stored as durable background knowledge about the dashboard. */
 export interface FocusedReviewRequest {
   request: string;
+  /** Distinguishes an author ask from engine-authored maintenance prompts. */
+  purpose?: "author-request" | "stale-refresh" | "solution-refinement";
+  /** Engine-derived acceptance contract for an explicit change request. */
+  requestContract?: ReviewRequestContract;
 }
 
 /** Author-authored rationale plus the point-in-time critique snapshot that makes

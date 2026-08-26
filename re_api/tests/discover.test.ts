@@ -823,6 +823,13 @@ test("add-kpis keeps only KPI definitions that name real fields and computes not
             agg: "sum",
             filter: { field: "department", value: "Eng" },
           },
+          {
+            label: "Engineering Tasks 2025",
+            tile: "department-tasks",
+            field: "tasks",
+            agg: "sum",
+            filters: [{ field: "department", value: "Eng" }, { field: "year", value: 2025 }],
+          },
           { label: "Bogus", tile: "department-tasks", field: "no-such-field", agg: "sum" },
           { label: "Rows", tile: "department-tasks", agg: "count" },
         ],
@@ -838,6 +845,7 @@ test("add-kpis keeps only KPI definitions that name real fields and computes not
     label: string;
     field?: string;
     filter?: { field: string; value: string | number | boolean };
+    filters?: Array<{ field: string; value: string | number | boolean }>;
   }>;
   const labels = defs.map((d) => d.label);
   assert.ok(labels.includes("Total Tasks"));
@@ -848,6 +856,9 @@ test("add-kpis keeps only KPI definitions that name real fields and computes not
     defs.find((d) => d.label === "Engineering Tasks")!.filter,
     { field: "department", value: "Eng" },
   );
+  // The fixture has no `year` field, so a semantically scoped KPI whose second
+  // filter cannot be backed by real rows is removed by the compute gate.
+  assert.ok(!labels.includes("Engineering Tasks 2025"));
   // No numeric value is authored by the model — only the field/agg to compute from.
   assert.ok(defs.every((d) => !("value" in d)));
 });
@@ -1163,6 +1174,119 @@ test("a component-level fix is executable through the general edit-spec proposal
   // The engine keeps the sanitized edits on the proposal so /apply re-applies
   // exactly what was validated.
   assert.deepEqual(kept.proposal.edits, [{ op: "set", path: ["encoding", "x", "sort"], value: "-y" }]);
+});
+
+test("full review filters an alignment-only preference on a short infographic callout", async () => {
+  const calloutSpec = {
+    data: { values: [{ x: 0 }] },
+    layer: [{
+      mark: { type: "text", align: "center", dy: 18 },
+      encoding: {
+        text: { value: "House Sparrows have roughly halved\nsince the 1970s — yet they are still\nBritain's number-one garden bird." },
+      },
+    }],
+  };
+  const candidate = {
+    object: "text",
+    problem: "overly complex | difficult",
+    recommendation: "text:communicate takeaways",
+    kind: "left-align-short-callout",
+    priority: "medium",
+    surface: "text",
+    tileId: "did-you-know",
+    title: "Make the annotation paragraph easier to scan",
+    issue: "The short annotation is center-aligned.",
+    rationale: "A left edge could offer another reading treatment.",
+    evidence: "The three-line callout uses a centered text mark.",
+    suggestion: "Left-align the explanatory paragraph and nudge it left.",
+    judgmentBasis: ["dashboard evidence", "general design principle"],
+    evidenceRefs: [{
+      source: "dashboard",
+      path: "tile.did-you-know.layer.0.mark.align",
+      tileId: "did-you-know",
+      detail: "The three-line callout uses a centered text mark.",
+    }],
+    proposal: {
+      kind: "edit-spec",
+      mode: "executable",
+      edits: [
+        { op: "set", path: ["layer", 0, "mark", "align"], value: "left" },
+        { op: "set", path: ["layer", 0, "mark", "dx"], value: -12 },
+      ],
+    },
+    target: { granularity: "annotation", ref: { tile: "did-you-know" } },
+  };
+  await assert.rejects(
+    discoverDashboardCritiques(
+      { "did-you-know": calloutSpec } as unknown as SpecMap,
+      { dashboardType: "infographic" },
+      {
+        title: "Britain's Garden Birds",
+        hasKpis: true,
+        hasEmbeddedKpis: true,
+        tiles: [{ id: "did-you-know", title: "Did you know?", hasSubtitle: true }],
+      },
+      new StubClient(diagnosisPayload([candidate])),
+    ),
+    /no critique passed/,
+  );
+});
+
+test("full review filters a pseudo-precision rewrite that is not a design improvement", async () => {
+  const calloutSpec = {
+    data: { values: [{ x: 0 }] },
+    layer: [{
+      mark: { type: "text", align: "center", dy: 18 },
+      encoding: {
+        text: { value: "House Sparrows have roughly halved\nsince the 1970s — yet they are still\nBritain's number-one garden bird." },
+      },
+    }],
+  };
+  const candidate = {
+    object: "text",
+    problem: "inconsistent | mismatched",
+    recommendation: "text:communicate takeaways",
+    kind: "match-callout-to-1979-baseline",
+    priority: "medium",
+    surface: "text",
+    tileId: "did-you-know",
+    title: "Match the callout wording to the 1979 baseline",
+    issue: "The callout says since the 1970s while the chart uses a 1979 baseline.",
+    rationale: "The two phrases use different levels of precision.",
+    evidence: "The callout says the 1970s and the chart labels its index as 1979 = 100.",
+    suggestion: "Replace the decade wording with explicit 1979 baseline language.",
+    judgmentBasis: ["dashboard evidence", "general design principle"],
+    evidenceRefs: [{
+      source: "dashboard",
+      path: "tile.did-you-know.layer.0.encoding.text.value",
+      tileId: "did-you-know",
+      detail: "The callout says since the 1970s.",
+    }],
+    proposal: {
+      kind: "edit-spec",
+      mode: "executable",
+      edits: [{
+        op: "set",
+        path: ["layer", 0, "encoding", "text", "value"],
+        value: "House Sparrows have roughly halved\nsince 1979 — yet they are still\nBritain's number-one garden bird.",
+      }],
+    },
+    target: { granularity: "annotation", ref: { tile: "did-you-know" } },
+  };
+  await assert.rejects(
+    discoverDashboardCritiques(
+      { "did-you-know": calloutSpec } as unknown as SpecMap,
+      { dashboardType: "infographic" },
+      {
+        title: "Britain's Garden Birds",
+        hasKpis: true,
+        hasEmbeddedKpis: true,
+        tiles: [{ id: "did-you-know", title: "Did you know?", hasSubtitle: true }],
+      },
+      new StubClient(diagnosisPayload([candidate])),
+    ),
+    /no critique passed/,
+  );
 });
 
 test("an edit-spec whose edits are all unsafe is downgraded to manual guidance", async () => {
@@ -1593,7 +1717,7 @@ test("local review adds direct guidance when model output does not answer the re
   const direct = result.critiques.find((item) => item.requestRelevance === "direct");
   assert.ok(direct);
   assert.equal(direct.proposal.mode, "guidance_only");
-  assert.match(direct.answer || "", /No material issue was validated/);
+  assert.match(direct.answer || "", /could not produce an executable change/);
 });
 
 test("local review drops a critique targeting a tile outside the selection but still surfaces the answer", async () => {
@@ -1647,7 +1771,7 @@ test("focused review requires a direct answer and tags results for request-first
     "Does this chart make department differences easy to compare?",
   );
   assert.match(client.firstUserText, /"kind": "focused"/);
-  assert.match(client.firstUserText, /Diagnose each object the evidence supports/);
+  assert.match(client.firstUserText, /FINAL REQUEST ACCEPTANCE CONTRACT/);
 });
 
 test("a focused review returns guidance even when the evaluated claim has no issue", async () => {

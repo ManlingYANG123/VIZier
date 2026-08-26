@@ -402,6 +402,46 @@ test("an executable diagnostic critique applies a concrete board change", async 
   assert.ok(result.changedTargets.includes("dashboard.title"));
 });
 
+test("runApply rolls back a safe proposal that changes the wrong target for an explicit request", async () => {
+  const initialBoard = dashboardBoard();
+  const unrelated = {
+    ...titleCritique,
+    id: "wrong-explicit-target",
+    reviewRequest: "Shorten the dashboard title.",
+    requestRelevance: "direct",
+    requestContract: {
+      request: "Shorten the dashboard title.",
+      explicitChange: true,
+      actions: ["shorten"],
+      targetPaths: ["board.title"],
+      targetKinds: ["dashboard-title"],
+      mustPreserve: [],
+      successCriteria: ["The dashboard title must become materially shorter."],
+    },
+    proposal: {
+      kind: "dashboard-title",
+      mode: "executable",
+      label: initialBoard.title,
+      subtitle: "A new subtitle that does not satisfy the title request",
+    },
+  } as Critique;
+  const result = await runApply(
+    {
+      version: 1,
+      context: {},
+      specMap: dashboardSpecMap(),
+      board: initialBoard,
+      critiques: [unrelated],
+      selectedRecommendationIds: [unrelated.id],
+    },
+    new Tracer("t-wrong-explicit-target", { logDir: null }),
+  );
+  assert.equal(result.rollback.rolledBack, true);
+  assert.match(result.rollback.reason || "", /request acceptance gate failed/);
+  assert.equal(result.board.title, initialBoard.title);
+  assert.equal(result.board.subtitle, initialBoard.subtitle);
+});
+
 // A board with laid-out tiles, so a layout/KPI apply has geometry to change.
 function laidOutBoard() {
   return {

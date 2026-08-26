@@ -5,6 +5,7 @@ import {
   applyPlan,
   buildApplicationPlan,
   enrichRecommendations,
+  largestCompatibleSelection,
   reevaluateMock,
   retainRecommendationFreshness,
 } from "../src/recommendation-engine.js";
@@ -63,6 +64,35 @@ test("unresolved conflicts block application", () => {
   );
   assert.equal(resolved.canApply, true);
   assert.deepEqual(resolved.order, ["brand"]);
+});
+
+test("largestCompatibleSelection keeps the largest previewable subset without changing selection", () => {
+  const recommendations = enrichRecommendations([
+    recommendation("multi", "v2-palette"),
+    recommendation("brand", "preserve-brand-palette"),
+    recommendation("tooltip", "add-tooltip"),
+  ]);
+  const result = largestCompatibleSelection(
+    ["multi", "brand", "tooltip"],
+    recommendations,
+  );
+
+  assert.deepEqual(result.selectedIds, ["multi", "tooltip"]);
+  assert.deepEqual(result.excluded.map((item) => item.id), ["brand"]);
+  assert.match(result.excluded[0].reason, /Conflicts/);
+  assert.equal(result.plan.canApply, true);
+});
+
+test("largestCompatibleSelection uses selection order as a stable conflict tie-break", () => {
+  const recommendations = enrichRecommendations([
+    recommendation("multi", "v2-palette"),
+    recommendation("brand", "preserve-brand-palette"),
+  ]);
+
+  assert.deepEqual(
+    largestCompatibleSelection(["brand", "multi"], recommendations).selectedIds,
+    ["brand"],
+  );
 });
 
 test("a conflict choice cannot exclude a required dependency", () => {

@@ -466,8 +466,12 @@ function ensureStyles() {
       flex:0 0 auto;animation:rtPulse 1.1s ease-in-out infinite}
     #reApiTrace .rt-dot.ok{background:var(--success,#10b981);animation:none}
     #reApiTrace .rt-dot.err{background:var(--danger,#ef4444);animation:none}
-    #reApiTrace .rt-title{flex:1;min-width:0;font-weight:600;font-size:12px;letter-spacing:.01em;
+    #reApiTrace .rt-title-stack{display:grid;flex:1;min-width:0;gap:2px}
+    #reApiTrace .rt-title{min-width:0;font-weight:600;font-size:12px;letter-spacing:.01em;
       color:var(--text,#111827);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #reApiTrace .rt-subtitle{min-width:0;color:var(--text-secondary,#6b7280);font-size:10.5px;
+      line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #reApiTrace .rt-subtitle[hidden]{display:none}
     #reApiTrace .rt-close{cursor:pointer;color:var(--text-secondary,#6b7280);background:none;
       border:none;font-size:14px;line-height:1;padding:2px 5px;border-radius:4px}
     #reApiTrace .rt-close:hover{color:var(--text,#111827);background:rgba(15,23,42,.06)}
@@ -512,13 +516,28 @@ function ensureStyles() {
     #reApiTrace .rt-step-error .rt-step-label{white-space:normal;color:var(--danger,#b91c1c)}
     #reApiTrace .rt-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;
       overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+    #reApiTrace[data-variant="prominent"]{position:relative;
+      border-color:color-mix(in srgb,var(--brand,#5b4cf0) 34%,#d7d9e0);
+      background:color-mix(in srgb,var(--brand,#5b4cf0) 4%,#fff);
+      box-shadow:0 5px 16px rgba(15,23,42,.11)}
+    #reApiTrace[data-variant="prominent"] .rt-head{min-height:54px;padding:10px 12px;border-bottom:0;
+      background:color-mix(in srgb,var(--brand,#5b4cf0) 9%,#fff)}
+    #reApiTrace[data-variant="prominent"] .rt-dot{width:18px;height:18px;
+      border:3px solid color-mix(in srgb,var(--brand,#5b4cf0) 20%,transparent);
+      border-top-color:var(--brand,#5b4cf0);background:transparent;animation:rtSpin .72s linear infinite}
+    #reApiTrace[data-variant="prominent"] .rt-title{font-size:13px;font-weight:700;letter-spacing:0}
+    #reApiTrace[data-variant="prominent"]::after{position:absolute;right:0;bottom:0;left:0;height:3px;
+      background:linear-gradient(90deg,transparent 0%,var(--brand,#5b4cf0) 44%,transparent 88%);
+      content:"";transform:translateX(-100%);animation:rtProgress 1.25s cubic-bezier(.45,0,.25,1) infinite}
     @keyframes rtFadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
     @keyframes rtPulse{0%,100%{opacity:1}50%{opacity:.45}}
     @keyframes rtSpin{to{transform:rotate(360deg)}}
+    @keyframes rtProgress{to{transform:translateX(100%)}}
     @media(prefers-reduced-motion:reduce){
       #reApiTrace{animation:none}
       #reApiTrace .rt-dot{animation:none}
       #reApiTrace [data-state="active"] > .rt-ico{animation:none}
+      #reApiTrace[data-variant="prominent"]::after{animation:none;transform:none}
       #reApiTrace.rt-hiding{transition:none}
     }
   `;
@@ -571,7 +590,10 @@ function el() {
   node.innerHTML = `
     <div class="rt-head">
       <span class="rt-dot" id="rtDot"></span>
-      <span class="rt-title" id="rtTitle">Engine</span>
+      <span class="rt-title-stack">
+        <span class="rt-title" id="rtTitle">Engine</span>
+        <span class="rt-subtitle" id="rtSubtitle" hidden></span>
+      </span>
       <button class="rt-close" id="rtClose" type="button" aria-label="Hide engine activity">×</button>
     </div>
     <div class="rt-body" id="rtBody"></div>`;
@@ -643,14 +665,18 @@ function upsertStage(body, group) {
 }
 
 export const tracePanel = {
-  start(title) {
+  start(title, options = {}) {
     clearTimeout(traceHideTimer);
     traceHideTimer = null;
     draftStream = "";
     draftSig = "";
     const node = el();
     node.classList.remove("rt-hiding");
+    node.dataset.variant = options.variant || "";
     node.querySelector("#rtTitle").textContent = title || "Engine";
+    const subtitle = node.querySelector("#rtSubtitle");
+    subtitle.textContent = options.subtitle || "";
+    subtitle.hidden = !options.subtitle;
     node.querySelector("#rtBody").innerHTML = "";
     node.querySelector("#rtDot").className = "rt-dot";
     const sr = node.querySelector(".rt-sr");

@@ -240,3 +240,19 @@ export function critiqueFewShotPrompt(): string {
   }
   return lines.join("\n");
 }
+
+/** One scope-matched demonstration keeps a directed request concrete without
+ * burying it beneath all full-review examples. */
+export function directedCritiqueFewShotPrompt(scope: "focused" | "selected-region"): string {
+  const preferredId = scope === "selected-region"
+    ? "fs-05-keep-local-issue-local"
+    : "fs-06-respect-focused-scope";
+  const example = CRITIQUE_FEW_SHOT_SET.examples.find((candidate) => candidate.id === preferredId);
+  if (!example) return "";
+  return [
+    "DIRECTED REVIEW DEMONSTRATION",
+    "Use this only for target resolution and evidence→proposal structure. Never copy its content.",
+    `INPUT:\n${JSON.stringify(example.input, null, 2)}`,
+    `EXPECTED OUTPUT:\n${JSON.stringify(example.expectedOutput, null, 2)}`,
+  ].join("\n");
+}

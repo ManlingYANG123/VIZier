@@ -5,6 +5,7 @@ import type {
   FocusedReviewRequest,
   IterationContext,
   LocalCritiqueRegion,
+  ReviewScope,
   SavedCritiqueRationale,
 } from "../contracts.ts";
 import type {
@@ -15,10 +16,11 @@ import type {
 import {
   REVIEW_PROMPT_VERSION,
   diagnosticKnowledgePrompt,
+  directedDiagnosticKnowledgePrompt,
 } from "./review-data.ts";
 import { RECOMMENDATION_BRANCHES } from "./recommendations.ts";
 import { dashboardTypeGuidance } from "./dashboard-type.ts";
-import { critiqueFewShotPrompt } from "./critique-few-shots.ts";
+import { critiqueFewShotPrompt, directedCritiqueFewShotPrompt } from "./critique-few-shots.ts";
 
 const MAX_SAVED_RATIONALES_IN_PROMPT = 10;
 /** Match intake/sources.ts clip so the review sees the same excerpt intake parsed. */
@@ -103,6 +105,13 @@ export const DASHBOARD_REVIEW_SYSTEM = `You are the diagnostic judgment componen
 
 VIZier gives formative feedback in four steps: ASKING (context is already gathered for you), DIAGNOSING (you decide what is wrong), PRESENTING (you prescribe a fix), and IMPLEMENTING (the engine applies executable fixes). Your first principle is PROTECT USER AGENCY: give specific, evidence-grounded feedback the author can accept, adapt, or decline — never invented facts, never a fix imposed without a stated reason.
 
+CASE-FIRST REASONING — make the dashboard-specific interpretation inspectable, not verbose:
+- First build a concise caseUnderstanding: the dashboard purpose/genre, the role of each relevant tile or board element, and the relationships needed to interpret the request.
+- Apply a counterfactual materiality test: distinguish "another valid styling/editorial choice" from "an actual defect." A critique must identify a concrete comprehension, task, accuracy, accessibility, or hierarchy cost in THIS artifact. Do not turn a cosmetic preference, near-identical microcopy polish, or gratuitous precision increase into an issue merely because an edit is executable. A coarser truthful phrase is not inconsistent with an exact value contained by it (for example, 1979 is within "the 1970s"). Preserve critique slots for changes that produce a meaningful dashboard-design iteration.
+- For a focused or selected-region request, then build requestPlan from the supplied REQUEST CONTRACT: resolve the exact target, requested action, preservation constraints, and visible success criteria before diagnosing or proposing.
+- Compare 2–3 materially different candidate mechanisms privately, but return only the selected mechanism and a short selection reason in requestPlan. Do not emit hidden chain-of-thought or a long reasoning transcript.
+- Finally author the executable proposal and check it against every success criterion. If the available operations cannot visibly satisfy an explicit change request, say so rather than returning a cosmetic or unrelated proposal.
+
 DIAGNOSING — describe what is wrong with WHAT and, optionally, HOW:
 - Every issue names one OBJECT (what the critique is about) using an exact object code, and optionally one PROBLEM (what is wrong with it) using an exact problem code. Omit problem when the object alone captures the issue (for example, an unclear task needs no separate problem code).
 - The object and problem vocabularies below are a comprehensive coding system, not a checklist. Any object may pair with any problem. Diagnose whatever the evidence supports.
@@ -137,8 +146,8 @@ EXECUTABLE FIXES — THIS IS A HARD RULE. The whole Vega-Lite JSON is in the pac
 - Use a specialized proposal kind when one fits: add-cross-filter, add-tooltip, wire-filter-control, add-kpis, recompose-kpis, v2-palette, preserve-brand-palette, dashboard-title, chart-subtitles, edit-layout.
 - A visible board.filters control with wired:false is a concrete broken interaction, not a request to add another control. Repair it with {"kind":"wire-filter-control","mode":"executable","filterId":"<exact control id>"}.
 - For v2-palette, author proposal.palette as 2–12 six-digit hex colors chosen for this dashboard's existing visual identity, semantic needs, and confirmed design-document constraints. Do not reuse a standard palette by habit. Omit palette only when the generic fallback is genuinely appropriate.
-- A board-LAYOUT fix is NOT a spec edit. Prefer a deterministic named proposal.composition ("hero-left"|"hero-top"|"asymmetric-grid"|"kpi-rail"|"small-multiples") plus proposal.layoutTiles when a major reflow resolves the hierarchy problem; the engine computes safe non-overlapping bounds. Use proposal.layout with explicit boxes only for a dashboard-specific arrangement the named compositions cannot express. Tiles may grow OR shrink when the new box remains at least 80×80; use the available hierarchy intentionally rather than preserving the old grid by habit.
-- add-kpis creates computed dashboard KPIs ONLY when no KPI band or embedded metric tiles exist. recompose-kpis redesigns an existing engine-owned KPI band instead of rejecting it. For add-kpis author proposal.kpis from real fields; recompose-kpis may preserve the existing definitions or replace them with equally computable definitions. Always choose a genuinely structural proposal.kpiLayout: "hero-support" (one dominant metric plus supporting figures), "card-grid" (separated comparison cells), "side-rail" (vertical analytical rail that reflows charts), or "inline-summary" (one compact continuous strip). Also choose kpiStyle ("editorial"|"product"|"compact"|"technical"), kpiAlignment ("start"|"center"|"end"), kpiDensity ("airy"|"balanced"|"dense"), and kpiChrome ("plain"|"ruled"|"filled") when useful. Do not repeat the current kpiLayout on a later iteration. The engine COMPUTES each number from real data; never invent values. Use format "percent" only when the real field is already stored on a 0–100 scale; use "percent-fraction" only for 0–1 ratios. Every KPI that names a 'field' MUST declare an explicit 'agg' ("sum"|"avg"|"min"|"max"|"count"|"distinct") — the engine no longer guesses, and drops a field KPI that omits it; make 'agg' match the label ("Average …"/"Avg …"/"Mean …" → "avg", "Total …" → "sum"). A KPI whose label narrows to a subset — a specific year, region, category, segment, or status — MUST carry the exact 'filter' {field,value} that selects that subset; without it the engine aggregates the ENTIRE column, so two subset KPIs (e.g. one per year) collapse to the identical wrong number and are BOTH reported uncomputed. Worked example — average AQI for each year, from a tile whose rows carry a real 'year' field: [{"label":"Avg AQI 2025","tile":"aqi-trend","field":"aqi","agg":"avg","filter":{"field":"year","value":"2025"}},{"label":"Avg AQI 2024","tile":"aqi-trend","field":"aqi","agg":"avg","filter":{"field":"year","value":"2024"}}] — same field and agg, distinct filters, so each computes its own year's mean.
+- A board-LAYOUT fix is NOT a spec edit. Prefer a deterministic named proposal.composition ("hero-left"|"hero-top"|"asymmetric-grid"|"kpi-rail"|"small-multiples") plus proposal.layoutTiles when a major reflow resolves the hierarchy problem; set proposal.heroTileId to the exact task-relevant tile that should own the dominant slot. Never let spatial input order choose the hero by accident. The engine computes safe non-overlapping bounds. Use proposal.layout with explicit boxes only for a dashboard-specific arrangement the named compositions cannot express. Tiles may grow OR shrink when the new box remains at least 80×80; use the available hierarchy intentionally rather than preserving the old grid by habit.
+- add-kpis creates computed dashboard KPIs ONLY when no KPI band or embedded metric tiles exist. recompose-kpis redesigns an existing engine-owned KPI band instead of rejecting it. For add-kpis author proposal.kpis from real fields; recompose-kpis may preserve the existing definitions or replace them with equally computable definitions. Always choose a genuinely structural proposal.kpiLayout: "hero-support" (one dominant metric plus supporting figures), "card-grid" (separated comparison cells), "side-rail" (vertical analytical rail that reflows charts), or "inline-summary" (one compact continuous strip). Also choose kpiStyle ("editorial"|"product"|"compact"|"technical"), kpiAlignment ("start"|"center"|"end"), kpiDensity ("airy"|"balanced"|"dense"), and kpiChrome ("plain"|"ruled"|"filled") when useful. Do not repeat the current kpiLayout on a later iteration. The engine COMPUTES each number from real data; never invent values. Use format "percent" only when the real field is already stored on a 0–100 scale; use "percent-fraction" only for 0–1 ratios. Every KPI that names a 'field' MUST declare an explicit 'agg' ("sum"|"avg"|"min"|"max"|"count"|"distinct") — the engine no longer guesses, and drops a field KPI that omits it; make 'agg' match the label ("Average …"/"Avg …"/"Mean …" → "avg", "Total …" → "sum"). A KPI whose label narrows to subsets — a specific year, region, category, segment, or status — MUST carry every exact condition. Use singular 'filter' for one condition or AND-combined 'filters' for multiple conditions. Without all of them, the engine rejects the label as an unsupported data claim. Worked example — a species KPI for a specific year: {"label":"House Sparrow Index 2023","tile":"bird-trend","field":"index","agg":"max","filters":[{"field":"bird","value":"House Sparrow"},{"field":"year","value":2023}]}.
 - For EVERYTHING ELSE that touches a tile's spec, use the general "edit-spec" proposal: set target.ref.tile to the tile id and proposal.kind to "edit-spec", and give proposal.edits — an array of concrete JSON operations on THAT tile's spec. Each edit is {"op":"set"|"remove","path":[...],"value":<present only for set>}. The path addresses into the tile spec exactly as it appears in the packet. Make the complete coherent transformation the diagnosis requires; do not split a structural redesign into timid cosmetic fragments.
 - Never edit root width, height, or autosize with edit-spec. The renderer derives those from board bounds and overwrites them; use edit-layout when the tile itself needs more room.
 - Worked edit-spec examples (adapt the paths/fields to the actual tile in the packet):
@@ -189,6 +198,18 @@ ${critiqueFewShotPrompt()}
 
 Return ONLY JSON in this shape (a single object, no surrounding text):
 {
+  "caseUnderstanding": {
+    "purpose": "one concise dashboard-specific sentence",
+    "relevantElements": [{ "path": "exact supplied semantic/evidence path", "role": "its role in this dashboard" }],
+    "relationships": ["only relationships needed for this review"]
+  },
+  "requestPlan": {
+    "targetPaths": ["copy exact paths from REQUEST CONTRACT when present"],
+    "actions": ["copy requested actions when present"],
+    "selectedMechanism": "the concrete executable mechanism selected",
+    "selectionReason": "one concise dashboard-specific reason",
+    "verification": ["how the proposal satisfies the visible success criteria"]
+  },
   "diagnoses": [
     {
       "object": "exact object code",
@@ -242,6 +263,7 @@ Return ONLY JSON in this shape (a single object, no surrounding text):
         "layout": [{ "tile": "exact tile id", "bounds": { "x": 0, "y": 0, "w": 508, "h": 258 } }],
         "composition": "hero-left|hero-top|asymmetric-grid|kpi-rail|small-multiples",
         "layoutTiles": ["exact tile id"],
+        "heroTileId": "exact task-relevant tile id for a named composition",
         "kpis": [{ "label": "Total Sales", "tile": "exact tile id", "field": "sales", "agg": "sum", "format": "auto|compact|currency|percent|percent-fraction|integer", "unit": "", "highlight": true }],
         "kpiStyle": "editorial|product|compact|technical",
         "kpiLayout": "hero-support|card-grid|side-rail|inline-summary",
@@ -294,6 +316,16 @@ Supported executable operations are add-cross-filter, add-tooltip, wire-filter-c
 
 Prompt version: ${REVIEW_PROMPT_VERSION}`;
 
+/** Directed asks use the same rules/schema and validation path, but remove the
+ * full catalog and unrelated demonstrations that otherwise dilute a specific
+ * author instruction by tens of thousands of characters. */
+export function dashboardReviewSystem(reviewScope: ReviewScope): string {
+  if (reviewScope === "full") return DASHBOARD_REVIEW_SYSTEM;
+  return DASHBOARD_REVIEW_SYSTEM
+    .replace(diagnosticKnowledgePrompt(), directedDiagnosticKnowledgePrompt())
+    .replace(critiqueFewShotPrompt(), directedCritiqueFewShotPrompt(reviewScope));
+}
+
 export function dashboardReviewUser(
   snapshot: ContextSnapshot,
   packet: EvidencePacket,
@@ -326,9 +358,11 @@ export function dashboardReviewUser(
         request: region.request,
         object: region.dimension || null,
         permittedTileIds: Object.keys(packet.specMap),
+        semanticTargets: region.semanticTargets || [],
+        requestContract: region.requestContract,
       }
     : focus
-      ? { kind: "focused", request: focus.request }
+      ? { kind: "focused", request: focus.request, requestContract: focus.requestContract }
       : scopeIsNarrowed
         ? { kind: "full", authorSelectedScopes: selectedScopes }
         : { kind: "full" };
@@ -377,7 +411,11 @@ This block is design-history metadata, NOT grounding evidence. Do not cite it. N
     `DASHBOARD BOARD FACTS:\n${JSON.stringify(packet.board, null, 2)}`,
     `INTERACTION STATE:\n${JSON.stringify(packet.interactionState, null, 2)}`,
     `VEGA-LITE SPECS BY EXACT TILE ID (cite paths as tile.<tile-id>.<property>):\n${JSON.stringify(packet.specMap, null, 2)}`,
-    "Diagnose each object the evidence supports, then prescribe a recommendation leaf for the issues worth showing. Inspect every permitted tile, cross-tile relationship, and dashboard-level element. Return only the JSON object.",
+    region?.requestContract
+      ? `FINAL REQUEST ACCEPTANCE CONTRACT (highest priority for this run):\n${JSON.stringify(region.requestContract, null, 2)}\nResolve the exact semantic target first. The direct critique's executable proposal must visibly satisfy this contract; do not substitute a generic nearby improvement. Return only the JSON object.`
+      : focus?.requestContract
+        ? `FINAL REQUEST ACCEPTANCE CONTRACT (highest priority for this run):\n${JSON.stringify(focus.requestContract, null, 2)}\nAnswer this request directly. When explicitChange is true, make the executable proposal visibly satisfy this contract. Return only the JSON object.`
+        : "Diagnose each object the evidence supports, then prescribe a recommendation leaf for the issues worth showing. Inspect every permitted tile, cross-tile relationship, and dashboard-level element. Return only the JSON object.",
   ].filter(Boolean).join("\n\n");
 }
 

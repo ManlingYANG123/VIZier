@@ -18,6 +18,7 @@ import { runDetectors } from "./detect/index.ts";
 import { discoverDashboardCritiques } from "./generate/discover.ts";
 import { applyBoardProposal, applyProposals } from "./apply/index.ts";
 import { validateAppliedDashboard } from "./apply/validate.ts";
+import { validateAppliedRequestIntent } from "./apply/requestIntent.ts";
 import { computeCrossFilterSlice, distinctValues } from "./compute/crossFilter.ts";
 import { reevaluate } from "./reevaluate.ts";
 import {
@@ -291,6 +292,48 @@ export async function runApply(
       },
       rollback: { rolledBack: true, reason },
       critiqueStatuses: outcome.critiqueStatuses,
+      unresolvedConflicts: outcome.unresolvedConflicts,
+    };
+  }
+  const requestIntentValidation = validateAppliedRequestIntent(
+    req.critiques,
+    appliedOrder,
+    req.board || {},
+    nextBoard,
+    req.specMap,
+    outcome.specMap,
+  );
+  tracer.emit(
+    "validate",
+    requestIntentValidation.ok
+      ? "explicit request acceptance contract ok"
+      : "explicit request acceptance contract FAILED -> rollback",
+    {
+      checkedCritiqueIds: requestIntentValidation.checkedCritiqueIds,
+      errors: requestIntentValidation.errors,
+    },
+  );
+  if (!requestIntentValidation.ok) {
+    const checked = new Set(requestIntentValidation.checkedCritiqueIds);
+    const reason = `request acceptance gate failed: ${requestIntentValidation.errors.join("; ")}`;
+    tracer.emit("done", "apply rolled back");
+    return {
+      runId: tracer.runId,
+      specMap: req.specMap,
+      board: req.board || {},
+      applicationOrder: [],
+      changedTargets: [],
+      recommendationDelta: { kept: [], updated: [], removed: [], added: [], changedTargets: [] },
+      addedCritiques: [],
+      evaluationReport: {
+        compiled: true,
+        compileError: null,
+        remainingFindings: runDetectors(req.specMap, req.board).length,
+        computed: [],
+      },
+      rollback: { rolledBack: true, reason },
+      critiqueStatuses: outcome.critiqueStatuses.map((status) =>
+        checked.has(status.id) ? { ...status, status: "rolled_back" as const } : status),
       unresolvedConflicts: outcome.unresolvedConflicts,
     };
   }

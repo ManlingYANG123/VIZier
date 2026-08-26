@@ -21,6 +21,7 @@ import type {
   LocalCritiqueRegion,
   Priority,
   Proposal,
+  ReviewRequestContract,
   ReviewScope,
   SavedCritiqueRationale,
   SpecMap,
@@ -28,7 +29,7 @@ import type {
   Surface,
 } from "../contracts.ts";
 import type { LLMClient } from "../llm/client.ts";
-import { DASHBOARD_REVIEW_SYSTEM, dashboardReviewUser, secondPassDirective } from "./prompts.ts";
+import { DASHBOARD_REVIEW_SYSTEM, dashboardReviewSystem, dashboardReviewUser, secondPassDirective } from "./prompts.ts";
 import {
   buildContextSnapshot,
   buildEvidencePacket,
@@ -40,6 +41,10 @@ import {
 } from "./evidence.ts";
 import { templateText } from "./critique.ts";
 import { safeSpecEdits } from "../apply/editSpec.ts";
+import {
+  lowMaterialityTextAlignmentReason,
+  lowMaterialityTextRewriteReason,
+} from "./materiality.ts";
 import { encodedFieldsDeep } from "../detect/specUtil.ts";
 import { hasEmbeddedKpis } from "../detect/kpi.ts";
 import { specHasField } from "../detect/filterControl.ts";
@@ -48,6 +53,11 @@ import { repairGuidanceToExecutable } from "./repair.ts";
 import { filterConflictingCritiques } from "./conflict-filter.ts";
 import { RECOMMENDATION_BRANCHES, RECOMMENDATION_LEAF_BY_ID } from "./recommendations.ts";
 import { dimensionEmphasis, suppressedDetectorsFor } from "./dashboard-type.ts";
+import {
+  buildReviewRequestContract,
+  contractTileIds,
+  sanitizeRegionSemanticTargets,
+} from "./request-contract.ts";
 import {
   CRITERION_REGISTRY_VERSION,
   CONTEXT_DEPENDENCY_LABELS,
@@ -296,12 +306,21 @@ export function scopeLocalReviewInput(
   const request = text(region.request)?.slice(0, 600);
   if (!bounds || !request) throw new Error("LOCAL_REVIEW_INVALID: select an area and enter a review request");
   const dimension = BRANCHES.has(region.dimension as Dimension) ? region.dimension as Dimension : undefined;
-  const normalizedRegion = { bounds, request, dimension };
+  const semanticTargets = sanitizeRegionSemanticTargets(region.semanticTargets, specMap, board);
+  const requestContract = buildReviewRequestContract(request, semanticTargets);
+  const normalizedRegion: LocalCritiqueRegion = {
+    bounds,
+    request,
+    ...(dimension ? { dimension } : {}),
+    ...(semanticTargets.length ? { semanticTargets } : {}),
+    requestContract,
+  };
   const boundedTiles = (board?.tiles || []).filter((tile) => finiteBounds(tile.bounds));
   if (!boundedTiles.length) return { specMap, board, region: normalizedRegion };
   const matchingIds = new Set(
     boundedTiles.filter((tile) => intersects(bounds, finiteBounds(tile.bounds)!)).map((tile) => tile.id),
   );
+  for (const tileId of contractTileIds(requestContract)) matchingIds.add(tileId);
   return {
     specMap: Object.fromEntries(Object.entries(specMap).filter(([tileId]) => matchingIds.has(tileId))),
     board: board ? { ...board, tiles: (board.tiles || []).filter((tile) => matchingIds.has(tile.id)) } : board,
@@ -313,7 +332,21 @@ export function normalizeFocusedReview(focus: FocusedReviewRequest | undefined):
   if (!focus) return undefined;
   const request = text(focus.request)?.replace(/\s+/g, " ").slice(0, 600);
   if (!request) throw new Error("FOCUSED_REVIEW_INVALID: enter a specific review question");
-  return { request };
+  const purpose = focus.purpose === "stale-refresh" || focus.purpose === "solution-refinement"
+    ? focus.purpose
+    : "author-request";
+  const requestContract = buildReviewRequestContract(request);
+  // A stale-card refresh quotes the old suggestion so the model can reassess
+  // it. That quoted verb is not a new author instruction and must not bypass
+  // materiality checks or force the old solution to be regenerated.
+  if (purpose === "stale-refresh") {
+    requestContract.explicitChange = false;
+    requestContract.actions = ["evaluate"];
+    requestContract.successCriteria = [
+      "Re-evaluate whether the previously identified issue is still material in the current dashboard.",
+    ];
+  }
+  return { request, purpose, requestContract };
 }
 
 function slug(value: string): string {
@@ -902,6 +935,7 @@ export function validatedProposal(raw: JsonObject, tileId: string | null, packet
   let sanitizedLayout: Array<{ tile: string; bounds: Bounds }> = [];
   let sanitizedComposition: Proposal["composition"];
   let sanitizedLayoutTiles: string[] = [];
+  let sanitizedHeroTileId: string | undefined;
   if (kind === "edit-layout") {
     const boundsById = new Map(
       (packet.board?.tiles || []).map((tile) => [tile.id, finiteBounds(tile.bounds)]),
@@ -939,6 +973,7 @@ export function validatedProposal(raw: JsonObject, tileId: string | null, packet
         ? proposalRaw.layoutTiles.map((item) => exactTile(item, tileIds)).filter((item): item is string => Boolean(item))
         : [];
       sanitizedLayoutTiles = [...new Set(requestedTiles.length ? requestedTiles : [...tileIds])];
+      sanitizedHeroTileId = exactTile(proposalRaw.heroTileId, tileIds) || undefined;
       const boardTileIds = (packet.board.tiles || [])
         .filter((tile) => finiteBounds(tile.bounds))
         .map((tile) => tile.id);
@@ -950,6 +985,7 @@ export function validatedProposal(raw: JsonObject, tileId: string | null, packet
       if (!coversWholeBoard || sanitizedLayoutTiles.length < 2 || sanitizedLayoutTiles.length > 6) {
         sanitizedComposition = undefined;
         sanitizedLayoutTiles = [];
+        sanitizedHeroTileId = undefined;
       }
     }
     if (!sanitizedLayout.length && !sanitizedComposition) kind = "manual";
@@ -981,6 +1017,17 @@ export function validatedProposal(raw: JsonObject, tileId: string | null, packet
       const filterValue = rawFilter.value;
       const filterValueIsScalar = typeof filterValue === "string" ||
         typeof filterValue === "number" || typeof filterValue === "boolean";
+      const rawFilters = Array.isArray(record.filters) ? record.filters : [];
+      const filters = rawFilters.flatMap((item) => {
+        const raw = object(item);
+        const filterField = typeof raw.field === "string" && raw.field.trim()
+          ? raw.field.trim()
+          : null;
+        const filterValue = raw.value;
+        const scalar = typeof filterValue === "string" ||
+          typeof filterValue === "number" || typeof filterValue === "boolean";
+        return filterField && scalar ? [{ field: filterField, value: filterValue }] : [];
+      });
       const candidate: KpiDefinition = {
         label,
         ...(kpiTile ? { tile: kpiTile } : {}),
@@ -989,6 +1036,7 @@ export function validatedProposal(raw: JsonObject, tileId: string | null, packet
         ...(filterField && filterValueIsScalar
           ? { filter: { field: filterField, value: filterValue } }
           : {}),
+        ...(filters.length ? { filters } : {}),
         ...(record.highlight === true ? { highlight: true } : {}),
         ...(unit ? { unit } : {}),
         ...(format ? { format } : {}),
@@ -1034,6 +1082,9 @@ export function validatedProposal(raw: JsonObject, tileId: string | null, packet
   if (kind === "edit-layout" && sanitizedComposition) {
     proposal.composition = sanitizedComposition;
     proposal.layoutTiles = sanitizedLayoutTiles;
+    if (sanitizedHeroTileId && sanitizedLayoutTiles.includes(sanitizedHeroTileId)) {
+      proposal.heroTileId = sanitizedHeroTileId;
+    }
   }
   if (kind === "wire-filter-control" && sanitizedFilterId) proposal.filterId = sanitizedFilterId;
   if ((kind === "add-kpis" || kind === "recompose-kpis") &&
@@ -1136,6 +1187,43 @@ function defaultSurface(dimension: Dimension): Surface {
   return "structural";
 }
 
+function proposalMatchesRequestContract(
+  proposal: Proposal,
+  tileId: string | null,
+  ref: Record<string, unknown>,
+  contract: ReviewRequestContract | undefined,
+  packet: EvidencePacket,
+): boolean {
+  if (!contract?.explicitChange || !contract.targetPaths.length) return true;
+  const targetPaths = contract.targetPaths;
+  const targetsTitle = targetPaths.includes("board.title");
+  const targetsSubtitle = targetPaths.includes("board.subtitle");
+  if (targetsTitle || targetsSubtitle) {
+    if (proposal.kind !== "dashboard-title") return false;
+    if (targetsTitle && typeof proposal.label !== "string") return false;
+    if (targetsSubtitle && typeof proposal.subtitle !== "string") return false;
+    if (targetsTitle && contract.actions.includes("shorten")) {
+      const before = String(packet.board.title || "").replace(/\s+/g, " ").trim();
+      const after = String(proposal.label || "").replace(/\s+/g, " ").trim();
+      if (!before || !after || after.length > Math.floor(before.length * 0.85)) return false;
+    }
+    return true;
+  }
+  const requestedTiles = new Set(contractTileIds(contract));
+  if (!requestedTiles.size) return true;
+  const proposalTiles = new Set([
+    ...(tileId ? [tileId] : []),
+    ...(typeof ref.tile === "string" ? [ref.tile] : []),
+    ...(typeof ref.source === "string" ? [ref.source] : []),
+    ...(Array.isArray(ref.tiles) ? ref.tiles.filter((id): id is string => typeof id === "string") : []),
+    ...(Array.isArray(ref.targets) ? ref.targets.filter((id): id is string => typeof id === "string") : []),
+    ...(Array.isArray(proposal.layoutTiles)
+      ? proposal.layoutTiles.filter((id): id is string => typeof id === "string")
+      : []),
+  ]);
+  return [...requestedTiles].some((id) => proposalTiles.has(id));
+}
+
 function validateCritique(
   value: unknown,
   index: number,
@@ -1144,6 +1232,8 @@ function validateCritique(
   snapshot: ContextSnapshot,
   reviewScope: ReviewScope,
   authorRequest?: string,
+  requestContract?: ReviewRequestContract,
+  focusPurpose?: FocusedReviewRequest["purpose"],
 ): { critique: Critique; finding: Finding } | null {
   const raw = object(value);
   if (!isObjectCode(raw.object)) return null;
@@ -1265,6 +1355,19 @@ function validateCritique(
     return null;
   }
   let { proposal, ref } = validatedProposal(raw, tileId, packet);
+  const materialityReason = tileId
+    ? [lowMaterialityTextAlignmentReason, lowMaterialityTextRewriteReason]
+      .map((check) => check({
+          proposal,
+          spec: packet.specMap[tileId],
+          dashboardType: snapshot.values.dashboardType,
+          explicitAuthorChange: Boolean(
+            requestContract?.explicitChange && focusPurpose !== "stale-refresh"
+          ),
+        }))
+      .find(Boolean) || null
+    : null;
+  if (materialityReason) return null;
   const priorDiag = proposal.diag;
   if (proposal.kind === "edit-layout" && asksToRepositionControl(raw, validatedRefs, packet)) {
     proposal = { kind: "manual", mode: "guidance_only" };
@@ -1299,6 +1402,10 @@ function validateCritique(
       proposal.diag = { ...(priorDiag as object), final: "manual", demoted: true, reason: "process" };
     }
     ref = tileId ? { tile: tileId } : {};
+  }
+
+  if (!proposalMatchesRequestContract(proposal, tileId, ref, requestContract, packet)) {
+    return null;
   }
 
   const interactionKind = INTERACTIONS.has(raw.interactionKind as InteractionKind) ? raw.interactionKind as InteractionKind : undefined;
@@ -1358,7 +1465,11 @@ function validateCritique(
     contextSnapshotId: snapshot.id,
     ...(answer ? { answer } : {}),
     ...(authorRequest && answer
-      ? { requestRelevance: "direct" as const, reviewRequest: authorRequest }
+      ? {
+          requestRelevance: "direct" as const,
+          reviewRequest: authorRequest,
+          ...(requestContract ? { requestContract } : {}),
+        }
       : {}),
   };
   return { critique, finding };
@@ -1450,6 +1561,7 @@ function requestGuidanceFallback(
   reviewScope: ReviewScope,
   authorRequest: string,
   region?: LocalCritiqueRegion,
+  requestContract?: ReviewRequestContract,
   answer?: string,
 ): { critique: Critique; finding: Finding } {
   const tileId = Object.keys(packet.specMap)[0] || null;
@@ -1464,8 +1576,9 @@ function requestGuidanceFallback(
       : dimension === "layout"
         ? "structural"
         : "encoding";
-  const resolvedAnswer = answer ||
-    "No material issue was validated for this request; keep the current treatment unless author testing shows a specific problem.";
+  const resolvedAnswer = answer || (requestContract?.explicitChange
+    ? "VIZier could not produce an executable change that satisfied this request's target and acceptance checks."
+    : "No material issue was validated for this request; keep the current treatment unless author testing shows a specific problem.");
   const evidenceDetail = tileId
     ? `The request was evaluated against ${tileId}${region ? " inside the selected region" : ""}.`
     : `The request was evaluated against the current dashboard${packet.board.title ? ` “${packet.board.title}”` : ""}.`;
@@ -1534,6 +1647,7 @@ function requestGuidanceFallback(
     answer: resolvedAnswer,
     requestRelevance: "direct",
     reviewRequest: authorRequest,
+    ...(requestContract ? { requestContract } : {}),
   };
   return { critique, finding };
 }
@@ -1916,7 +2030,7 @@ export async function discoverDashboardCritiques(
         constraintSet,
         designDocumentText,
       ),
-      { system: DASHBOARD_REVIEW_SYSTEM, temperature, maxTokens: 16000, onToken },
+      { system: dashboardReviewSystem(reviewScope), temperature, maxTokens: 16000, onToken },
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1960,6 +2074,8 @@ export async function discoverDashboardCritiques(
 
   const resultLimit = reviewScope === "full" ? 20 : 8;
   const authorRequest = scoped.region?.request || normalizedFocus?.request;
+  const requestContract = scoped.region?.requestContract || normalizedFocus?.requestContract;
+  const focusPurpose = normalizedFocus?.purpose;
   const validated = reviewableRawCritiques
     .map((item, index) =>
       validateCritique(
@@ -1970,6 +2086,8 @@ export async function discoverDashboardCritiques(
         snapshot,
         reviewScope,
         authorRequest,
+        requestContract,
+        focusPurpose,
       )
     )
     .filter((item): item is NonNullable<typeof item> => Boolean(item));
@@ -2024,7 +2142,17 @@ export async function discoverDashboardCritiques(
       // Offset the index so pass-2 critique ids never collide with pass-1 ids.
       const secondValidated = secondReviewable
         .map((item, i) =>
-          validateCritique(item, 1000 + i, diagnosisByKey, packet, snapshot, reviewScope, authorRequest))
+          validateCritique(
+            item,
+            1000 + i,
+            diagnosisByKey,
+            packet,
+            snapshot,
+            reviewScope,
+            authorRequest,
+            requestContract,
+            focusPurpose,
+          ))
         .filter((item): item is NonNullable<typeof item> => Boolean(item));
       validated.push(...secondValidated);
     } catch {
@@ -2136,7 +2264,7 @@ export async function discoverDashboardCritiques(
   let answer = directAnswer || rawAnswer;
   const requestFallback = authorRequest &&
       !filtered.some((item) => item.critique.requestRelevance === "direct")
-    ? requestGuidanceFallback(packet, snapshot, reviewScope, authorRequest, scoped.region, answer)
+    ? requestGuidanceFallback(packet, snapshot, reviewScope, authorRequest, scoped.region, requestContract, answer)
     : null;
   if (requestFallback) answer = requestFallback.critique.answer;
   return {

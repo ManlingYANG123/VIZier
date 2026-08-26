@@ -1,6 +1,6 @@
 {
   "setId": "critique-end-to-end-v1",
-  "version": "2026-08-24",
+  "version": "2026-08-26",
   "description": "Six fixed, compact demonstrations for evidence-grounded structured critique generation. Source references are maintainership provenance and are never sent to the model.",
   "examples": [
     {
@@ -386,7 +386,7 @@
     },
     {
       "id": "fs-05-keep-local-issue-local",
-      "purpose": "Keep a chart-specific readability issue attached to the affected tile instead of generalizing it to the dashboard.",
+      "purpose": "Resolve a selected axis and explicit author instruction into one visible, local executable change.",
       "sources": [
         {
           "dataset": "slack-replies-coded-consolidated-08-17",
@@ -397,7 +397,32 @@
         }
       ],
       "input": {
-        "requestScope": { "kind": "full" },
+        "requestScope": {
+          "kind": "selected-region",
+          "bounds": { "x": 28, "y": 310, "w": 300, "h": 72 },
+          "request": "Make these category labels larger and angle them so they are easier to read.",
+          "permittedTileIds": ["category-satisfaction"],
+          "semanticTargets": [{
+            "kind": "axis",
+            "path": "tile.category-satisfaction.encoding",
+            "tileId": "category-satisfaction",
+            "text": "Service categories",
+            "bounds": { "x": 28, "y": 310, "w": 300, "h": 72 },
+            "overlapRatio": 0.94
+          }],
+          "requestContract": {
+            "request": "Make these category labels larger and angle them so they are easier to read.",
+            "explicitChange": true,
+            "actions": ["resize", "fix"],
+            "targetPaths": ["tile.category-satisfaction.encoding"],
+            "targetKinds": ["axis"],
+            "mustPreserve": [],
+            "successCriteria": [
+              "The proposed dashboard must visibly change the selected axis labels.",
+              "The executable proposal must increase label size and angle the labels."
+            ]
+          }
+        },
         "dashboardGenre": "analytical",
         "context": {
           "goal": "Compare satisfaction across service categories.",
@@ -465,6 +490,7 @@
           "rationale": "This is a local axis-label issue, not evidence that the whole dashboard layout is unreadable.",
           "evidence": "The category chart is 320 pixels wide and uses horizontal 9 px x-axis labels.",
           "suggestion": "Rotate the category labels and increase their font size within this chart.",
+          "answer": "Yes. The selected x-axis labels should be enlarged and angled; the proposed edits make both changes on this chart only.",
           "judgmentBasis": ["dashboard evidence", "general design principle"],
           "requiredContext": [],
           "contextStatus": "not_applicable",

@@ -272,6 +272,7 @@ function compositionLayout(
   board: BoardMeta,
   composition: Proposal["composition"],
   requestedIds: unknown,
+  heroTileId?: unknown,
 ): Array<{ tile: string; bounds: Bounds }> {
   const all = (board.tiles || []).filter((tile) => tile.bounds);
   const requested = new Set(Array.isArray(requestedIds)
@@ -279,6 +280,10 @@ function compositionLayout(
     : []);
   const tiles = (requested.size ? all.filter((tile) => requested.has(tile.id)) : all)
     .sort((a, b) => (a.bounds!.y - b.bounds!.y) || (a.bounds!.x - b.bounds!.x));
+  if (typeof heroTileId === "string") {
+    const heroIndex = tiles.findIndex((tile) => tile.id === heroTileId);
+    if (heroIndex > 0) tiles.unshift(...tiles.splice(heroIndex, 1));
+  }
   if (!composition || tiles.length < 2) return [];
   const gap = 24;
   const minX = Math.min(...tiles.map((tile) => tile.bounds!.x));
@@ -399,8 +404,11 @@ function applyLayout(
   layout: unknown,
   composition?: Proposal["composition"],
   layoutTiles?: unknown,
+  heroTileId?: unknown,
 ): boolean {
-  const entries = composition ? compositionLayout(board, composition, layoutTiles) : (Array.isArray(layout) ? layout : []);
+  const entries = composition
+    ? compositionLayout(board, composition, layoutTiles, heroTileId)
+    : (Array.isArray(layout) ? layout : []);
   const tiles = board.tiles;
   if (!entries.length || !Array.isArray(tiles) || !tiles.length) return false;
   const byId = new Map(tiles.map((tile) => [tile.id, tile]));
@@ -572,6 +580,7 @@ export function applyBoardProposal(board: BoardMeta, critique: Critique, specMap
         critique.proposal.layout,
         critique.proposal.composition,
         critique.proposal.layoutTiles,
+        critique.proposal.heroTileId,
       );
     default:
       return false;

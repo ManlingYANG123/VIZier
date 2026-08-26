@@ -253,14 +253,15 @@ high-resolution PNG and reloadable JSON for every checkpoint plus the live
 final dashboard, beside the event log:
 
 ```
-studies/{participant}/{session}/
-  {stamp}.json                      ← event log (no embedded images)
-  dashboards/checkpoint-01.json
-  dashboards/checkpoint-01.png
-  dashboards/checkpoint-02.json
+studies/{participant}/
+  {session}_{stamp}.json            ← event log (no embedded images)
+  {session}_checkpoint-01.json
+  {session}_checkpoint-01.png
+  {session}_checkpoint-02.json
   ...
-  dashboards/final.json
-  dashboards/final.png
+  {session}_final.json
+  {session}_final.png
+  {session}_scale-post-{stamp}.json
 ```
 
 PNGs are 2× the canvas CSS size. JSON is `{ dashboard, tiles }` and can be
