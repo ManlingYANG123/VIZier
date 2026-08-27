@@ -107,6 +107,8 @@ test("every active study phase has one concise transition page", () => {
     assert.ok(intro.description.length > 0);
     assert.ok(intro.action.startsWith("Begin"));
   });
+  assert.equal(STUDY_PHASE_INTROS.training.action, "Begin practice");
+  assert.equal(STUDY_PHASE_INTROS.dashboard_task.action, "Begin task");
 });
 
 test("annotations retain normalized optional regions", () => {
@@ -142,7 +144,7 @@ test("questionnaire content follows the study protocol exactly", () => {
       "Any examples? Please explain.",
     ],
     [
-      "VIZier helped me understand the ‘why’ behind dashboard design choices, and what makes them potentially effective or ineffective.",
+      "VIZier nudged me to reflect more intentionally on the ‘why’ behind dashboard design choices, and what makes them more effective or ineffective.",
       "Any examples? Please explain.",
     ],
     [

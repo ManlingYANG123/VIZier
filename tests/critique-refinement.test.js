@@ -30,17 +30,21 @@ test("fixable critiques offer accept, rationale-required refinement, and issue r
   assert.match(styles, /\.focus-action\.refine\.is-generating::before/);
 });
 
-test("refinement generates alternatives, then waits for confirmation", async () => {
+test("selecting a refinement option replaces Proposed, then waits for Accept Change", async () => {
   const [source, styles] = await Promise.all([readApp(), readStyles()]);
 
   assert.match(source, /REFINEMENT_ALTERNATIVE_STRATEGIES = \[/);
   assert.match(source, /joint: true/);
-  assert.match(source, /allowPracticePreset: false/);
+  assert.match(source, /usePracticeOverallCache: false/);
   assert.match(source, /id="refinementChoices"[\s\S]*?aria-label="Alternative solutions"/);
   assert.match(source, /Option \$\{index \+ 1\}/);
-  assert.match(source, /Choose this fix/);
   assert.match(source, /previewRefinementAlternative\(/);
   assert.match(source, /commitRefinementAlternative\(/);
+  assert.match(source, /closeContextModal\(\{ cancelPending: false \}\)/);
+  assert.match(source, /document\.getElementById\("focusAccept"\)\?\.focus\(\)/);
+  assert.match(source, /previewResult: pending\.previewResults\?\.\[selectedIndex\]/);
+  assert.match(source, /applied: false/);
+  assert.doesNotMatch(source, /Choose this fix|Using Solution/);
   assert.match(source, /viable\.length >= 1/);
   assert.match(styles, /\.refinement-choice:has\(input:checked\)/);
   assert.match(styles, /\.context-modal\[data-intent="refine-solution"\]/);

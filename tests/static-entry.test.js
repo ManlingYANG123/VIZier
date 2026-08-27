@@ -271,7 +271,7 @@ test("group study routes boot the neutral runner before VIZier", async () => {
   assert.match(styles, /\.design-doc-action-link:focus-visible/);
 });
 
-test("practice opens directly in free exploration with the live engine", async () => {
+test("practice serves one cached overall review while scoped generation stays live", async () => {
   const app = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
   const runner = await readFile(new URL("../src/study-runner.js", import.meta.url), "utf8");
   const tutorial = await readFile(new URL("../src/practice-tutorial.js", import.meta.url), "utf8");
@@ -280,9 +280,18 @@ test("practice opens directly in free exploration with the live engine", async (
 
   assert.match(runner, /practice: runnerState\.phase === "training"/);
   assert.doesNotMatch(runner, /startGuidedPracticeTutorial/);
-  assert.match(app, /if \(!practiceUsesPreset\(\)\) return streamApply/);
-  assert.match(app, /practiceReviewResponse\(practiceRuntime\.preset/);
-  assert.match(app, /executionMode: "live-engine"/);
+  assert.match(app, /if \(!practiceTutorialIsGuiding\(\)\) return streamApply/);
+  assert.match(app, /practiceOverallReviewResponse\(practiceRuntime\.preset\)/);
+  assert.match(app, /shouldUsePracticeOverallCache\(\{[\s\S]*?explicitlyRequested: options\.usePracticeOverallCache/);
+  assert.match(app, /practiceOverallReview: true/);
+  assert.match(app, /practiceRuntime\.overallReviewCacheConsumed = true/);
+  assert.match(app, /overallReviewCacheConsumed: practiceRuntime\.overallReviewCacheConsumed/);
+  assert.match(app, /const savedCacheState = snapshot\.practice\?\.overallReviewCacheConsumed/);
+  assert.match(app, /Practice Review Complete/);
+  assert.match(app, /practice_overall_cache_served/);
+  assert.match(app, /executionMode: "hybrid"/);
+  assert.match(app, /practiceOverallReviewMode: "pre-cached-once"/);
+  assert.match(app, /practiceLiveGenerationScopes: \["focused", "selected-region", "critique"\]/);
   assert.match(app, /practiceMode: "free-explore"/);
   assert.match(presets, /Should I change the layout\?/);
   assert.match(presets, /Is this title clear enough\?/);
@@ -297,10 +306,13 @@ test("practice opens directly in free exploration with the live engine", async (
   assert.doesNotMatch(app, /orientation-workspace/);
   assert.match(app, /expect: "context:confirmed"/);
   assert.match(app, /emitPracticeAction\("context:confirmed"/);
-  // Tutorial state starts with an edited Context and uses deterministic local
-  // preset responses. Checkpoint saving is taught exactly once.
+  // Tutorial state starts with an edited Context. Only the first overall review
+  // is cached; focused, selected-area, refinement, and retry paths remain live.
   assert.match(app, /fieldStatus: \{ goal: "edited", audience: "edited", constraints: "edited" \}/);
-  assert.match(app, /practiceReviewResponse\(practiceRuntime\.preset/);
+  assert.doesNotMatch(app, /practiceReviewResponse/);
+  assert.match(app, /async function generateLocalCritiques\(\{ bounds, request \}\)[\s\S]*?const resp = await streamCritique\(/);
+  assert.match(app, /generateCritiquesFromEngine\(request, \{[\s\S]*?usePracticeOverallCache: false/);
+  assert.equal((app.match(/expect: "review:full"/g) || []).length, 1);
   assert.equal((app.match(/expect: "checkpoint:saved"/g) || []).length, 1);
   assert.doesNotMatch(app, /practiceCheckpointActions|focused-checkpoint|local-checkpoint|save-batch/);
   // Guidance is a square-cornered, colorful clockwise outline, never a
@@ -345,8 +357,9 @@ test("practice opens directly in free exploration with the live engine", async (
   assert.match(app, /practice_tutorial_mode_changed/);
   assert.match(app, /practiceRuntime\.tutorialMode = mode === "tutorial"/);
   assert.match(app, /practiceMode: "free-explore"/);
-  assert.match(app, /function practiceUsesPreset\(\)/);
-  assert.match(app, /const resp = practiceUsesPreset\(\)/);
+  assert.match(presets, /function shouldUsePracticeOverallCache\(/);
+  assert.match(app, /function practiceTutorialIsGuiding\(\)/);
+  assert.doesNotMatch(app, /refresh-full-review/);
   assert.match(styles, /\.practice-guide-mode-toggle\[data-mode="explore"\]/);
 });
 
@@ -1021,6 +1034,27 @@ test("study telemetry pairs review requests with displayed or failed, and checkp
   assert.match(source, /const recommendationIds = \[\.\.\.\(state\.workingDraft\.applicationOrder \|\| \[\]\)\];/);
   assert.match(source, /const committedIds = Array\.isArray\(result\.applicationOrder\)/);
   assert.match(source, /workingDraft\.applicationOrder \|\| \[\]\)\.length/);
+});
+
+test("Generate and Regenerate save the completed round before requesting new critiques", async () => {
+  const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
+
+  assert.match(source, /aiAssistButton\.addEventListener\("click", \(\) => \{\s*void runAIAssist\(\{\s*checkpointBeforeReview: true,\s*practiceOverallReview: true,/);
+  assert.match(source, /if \(options\.checkpointBeforeReview\) \{[\s\S]*?await saveWorkingDraftCheckpoint\(\{ force: true, source: "critique-request" \}\);[\s\S]*?requestStartedAt = Date\.now\(\);/);
+  assert.match(source, /checkpoint\.purpose = "round_complete"/);
+  assert.match(source, /Checkpoint \$\{checkpointId\} · Previous Round Complete/);
+  assert.match(source, /Automatically saved before the next critique run/);
+  assert.match(source, /checkpoint_save_failed/);
+});
+
+test("a selected-area review infers its category without asking the author", async () => {
+  const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
+
+  assert.doesNotMatch(source, /id="localReviewDimension"|for="localReviewDimension"/);
+  assert.doesNotMatch(source, /els\.localReviewDimension/);
+  assert.match(source, /async function generateLocalCritiques\(\{ bounds, request \}\)/);
+  assert.match(source, /region: \{\s*bounds,\s*request,\s*semanticTargets,\s*\}/);
+  assert.match(source, /dimension: localCritiques\[0\]\?\.dimension \|\| "other"/);
 });
 
 test("study telemetry survives refresh and closes preview, request, inspection, and final-state lifecycles", async () => {

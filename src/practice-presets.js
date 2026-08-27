@@ -1,4 +1,4 @@
-export const PRACTICE_PRESET_VERSION = "2026-08-24.2";
+export const PRACTICE_PRESET_VERSION = "2026-08-27.1";
 
 const clone = (value) => structuredClone(value);
 
@@ -258,48 +258,40 @@ const PRESETS = {
   },
 };
 
-function localCritique(preset, bounds) {
-  return baseCritique({
-    id: `practice-${preset.materialCode.toLowerCase()}-title`,
-    dimension: "text",
-    object: "dashboard title",
-    problem: "unclear | ambiguous",
-    title: "Make the dashboard title more specific",
-    issue: "The current title names the topic but not the comparison the dashboard supports.",
-    suggestion: `Use “${preset.local.title}”.`,
-    rationale: "A task-specific title helps readers understand the dashboard before they inspect individual charts.",
-    evidence: "The selected title region contains a broad dashboard name without the primary comparison.",
-    priority: "high",
-    proposal: { kind: "dashboard-title", label: preset.local.title },
-    target: { granularity: "selected-region", ref: { selectedBounds: clone(bounds) } },
-    answer: preset.local.answer,
-    requestRelevance: "direct",
-  });
-}
-
 export function practicePresetForMaterial(materialCode) {
   const preset = PRESETS[String(materialCode || "").toUpperCase()];
   return preset ? clone(preset) : null;
 }
 
-export function practiceReviewResponse(preset, { scope = "full", bounds = null } = {}) {
+export function shouldUsePracticeOverallCache({
+  practiceActive = false,
+  explicitlyRequested = false,
+  cacheConsumed = false,
+  focusedRequest = "",
+} = {}) {
+  return Boolean(
+    practiceActive
+    && explicitlyRequested
+    && !cacheConsumed
+    && !String(focusedRequest || "").trim()
+  );
+}
+
+export function practiceOverallReviewResponse(preset) {
   if (!preset) throw new Error("Practice preset is unavailable for this material.");
-  const source = scope === "focused" ? preset.focused : scope === "local"
-    ? { critiques: [localCritique(preset, bounds || { x: 0, y: 0, w: 1, h: 1 })], answer: preset.local.answer }
-    : preset.full;
   return {
-    reviewScope: scope === "local" ? "selected-region" : scope,
-    critiques: clone(source.critiques || []),
+    reviewScope: "full",
+    critiques: clone(preset.full.critiques || []),
     strengths: [],
-    answer: source.answer || null,
-    model: "vizier-practice-preset",
-    promptVersion: "practice-preset-v1",
-    engineVersion: "practice-preset-runtime-v1",
+    answer: preset.full.answer || null,
+    model: "vizier-practice-cache",
+    promptVersion: "practice-overall-cache-v1",
+    engineVersion: "practice-cache-runtime-v1",
     registryVersion: PRACTICE_PRESET_VERSION,
-    fewShotSetId: "practice-tutorial",
+    fewShotSetId: "practice-overall-cache",
     fewShotVersion: PRACTICE_PRESET_VERSION,
-    fewShotIds: [`practice-${preset.materialCode.toLowerCase()}-${scope}`],
-    runId: `preset-${preset.materialCode.toLowerCase()}-${scope}`,
+    fewShotIds: [`practice-${preset.materialCode.toLowerCase()}-full`],
+    runId: `cache-${preset.materialCode.toLowerCase()}-full`,
   };
 }
 

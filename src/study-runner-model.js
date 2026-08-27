@@ -86,11 +86,11 @@ export function isDashboardTaskPhase(phase) {
 export const STUDY_PHASE_INTROS = Object.freeze({
   training: Object.freeze({
     description: "Explore VIZier with guidance from the facilitator.",
-    action: "Begin guided practice",
+    action: "Begin practice",
   }),
   dashboard_task: Object.freeze({
     description: "Use VIZier independently for the formal evaluation. The facilitator will tell you when to finish.",
-    action: "Begin formal use",
+    action: "Begin task",
   }),
   post_assessment: Object.freeze({
     description: "Complete the questionnaire, then discuss each interview prompt with the facilitator.",
@@ -118,7 +118,7 @@ export const POST_EXPERIENCE_SCALE_ITEMS = freezeScaleItems([
   },
   {
     id: "vizier_understanding",
-    statement: "VIZier helped me understand the ‘why’ behind dashboard design choices, and what makes them potentially effective or ineffective.",
+    statement: "VIZier nudged me to reflect more intentionally on the ‘why’ behind dashboard design choices, and what makes them more effective or ineffective.",
     interviewQuestion: "Any examples? Please explain.",
   },
   {

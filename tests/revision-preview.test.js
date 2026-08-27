@@ -26,6 +26,15 @@ test("revision labels use Title Case and correct pluralization", () => {
     }),
     "Checkpoint 3 · 2 Changes",
   );
+  assert.equal(
+    revisionDisplayLabel({
+      id: 4,
+      kind: "revision",
+      purpose: "round_complete",
+      label: "Checkpoint 4 · Previous Round Complete",
+    }),
+    "Checkpoint 4 · Previous Round Complete",
+  );
 });
 
 test("checkpoint selection builds a chronological pair from two timeline clicks", () => {

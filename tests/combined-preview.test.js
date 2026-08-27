@@ -124,5 +124,5 @@ test("solution alternatives remain on demand through Refine Solution", async () 
   assert.match(source, /id="focusRefineSolution"/);
   assert.match(source, /critiqueSolutionRefinementRequest\(critique, rationale, \{/);
   assert.match(source, /id="refinementChoices"/);
-  assert.match(source, /allowPracticePreset: false/);
+  assert.match(source, /usePracticeOverallCache: false/);
 });

@@ -1,5 +1,8 @@
 export function revisionDisplayLabel(version, { includeApplied = false } = {}) {
   if (version.kind !== "revision") return `Checkpoint ${version.id} · Original Dashboard`;
+  if (version.purpose === "round_complete") {
+    return version.label || `Checkpoint ${version.id} · Previous Round Complete`;
+  }
   const count = version.appliedRecommendations?.length || version.applicationOrder?.length || 0;
   const noun = count === 1 ? "Change" : "Changes";
   return `Checkpoint ${version.id} · ${count} ${noun}${includeApplied ? " Applied" : ""}`;

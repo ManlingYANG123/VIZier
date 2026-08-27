@@ -5,7 +5,8 @@ import {
   PRACTICE_PRESET_VERSION,
   buildPracticeApplyResult,
   practicePresetForMaterial,
-  practiceReviewResponse,
+  practiceOverallReviewResponse,
+  shouldUsePracticeOverallCache,
 } from "../src/practice-presets.js";
 
 function dashboardFixture(code) {
@@ -39,19 +40,34 @@ test("A and B practice packs expose symmetric Ask and Apply fixtures", () => {
   assert.match(PRACTICE_PRESET_VERSION, /^\d{4}-\d{2}-\d{2}\./);
 });
 
-test("practice review responses cover full, focused, and selected-area asks", () => {
-  const preset = practicePresetForMaterial("A");
-  const full = practiceReviewResponse(preset, { scope: "full" });
-  const focused = practiceReviewResponse(preset, { scope: "focused" });
-  const bounds = { x: 10, y: 20, w: 300, h: 60 };
-  const local = practiceReviewResponse(preset, { scope: "local", bounds });
-  assert.equal(full.critiques.length, 3);
-  assert.equal(focused.reviewScope, "focused");
-  assert.equal(focused.critiques[0].proposal.kind, "edit-layout");
-  assert.equal(local.reviewScope, "selected-region");
-  assert.equal(local.critiques[0].proposal.kind, "dashboard-title");
-  assert.deepEqual(local.critiques[0].target.ref.selectedBounds, bounds);
-  assert.equal(local.model, "vizier-practice-preset");
+test("A and B expose distinct pre-cached overall-review responses", () => {
+  const a = practiceOverallReviewResponse(practicePresetForMaterial("A"));
+  const b = practiceOverallReviewResponse(practicePresetForMaterial("B"));
+
+  assert.equal(a.reviewScope, "full");
+  assert.equal(b.reviewScope, "full");
+  assert.equal(a.critiques.length, 3);
+  assert.equal(b.critiques.length, 3);
+  assert.equal(a.model, "vizier-practice-cache");
+  assert.equal(b.model, "vizier-practice-cache");
+  assert.notDeepEqual(a.critiques.map((critique) => critique.id), b.critiques.map((critique) => critique.id));
+  assert.match(a.runId, /cache-a-full/);
+  assert.match(b.runId, /cache-b-full/);
+});
+
+test("the Practice cache is restricted to one explicitly requested overall review", () => {
+  const base = {
+    practiceActive: true,
+    explicitlyRequested: true,
+    cacheConsumed: false,
+    focusedRequest: "",
+  };
+
+  assert.equal(shouldUsePracticeOverallCache(base), true);
+  assert.equal(shouldUsePracticeOverallCache({ ...base, practiceActive: false }), false);
+  assert.equal(shouldUsePracticeOverallCache({ ...base, explicitlyRequested: false }), false);
+  assert.equal(shouldUsePracticeOverallCache({ ...base, cacheConsumed: true }), false);
+  assert.equal(shouldUsePracticeOverallCache({ ...base, focusedRequest: "Should I change the layout?" }), false);
 });
 
 test("single and batch practice Apply mutate clones, not the dashboard fixture", () => {
@@ -79,27 +95,14 @@ test("single and batch practice Apply mutate clones, not the dashboard fixture",
   }
 });
 
-test("focused layout and local title presets produce reloadable board changes", () => {
+test("the prepared focused layout fixture still produces a reloadable board change", () => {
   const preset = practicePresetForMaterial("B");
   const fixture = dashboardFixture("B");
-  const focused = practiceReviewResponse(preset, { scope: "focused" });
   const layout = buildPracticeApplyResult({
-    critiques: focused.critiques,
-    selectedIds: [focused.critiques[0].id],
+    critiques: preset.focused.critiques,
+    selectedIds: [preset.focused.critiques[0].id],
     ...fixture,
   });
   assert.ok(layout.board.tiles.every((tile) => tile.id && tile.bounds));
   assert.ok(layout.changedTargets.includes("dashboard.layout"));
-
-  const local = practiceReviewResponse(preset, {
-    scope: "local",
-    bounds: { x: 12, y: 14, w: 320, h: 64 },
-  });
-  const title = buildPracticeApplyResult({
-    critiques: local.critiques,
-    selectedIds: [local.critiques[0].id],
-    ...fixture,
-  });
-  assert.equal(title.board.title, preset.local.title);
-  assert.ok(title.changedTargets.includes("dashboard.title"));
 });

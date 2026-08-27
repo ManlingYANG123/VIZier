@@ -135,7 +135,8 @@ import {
   PRACTICE_PRESET_VERSION,
   buildPracticeApplyResult,
   practicePresetForMaterial,
-  practiceReviewResponse,
+  practiceOverallReviewResponse,
+  shouldUsePracticeOverallCache,
 } from "./practice-presets.js";
 import { createPracticeTutorial } from "./practice-tutorial.js";
 
@@ -544,11 +545,12 @@ let preferenceAgentTimer = null;
 let contextHintTimer = null;
 let contextHintIndex = 0;
 
-// Practice opens directly into free exploration. Prepared material and Context
-// remain available, while every Ask and Apply uses the live engine.
+// Practice opens directly into free exploration. Its first overall review is
+// served from the matching A/B cache; narrower follow-up asks stay live.
 const practiceRuntime = {
   active: false,
   tutorialMode: false,
+  overallReviewCacheConsumed: false,
   materialCode: null,
   preset: null,
   tutorial: null,
@@ -559,15 +561,21 @@ function practiceIsActive() {
   return Boolean(practiceRuntime.active && practiceRuntime.preset);
 }
 
-function practiceUsesPreset() {
+function practiceTutorialIsGuiding() {
   return practiceIsActive() && practiceRuntime.tutorialMode;
+}
+
+function practiceOverallReviewComplete() {
+  return practiceIsActive() && practiceRuntime.overallReviewCacheConsumed;
 }
 
 function practiceStudyFields() {
   return practiceIsActive()
     ? {
-        executionMode: "live-engine",
+        executionMode: "hybrid",
         practiceMode: "free-explore",
+        practiceOverallReviewMode: "pre-cached-once",
+        practiceLiveGenerationScopes: ["focused", "selected-region", "critique"],
         practicePresetVersion: PRACTICE_PRESET_VERSION,
         practiceMaterialCode: practiceRuntime.materialCode,
       }
@@ -582,12 +590,12 @@ function emitPracticeAction(type, data = {}) {
 }
 
 async function practicePause(ms = 140) {
-  if (!practiceUsesPreset()) return;
+  if (!practiceIsActive()) return;
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function streamApplyForCurrentMode(payload, onEvent) {
-  if (!practiceUsesPreset()) return streamApply(payload, onEvent);
+  if (!practiceTutorialIsGuiding()) return streamApply(payload, onEvent);
   onEvent?.({ type: "practice_preset_started", version: PRACTICE_PRESET_VERSION });
   await practicePause();
   const result = buildPracticeApplyResult({
@@ -871,21 +879,6 @@ document.querySelector("#app").innerHTML = `
         <p class="local-review-hint">The review engine will analyze only this area and its overlapping charts.</p>
         <label for="localReviewRequest">What should the review focus on?</label>
         <textarea id="localReviewRequest" rows="3" maxlength="600" required placeholder="For example: Is this trend easy to interpret at a glance?"></textarea>
-        <label for="localReviewDimension">Critique Category</label>
-        <select id="localReviewDimension">
-          <option value="">Best Match</option>
-          <option value="chart">Charts</option>
-          <option value="color">Color</option>
-          <option value="layout">Layout</option>
-          <option value="data">Data</option>
-          <option value="text">Text</option>
-          <option value="visual design">Visual design</option>
-          <option value="cognition">Cognition</option>
-          <option value="context">Context</option>
-          <option value="interaction">Interactivity</option>
-          <option value="task">Task</option>
-          <option value="design process">Design process</option>
-        </select>
         <p class="local-review-error" id="localReviewError" role="alert" hidden></p>
         <div class="modal-actions">
           <button type="button" class="button ghost small" id="cancelLocalReview">Cancel</button>
@@ -917,7 +910,7 @@ const els = Object.fromEntries([
   "zoomLevel", "aiAssistButton",
   "dashboardTitle", "dashboardSubtitle", "dashboardFilterBar", "kpiRow", "dashboardArtboard",
   "searchInput", "versionList", "statusBar", "annotateHint", "localReviewButton",
-  "localReviewPopover", "localReviewRequest", "localReviewDimension",
+  "localReviewPopover", "localReviewRequest",
   "localReviewError", "submitLocalReview", "leftPanelResizer", "rightPanelResizer",
 ].map((id) => [id, document.getElementById(id)]));
 
@@ -1122,7 +1115,8 @@ function syncReviewReadiness() {
     || els.aiAssistButton.classList.contains("ai-running"),
   );
   const actionTitle = els.aiAssistButton.querySelector(".ai-action-title");
-  els.aiAssistButton.disabled = !ready || running;
+  const overallPracticeReviewComplete = practiceOverallReviewComplete();
+  els.aiAssistButton.disabled = !ready || running || overallPracticeReviewComplete;
   const focusedSend = document.getElementById("runFocusedReviewBtn");
   const focusedInput = document.getElementById("focusedReviewInput");
   if (focusedSend && !state.focusedReviewRunning) {
@@ -1131,10 +1125,14 @@ function syncReviewReadiness() {
   }
   if (!ready && !running) actionTitle.textContent = docProcessing ? "Reading Document…" : "Confirm Context First";
   if (ready && !running) {
-    actionTitle.textContent = state.critiques.length ? "Regenerate Critiques" : "Generate Critiques";
+    actionTitle.textContent = overallPracticeReviewComplete
+      ? "Practice Review Complete"
+      : state.critiques.length ? "Regenerate Critiques" : "Generate Critiques";
   }
   els.aiAssistButton.setAttribute("aria-label", ready
-    ? actionTitle.textContent
+    ? overallPracticeReviewComplete
+      ? "Practice overall review already completed; use Focused Review or Select Area to continue"
+      : actionTitle.textContent
     : "Confirm context before generating critiques");
   els.localReviewButton.disabled = !ready || running;
   els.localReviewButton.setAttribute("aria-label", ready
@@ -2608,10 +2606,14 @@ function renderVersions() {
       && !hasComparison
       && version.id === afterVersion.id;
     const active = isBefore || isAfter || isSingleSelection;
-    const validated = Boolean(version.evaluationReport?.compiled && !version.evaluationReport?.compileError);
+    const isRoundComplete = version.purpose === "round_complete";
+    const validated = isRoundComplete
+      || Boolean(version.evaluationReport?.compiled && !version.evaluationReport?.compileError);
     const changeCount = version.appliedRecommendations?.length || version.applicationOrder?.length || 0;
     const timelineMeta = version.kind === "revision"
-      ? `${changeCount} ${changeCount === 1 ? "change" : "changes"}`
+      ? isRoundComplete
+        ? "Previous Round Complete"
+        : `${changeCount} ${changeCount === 1 ? "change" : "changes"}`
       : "Original dashboard";
     const originLabel = isBefore
       ? "Before"
@@ -2620,7 +2622,7 @@ function renderVersions() {
         : isSingleSelection
           ? "Selected"
           : version.kind === "revision"
-            ? (validated ? "Validated" : "Review")
+            ? (isRoundComplete ? "Round end" : validated ? "Validated" : "Review")
             : "Baseline";
     return `
       <button class="version-card ${active ? "active" : ""} ${isBefore ? "compare-before" : ""} ${isAfter ? "compare-after" : ""} ${isSingleSelection ? "compare-single" : ""}" type="button"
@@ -2638,6 +2640,7 @@ function renderVersions() {
   if (detail) {
     const report = afterVersion.evaluationReport;
     const validated = afterVersion.kind !== "revision"
+      || afterVersion.purpose === "round_complete"
       || Boolean(report?.compiled && !report?.compileError);
     const comparisonTitle = hasComparison
       ? `<span class="checkpoint-route"><span>Checkpoint ${beforeVersion.id}</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9.5 4.5 13 8l-3.5 3.5"/></svg><span>Checkpoint ${afterVersion.id}</span></span>`
@@ -2719,7 +2722,6 @@ function setLocalReviewSubmitting(submitting) {
   // lights up with the same Gemini-style edge ring as the context box.
   document.querySelector(".draft-marker")?.classList.toggle("is-generating", submitting);
   els.localReviewRequest.disabled = submitting;
-  els.localReviewDimension.disabled = submitting;
   els.submitLocalReview.disabled = submitting;
   els.submitLocalReview.querySelector("span").textContent = submitting
     ? "Reviewing selected area…"
@@ -4483,6 +4485,7 @@ function openRationaleModal(critique, rationale = null, anchor = null, { intent 
   const choices = document.getElementById("refinementChoices");
   const regenerate = document.getElementById("regenerateRefinementChoices");
   const submit = document.getElementById("saveRationaleButton");
+  submit.hidden = false;
   state.refinementAlternatives = null;
   modal.dataset.intent = intent;
   modal.setAttribute("aria-label", refiningSolution
@@ -4538,6 +4541,7 @@ function closeContextModal({ cancelPending = true } = {}) {
   input.disabled = false;
   input.hidden = false;
   document.getElementById("saveRationaleButton").disabled = false;
+  document.getElementById("saveRationaleButton").hidden = false;
   document.getElementById("saveRationaleButton").textContent = "Keep this in mind";
   document.getElementById("rationaleHint").hidden = true;
   document.getElementById("rationaleError").hidden = true;
@@ -4644,23 +4648,52 @@ function renderRefinementAlternatives(critique, alternatives, rationale, meta = 
   choices.hidden = false;
   choices.querySelectorAll('input[name="refinementAlternative"]').forEach((radio) => {
     radio.addEventListener("change", async () => {
-      state.refinementAlternatives.selectedIndex = Number(radio.value);
-      submit.disabled = true;
-      submit.textContent = "Previewing…";
+      const selectedIndex = Number(radio.value);
+      state.refinementAlternatives.selectedIndex = selectedIndex;
+      choices.querySelectorAll('input[name="refinementAlternative"]').forEach((choice) => {
+        choice.disabled = true;
+      });
+      hint.textContent = "Updating the detail page and Proposed canvas preview…";
       error.hidden = true;
       const previewed = await previewRefinementAlternative(
         critique,
-        alternatives[Number(radio.value)],
-        Number(radio.value),
+        alternatives[selectedIndex],
+        selectedIndex,
       );
       if (!state.refinementAlternatives || state.refinementAlternatives.critiqueId !== critique.id) return;
-      submit.textContent = "Choose this fix";
-      submit.disabled = !previewed;
+      if (!previewed) {
+        hint.textContent = "That option could not be previewed. Choose another solution.";
+        choices.querySelectorAll('input[name="refinementAlternative"]').forEach((choice) => {
+          choice.disabled = false;
+        });
+        return;
+      }
+      const pending = state.refinementAlternatives;
+      const committed = await commitRefinementAlternative(
+        critique,
+        alternatives[selectedIndex],
+        rationale,
+        {
+          requestId: pending.requestId,
+          latencyMs: pending.latencyMs,
+          alternativeCount: alternatives.length,
+          selectedIndex,
+          previewResult: pending.previewResults?.[selectedIndex],
+        },
+      );
+      if (!committed) {
+        hint.textContent = "That option could not update Proposed. Choose another solution.";
+        choices.querySelectorAll('input[name="refinementAlternative"]').forEach((choice) => {
+          choice.disabled = false;
+        });
+        return;
+      }
+      closeContextModal({ cancelPending: false });
+      document.getElementById("focusAccept")?.focus();
     });
   });
   regenerate.hidden = false;
-  submit.textContent = "Choose this fix";
-  submit.disabled = true;
+  submit.hidden = true;
   choices.querySelector("input")?.focus();
   positionRationalePopover(rationaleAnchorElement);
 }
@@ -6732,8 +6765,8 @@ function showFocusApplyFailure(reason) {
   notice.scrollIntoView({ block: "nearest" });
 }
 
-async function saveWorkingDraftCheckpoint() {
-  if (!state.workingDraft.dirty) return;
+async function saveWorkingDraftCheckpoint({ force = false, source = "manual" } = {}) {
+  if (!force && !state.workingDraft.dirty) return null;
   const button = document.getElementById("saveCheckpointButton");
   const buttonLabel = button?.querySelector("span");
   if (button) button.disabled = true;
@@ -6742,15 +6775,23 @@ async function saveWorkingDraftCheckpoint() {
   try {
     const checkpointId = Math.max(...state.versions.map((version) => version.id)) + 1;
     const recommendationIds = [...(state.workingDraft.applicationOrder || [])];
+    const isRoundComplete = source === "critique-request";
     const checkpointEvent = appendInteractionEvent({
       kind: "checkpoint_saved",
-      summary: `Saved Checkpoint ${checkpointId} with ${recommendationIds.length} ${recommendationIds.length === 1 ? "change" : "changes"}`,
+      summary: isRoundComplete
+        ? `Saved Checkpoint ${checkpointId} at the end of the previous round`
+        : `Saved Checkpoint ${checkpointId} with ${recommendationIds.length} ${recommendationIds.length === 1 ? "change" : "changes"}`,
       data: {
         checkpointId,
         baseCheckpointId: state.workingDraft.baseCheckpointId,
         recommendationIds,
+        source,
       },
     }, { synthesize: false });
+    const currentSnapshot = {
+      specMap: buildEngineSpecMap(),
+      board: buildEngineBoardMeta(),
+    };
     const checkpoint = buildRevisionCheckpoint({
       version: checkpointId,
       appliedCritiques: state.workingDraft.appliedCritiques,
@@ -6760,11 +6801,10 @@ async function saveWorkingDraftCheckpoint() {
         recommendationDelta: state.workingDraft.recommendationDelta,
         evaluationReport: state.workingDraft.evaluationReport,
       },
-      beforeSnapshot: state.workingDraft.beforeSnapshot,
-      afterSnapshot: state.workingDraft.afterSnapshot || {
-        specMap: buildEngineSpecMap(),
-        board: buildEngineBoardMeta(),
-      },
+      beforeSnapshot: state.workingDraft.beforeSnapshot
+        || state.versions.at(-1)?.afterSnapshot
+        || currentSnapshot,
+      afterSnapshot: state.workingDraft.afterSnapshot || currentSnapshot,
       beforeScreenshot: state.workingDraft.beforeScreenshot
         || state.versions.at(-1)?.afterScreenshot
         || null,
@@ -6774,6 +6814,11 @@ async function saveWorkingDraftCheckpoint() {
         checkpointEvent.id,
       ],
     });
+    if (isRoundComplete) {
+      checkpoint.purpose = "round_complete";
+      checkpoint.label = `Checkpoint ${checkpointId} · Previous Round Complete`;
+      checkpoint.note = "Automatically saved before the next critique run";
+    }
     const captured = await captureDashboardExport().catch((error) => {
       console.warn("[revision-screenshot] checkpoint PNG capture failed", error);
       return { screenshot: null, png: null, svg: null, snapshot: null };
@@ -6789,14 +6834,18 @@ async function saveWorkingDraftCheckpoint() {
       after: checkpointId,
     };
     state.workingDraft = createWorkingDraft(checkpointId);
-    state.drawers.versions = true;
+    // Manual saves open the comparison dock. Automatic round-end saves should
+    // not shift the workspace just as the next critique generation starts.
+    if (!isRoundComplete) state.drawers.versions = true;
     renderVersions();
     renderWorkingDraftStatus();
     applyDrawers();
     emitPracticeAction("checkpoint:saved", {
       checkpointId,
       recommendationIds,
+      source,
     });
+    return checkpoint;
   } finally {
     if (buttonLabel) buttonLabel.textContent = "Save Checkpoint";
     renderWorkingDraftStatus();
@@ -8183,6 +8232,7 @@ async function renderInspector() {
       focusedRequest: "",
       trigger: "stale-context-recovery",
       keepCritiqueId: targetId,
+      checkpointBeforeReview: true,
     });
     if (!regenerated) {
       button.disabled = false;
@@ -8621,7 +8671,7 @@ async function generateRefinementAlternatives(critique, rationale, isCancelled) 
       focusPurpose: "solution-refinement",
       // Practice's fixed first-round preset cannot produce a new proposal.
       // Refinement is explicitly on demand, so it must use the live engine.
-      allowPracticePreset: false,
+      usePracticeOverallCache: false,
     });
     if (isCancelled()) return "cancelled";
     const alternatives = [];
@@ -8699,7 +8749,13 @@ async function commitRefinementAlternative(critique, replacement, rationale, met
   const next = [...state.critiques];
   next[index] = refreshed;
   state.critiques = scopeRank(enrichRecommendations(next, state.version));
-  state.previewCache.delete(current.id);
+  invalidateCritiquePreviewCache(current.id);
+  if (meta.previewResult) {
+    state.previewCache.set(
+      `${state.artifact.id}:${state.version}:${current.id}`,
+      clone(meta.previewResult),
+    );
+  }
   state.interactionObservations.delete(current.id);
   state.critiqueRefreshNotice = null;
   state.selectedCritiqueId = current.id;
@@ -8716,6 +8772,7 @@ async function commitRefinementAlternative(critique, replacement, rationale, met
     refinementRationale: rationale,
     alternativeCount: meta.alternativeCount || null,
     selectedAlternative: Number.isInteger(meta.selectedIndex) ? meta.selectedIndex + 1 : null,
+    applied: false,
     dimension: current.dimension,
     latencyMs: meta.latencyMs ?? null,
   });
@@ -9196,18 +9253,24 @@ async function generateCritiquesFromEngine(focusedRequest = "", options = {}) {
         ? "Focused Review — answering your request"
         : "AI Assist — criteria-aware full review"));
   }
-  const resp = practiceUsesPreset() && options.allowPracticePreset !== false
+  const usePracticeOverallCache = shouldUsePracticeOverallCache({
+    practiceActive: practiceIsActive(),
+    explicitlyRequested: options.usePracticeOverallCache,
+    cacheConsumed: practiceRuntime.overallReviewCacheConsumed,
+    focusedRequest: normalizedRequest,
+  });
+  const resp = usePracticeOverallCache
     ? await (async () => {
         if (traceEnabled) {
           tracePanel.event({
-            type: "practice_preset",
+            type: "practice_overall_cache",
             materialCode: practiceRuntime.materialCode,
-            scope: reviewScope,
+            scope: "full",
             version: PRACTICE_PRESET_VERSION,
           });
         }
         await practicePause(180);
-        return practiceReviewResponse(practiceRuntime.preset, { scope: reviewScope });
+        return practiceOverallReviewResponse(practiceRuntime.preset);
       })()
     : await streamCritique(
         {
@@ -9254,57 +9317,51 @@ async function generateCritiquesFromEngine(focusedRequest = "", options = {}) {
       boundsById[c.target?.ref?.tile] ||
       fullBoard,
   }));
-  return { critiques, answer: resp.answer || null, reviewScope: state.reviewScope, reviewMeta: {
-    model: resp?.model || critiques[0]?.model || null,
-    promptVersion: resp?.promptVersion || critiques[0]?.promptVersion || null,
-    systemVersion: resp?.engineVersion || critiques[0]?.engineVersion || null,
-    registryVersion: resp?.registryVersion || critiques[0]?.registryVersion || null,
-    fewShotSetId: resp?.fewShotSetId || null,
-    fewShotVersion: resp?.fewShotVersion || null,
-    fewShotIds: Array.isArray(resp?.fewShotIds) ? [...resp.fewShotIds] : [],
-    fewShotContentHash: resp?.fewShotContentHash || null,
-    runId: resp?.runId || null,
-  } };
+  return {
+    critiques,
+    answer: resp.answer || null,
+    reviewScope: state.reviewScope,
+    usedPracticeOverallCache: usePracticeOverallCache,
+    reviewMeta: {
+      model: resp?.model || critiques[0]?.model || null,
+      promptVersion: resp?.promptVersion || critiques[0]?.promptVersion || null,
+      systemVersion: resp?.engineVersion || critiques[0]?.engineVersion || null,
+      registryVersion: resp?.registryVersion || critiques[0]?.registryVersion || null,
+      fewShotSetId: resp?.fewShotSetId || null,
+      fewShotVersion: resp?.fewShotVersion || null,
+      fewShotIds: Array.isArray(resp?.fewShotIds) ? [...resp.fewShotIds] : [],
+      fewShotContentHash: resp?.fewShotContentHash || null,
+      runId: resp?.runId || null,
+    },
+  };
 }
 
-async function generateLocalCritiques({ bounds, request, dimension }) {
+async function generateLocalCritiques({ bounds, request }) {
   if (!contextReadyForReview()) {
     throw new Error("Confirm the context before starting a local review.");
   }
   const semanticTargets = semanticTargetsForRegion(bounds);
   tracePanel.start("Local review — selected area");
-  const resp = practiceUsesPreset()
-    ? await (async () => {
-        tracePanel.event({
-          type: "practice_preset",
-          materialCode: practiceRuntime.materialCode,
-          scope: "selected-region",
-          version: PRACTICE_PRESET_VERSION,
-        });
-        await practicePause(180);
-        return practiceReviewResponse(practiceRuntime.preset, { scope: "local", bounds });
-      })()
-    : await streamCritique(
-        {
-          version: state.version,
-          context: reviewContextForEngine(),
-          specMap: buildEngineSpecMap(),
-          board: buildEngineBoardMeta(),
-          iterationContext: iterationContextForEngine(),
-          reviewScope: "selected-region",
-          requireLLM: true,
-          reviewTemperature: state.reviewTemperature,
-          savedRationales: savedRationalesForEngine(),
-          ...designDocumentForEngine(),
-          region: {
-            bounds,
-            request,
-            semanticTargets,
-            ...(dimension ? { dimension } : {}),
-          },
-        },
-        (event) => tracePanel.event(event),
-      );
+  const resp = await streamCritique(
+    {
+      version: state.version,
+      context: reviewContextForEngine(),
+      specMap: buildEngineSpecMap(),
+      board: buildEngineBoardMeta(),
+      iterationContext: iterationContextForEngine(),
+      reviewScope: "selected-region",
+      requireLLM: true,
+      reviewTemperature: state.reviewTemperature,
+      savedRationales: savedRationalesForEngine(),
+      ...designDocumentForEngine(),
+      region: {
+        bounds,
+        request,
+        semanticTargets,
+      },
+    },
+    (event) => tracePanel.event(event),
+  );
   tracePanel.done();
   const answer = resp?.answer || null;
   // A region ask can legitimately return just an answer (e.g. "no material
@@ -9318,7 +9375,7 @@ async function generateLocalCritiques({ bounds, request, dimension }) {
     id: `local-${state.nextLocalReviewId++}-${critique.id}`,
     bounds: clone(bounds),
     origin: "local-review",
-    localReview: { request, dimension: dimension || null, bounds: clone(bounds), semanticTargets: clone(semanticTargets) },
+    localReview: { request, bounds: clone(bounds), semanticTargets: clone(semanticTargets) },
     target: {
       ...(critique.target || {}),
       granularity: "selected-region",
@@ -9407,6 +9464,10 @@ async function runAIAssist(options = {}) {
   const focusedRequest = typeof options.focusedRequest === "string"
     ? options.focusedRequest.replace(/\s+/g, " ").trim()
     : state.reviewRequest.replace(/\s+/g, " ").trim();
+  if (options.practiceOverallReview && !focusedRequest && practiceOverallReviewComplete()) {
+    syncReviewReadiness();
+    return false;
+  }
   const attemptedScope = focusedRequest ? "focused" : "full";
   const actionTitle = els.aiAssistButton.querySelector(".ai-action-title");
   const actionDetail = els.aiAssistButton.querySelector(".ai-action-detail");
@@ -9420,7 +9481,7 @@ async function runAIAssist(options = {}) {
 
   let askId = null;
   const requestId = newStudyId();
-  const requestStartedAt = Date.now();
+  let requestStartedAt = null;
   const hadPrior = state.critiques.length > 0;
   const requestMode = critiqueRequestMode({
     focusedRequest,
@@ -9428,6 +9489,14 @@ async function runAIAssist(options = {}) {
     hadPrior,
   });
   try {
+    if (options.checkpointBeforeReview) {
+      actionTitle.textContent = "Saving Checkpoint…";
+      if (actionDetail) actionDetail.textContent = "Preserving the previous round’s dashboard";
+      await saveWorkingDraftCheckpoint({ force: true, source: "critique-request" });
+      actionTitle.textContent = "Generating Critiques…";
+      if (actionDetail) actionDetail.textContent = "Building recommendations";
+    }
+    requestStartedAt = Date.now();
     askId = state.nextAskId++;
     recordStudyAction(
       "critique_requested",
@@ -9442,7 +9511,14 @@ async function runAIAssist(options = {}) {
         critiqueId: options.keepCritiqueId || null,
       }),
     );
-    const { critiques: baseCritiques, answer, reviewMeta } = await generateCritiquesFromEngine(focusedRequest);
+    const {
+      critiques: baseCritiques,
+      answer,
+      reviewMeta,
+      usedPracticeOverallCache,
+    } = await generateCritiquesFromEngine(focusedRequest, {
+      usePracticeOverallCache: options.practiceOverallReview === true,
+    });
     // Synchronize the active list with the dashboard the engine just reviewed:
     // refresh still-valid cards, add new findings, remove obsolete/duplicate
     // undecided cards, and preserve only explicit decisions as durable history.
@@ -9516,6 +9592,18 @@ async function runAIAssist(options = {}) {
       fewShotIds: reviewMeta?.fewShotIds || [],
       fewShotContentHash: reviewMeta?.fewShotContentHash || null,
     });
+    if (usedPracticeOverallCache) {
+      practiceRuntime.overallReviewCacheConsumed = true;
+      recordStudyAction("practice_overall_cache_served", `Displayed cached Practice review ${practiceRuntime.materialCode}`, {
+        materialCode: practiceRuntime.materialCode,
+        dashboardId: state.artifact?.libraryId || state.artifact?.id || null,
+        askId,
+        critiqueIds: baseCritiques.map((critique) => critique.id),
+        cacheVersion: PRACTICE_PRESET_VERSION,
+        latencyMs: Date.now() - requestStartedAt,
+        ...practiceStudyFields(),
+      });
+    }
     emitPracticeAction(focusedRequest ? "review:focused" : "review:full", {
       askId,
       critiqueIds: baseCritiques.map((critique) => critique.id),
@@ -9523,6 +9611,15 @@ async function runAIAssist(options = {}) {
     return true;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    if (!requestStartedAt) {
+      tracePanel.fail(`Checkpoint save failed — ${message}`);
+      recordStudyAction("checkpoint_save_failed", "Could not save the previous-round checkpoint", {
+        source: "critique-request",
+        reason: message,
+        dashboardVersion: Number(state.version) || 1,
+      });
+      return false;
+    }
     const modeLabel = attemptedScope === "focused" ? "Focused review" : "Full review";
     tracePanel.fail(`${modeLabel} failed — ${message}`);
     recordStudyAction("critique_request_failed", `${modeLabel} failed`, {
@@ -9716,7 +9813,12 @@ async function resetDemo() {
   fitCanvas();
 }
 
-els.aiAssistButton.addEventListener("click", runAIAssist);
+els.aiAssistButton.addEventListener("click", () => {
+  void runAIAssist({
+    checkpointBeforeReview: true,
+    practiceOverallReview: true,
+  });
+});
 document.getElementById("resetButton").addEventListener("click", resetDemo);
 
 // --- User-study data collection (telemetry) -------------------------------
@@ -10249,7 +10351,6 @@ document.getElementById("localReviewForm").addEventListener("submit", async (eve
     const { critiques: localCritiques, answer, reviewMeta } = await generateLocalCritiques({
       bounds,
       request,
-      dimension: els.localReviewDimension.value,
     });
     // Region asks already accumulated; route through the same merge so decided
     // critiques are respected and every ask gets consistent history provenance.
@@ -10286,7 +10387,7 @@ document.getElementById("localReviewForm").addEventListener("submit", async (eve
         ? `Requested a local critique of ${localCritiques.length} ${localCritiques.length === 1 ? "finding" : "findings"}`
         : "Requested a local review (answer only, no grounded critique)",
       detail: request,
-      dimension: els.localReviewDimension.value || localCritiques[0]?.dimension || "other",
+      dimension: localCritiques[0]?.dimension || "other",
       bounds,
       data: {
         requestId,
@@ -10450,13 +10551,12 @@ function finishLocalReviewSelection(event) {
   const bounds = { x: draft.x, y: draft.y, w: draft.w, h: draft.h };
   if (bounds.w >= 16 && bounds.h >= 16) {
     openLocalReviewPopover(bounds);
-    if (practiceUsesPreset()) {
+    if (practiceTutorialIsGuiding()) {
       // Practice still uses the participant's real drag. Once a valid area is
       // selected, preload the controlled title question so no simulated cursor
       // or artificial selection is needed.
       els.localReviewRequest.value = practiceRuntime.preset.local.request;
       els.localReviewRequest.dispatchEvent(new Event("input", { bubbles: true }));
-      els.localReviewDimension.value = "text";
       syncReviewReadiness();
       emitPracticeAction("area:selection-ready", { bounds });
     }
@@ -10568,6 +10668,7 @@ document.getElementById("regenerateRefinementChoices").addEventListener("click",
   input.disabled = false;
   submit.textContent = "Generate Alternative(s)";
   submit.disabled = !input.value.trim();
+  submit.hidden = false;
   document.getElementById("regenerateRefinementChoices").hidden = true;
   input.focus();
   positionRationalePopover(rationaleAnchorElement);
@@ -10585,32 +10686,8 @@ document.getElementById("contextInjectForm").addEventListener("submit", async (e
     && critique
     && pendingAlternatives?.critiqueId === critique.id
   ) {
-    const selectedIndex = pendingAlternatives.selectedIndex;
-    const replacement = Number.isInteger(selectedIndex)
-      ? pendingAlternatives.alternatives[selectedIndex]
-      : null;
-    if (!replacement) return;
-    const submit = document.getElementById("saveRationaleButton");
-    submit.disabled = true;
-    submit.textContent = "Using Solution…";
-    const committed = await commitRefinementAlternative(
-      critique,
-      replacement,
-      pendingAlternatives.rationale,
-      {
-        requestId: pendingAlternatives.requestId,
-        latencyMs: pendingAlternatives.latencyMs,
-        alternativeCount: pendingAlternatives.alternatives.length,
-        selectedIndex,
-      },
-    );
-    if (committed) {
-      closeContextModal({ cancelPending: false });
-      document.getElementById("focusRefineSolution")?.focus();
-      return;
-    }
-    submit.disabled = false;
-    submit.textContent = "Choose this fix";
+    // Choosing the radio option owns this transition. Ignore form submission
+    // while its preview/Proposed update is in flight so Enter cannot double-run it.
     return;
   }
   const critiqueReference = critique || {
@@ -10979,6 +11056,7 @@ function disablePracticeRuntime() {
   practiceRuntime.tutorial?.destroy();
   practiceRuntime.active = false;
   practiceRuntime.tutorialMode = false;
+  practiceRuntime.overallReviewCacheConsumed = false;
   practiceRuntime.materialCode = null;
   practiceRuntime.preset = null;
   practiceRuntime.tutorial = null;
@@ -11008,6 +11086,7 @@ function configurePracticePreset(material) {
   if (!preset) throw new Error(`No guided-practice preset is configured for material ${material.code}.`);
   practiceRuntime.active = true;
   practiceRuntime.tutorialMode = false;
+  practiceRuntime.overallReviewCacheConsumed = false;
   practiceRuntime.materialCode = material.code;
   practiceRuntime.preset = preset;
   practiceRuntime.tutorialState = null;
@@ -11185,7 +11264,7 @@ function practiceTutorialMilestones(preset) {
         {
           id: "apply-local",
           label: "Apply the title recommendation",
-          instruction: "Apply the prepared title revision.",
+          instruction: "Apply the title recommendation returned for the selected area.",
           target: "#focusAccept",
           expect: "apply:single",
         },
@@ -11195,13 +11274,6 @@ function practiceTutorialMilestones(preset) {
       id: "batch-apply",
       title: "Apply several recommendations together",
       actions: [
-        {
-          id: "refresh-full-review",
-          label: "Refresh the Full Review",
-          instruction: "Refresh the Full Review for the current dashboard before composing a combined change.",
-          target: "#aiAssistButton",
-          expect: "review:full",
-        },
         {
           id: "enter-batch",
           label: "Enter multi-select mode",
@@ -11253,6 +11325,7 @@ async function resetPracticeWorkspace() {
   state.workingDraft = createWorkingDraft(1);
   state.nextAskId = 1;
   state.nextLocalReviewId = 1;
+  practiceRuntime.overallReviewCacheConsumed = false;
   resetBatchState();
   closeLocalReviewPopover();
   await refreshAfterDashboardMutation();
@@ -11395,6 +11468,12 @@ export function captureStudyRunnerWorkspaceState() {
           critiques: document.getElementById("critiqueList")?.scrollTop || 0,
         },
       },
+      practice: practiceIsActive()
+        ? {
+            materialCode: practiceRuntime.materialCode,
+            overallReviewCacheConsumed: practiceRuntime.overallReviewCacheConsumed,
+          }
+        : null,
       tutorial: practiceRuntime.tutorial?.getState?.() || practiceRuntime.tutorialState,
     });
   } catch (error) {
@@ -11460,6 +11539,15 @@ export async function restoreStudyRunnerWorkspaceState(snapshot) {
   activeDesignDocId = saved.activeDesignDocId || "";
   practiceRuntime.tutorialState = clone(snapshot.tutorial || null);
   practiceRuntime.tutorialMode = false;
+  const savedCacheState = snapshot.practice?.overallReviewCacheConsumed;
+  if (practiceIsActive()) {
+    const cachedCritiqueIds = new Set(
+      (practiceRuntime.preset?.full?.critiques || []).map((critique) => critique.id),
+    );
+    practiceRuntime.overallReviewCacheConsumed = savedCacheState === undefined
+      ? state.critiques.some((critique) => cachedCritiqueIds.has(critique.id))
+      : Boolean(savedCacheState);
+  }
   state.previewCache.clear();
   state.canvasPreview = null;
   els.searchInput.value = state.search;
