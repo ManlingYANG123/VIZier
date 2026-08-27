@@ -83,6 +83,14 @@ test("a whitespace-normalized refinement request still retains its named tile ta
   assert.deepEqual(contract.targetPaths, ["tile.task-velocity"]);
 });
 
+test("a focused request resolves a named board tile title into its semantic target", () => {
+  const focus = normalizeFocusedReview({
+    request: "Make the Bird trend easier to compare while preserving its colors.",
+  }, specs, board);
+  assert.deepEqual(focus?.requestContract?.targetPaths, ["tile.trend"]);
+  assert.deepEqual(focus?.requestContract?.targetKinds, ["tile", "chart"]);
+});
+
 test("a stale refresh evaluates the old issue instead of treating its quoted suggestion as a new author command", () => {
   const focus = normalizeFocusedReview({
     purpose: "stale-refresh",
@@ -156,10 +164,33 @@ test("post-apply intent gate accepts a visibly shorter requested title", () => {
   assert.equal(result.ok, true);
 });
 
+test("post-apply intent gate uses the direct critique target when a focused request has no semantic hits", () => {
+  const contract = buildReviewRequestContract("Make this chart easier to compare.");
+  assert.deepEqual(contract.targetPaths, []);
+  const critique: Critique = {
+    ...directTitleCritique(contract),
+    id: "chart-fix",
+    tileId: "trend",
+    target: { granularity: "chart", ref: { tile: "trend" } },
+    proposal: { kind: "edit-spec", mode: "executable", edits: [] },
+  };
+  const nextSpecs = structuredClone(specs);
+  nextSpecs.trend.mark = "bar";
+  const result = validateAppliedRequestIntent(
+    [critique],
+    ["chart-fix"],
+    board,
+    structuredClone(board),
+    specs,
+    nextSpecs,
+  );
+  assert.equal(result.ok, true);
+});
+
 test("directed reviews use a materially smaller scope-matched system prompt", () => {
   const full = dashboardReviewSystem("full");
   const local = dashboardReviewSystem("selected-region");
-  assert.ok(local.length < full.length * 0.55, `${local.length} should be less than 55% of ${full.length}`);
+  assert.ok(local.length < full.length * 0.75, `${local.length} should be less than 75% of ${full.length}`);
   assert.match(local, /DIRECTED REVIEW DEMONSTRATION/);
   assert.match(local, /selected-region/);
   assert.doesNotMatch(local, /RECOMMENDATION CATALOG/);

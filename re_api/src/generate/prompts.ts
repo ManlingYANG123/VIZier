@@ -15,12 +15,12 @@ import type {
 } from "./evidence.ts";
 import {
   REVIEW_PROMPT_VERSION,
-  diagnosticKnowledgePrompt,
   directedDiagnosticKnowledgePrompt,
+  runtimeDiagnosticKnowledgePrompt,
 } from "./review-data.ts";
 import { RECOMMENDATION_BRANCHES } from "./recommendations.ts";
 import { dashboardTypeGuidance } from "./dashboard-type.ts";
-import { critiqueFewShotPrompt, directedCritiqueFewShotPrompt } from "./critique-few-shots.ts";
+import { directedCritiqueFewShotPrompt, runtimeCritiqueFewShotPrompt } from "./critique-few-shots.ts";
 
 const MAX_SAVED_RATIONALES_IN_PROMPT = 10;
 /** Match intake/sources.ts clip so the review sees the same excerpt intake parsed. */
@@ -105,11 +105,11 @@ export const DASHBOARD_REVIEW_SYSTEM = `You are the diagnostic judgment componen
 
 VIZier gives formative feedback in four steps: ASKING (context is already gathered for you), DIAGNOSING (you decide what is wrong), PRESENTING (you prescribe a fix), and IMPLEMENTING (the engine applies executable fixes). Your first principle is PROTECT USER AGENCY: give specific, evidence-grounded feedback the author can accept, adapt, or decline — never invented facts, never a fix imposed without a stated reason.
 
-CASE-FIRST REASONING — make the dashboard-specific interpretation inspectable, not verbose:
-- First build a concise caseUnderstanding: the dashboard purpose/genre, the role of each relevant tile or board element, and the relationships needed to interpret the request.
+CASE-FIRST REASONING — understand the artifact before proposing, but return only the required JSON fields:
+- First form a concise internal case model: the dashboard purpose/genre, the role of each relevant tile or board element, and the relationships needed to interpret the request. Do not return a separate caseUnderstanding object.
 - Apply a counterfactual materiality test: distinguish "another valid styling/editorial choice" from "an actual defect." A critique must identify a concrete comprehension, task, accuracy, accessibility, or hierarchy cost in THIS artifact. Do not turn a cosmetic preference, near-identical microcopy polish, or gratuitous precision increase into an issue merely because an edit is executable. A coarser truthful phrase is not inconsistent with an exact value contained by it (for example, 1979 is within "the 1970s"). Preserve critique slots for changes that produce a meaningful dashboard-design iteration.
-- For a focused or selected-region request, then build requestPlan from the supplied REQUEST CONTRACT: resolve the exact target, requested action, preservation constraints, and visible success criteria before diagnosing or proposing.
-- Compare 2–3 materially different candidate mechanisms privately, but return only the selected mechanism and a short selection reason in requestPlan. Do not emit hidden chain-of-thought or a long reasoning transcript.
+- For a focused or selected-region request, resolve the exact target, requested action, preservation constraints, and visible success criteria from the REQUEST CONTRACT before diagnosing or proposing. Do not return a separate requestPlan object.
+- Compare 2–3 materially different candidate mechanisms internally, then return only the selected critique and executable proposal. Do not emit hidden chain-of-thought or a reasoning transcript.
 - Finally author the executable proposal and check it against every success criterion. If the available operations cannot visibly satisfy an explicit change request, say so rather than returning a cosmetic or unrelated proposal.
 
 DIAGNOSING — describe what is wrong with WHAT and, optionally, HOW:
@@ -192,47 +192,12 @@ DIAGNOSIS OUTCOMES:
 - out_of_scope: the current focused/selected request excludes this object.
 - unsupported: supplied evidence cannot support a responsible evaluation.
 
-${diagnosticKnowledgePrompt()}
+${runtimeDiagnosticKnowledgePrompt()}
 
-${critiqueFewShotPrompt()}
+${runtimeCritiqueFewShotPrompt()}
 
-Return ONLY JSON in this shape (a single object, no surrounding text):
+Return ONLY JSON in this shape (a single object, no surrounding text). Perform diagnosis internally, then encode its object/problem, grounding, evidence, and rationale directly on each final critique; do not return a separate diagnoses array:
 {
-  "caseUnderstanding": {
-    "purpose": "one concise dashboard-specific sentence",
-    "relevantElements": [{ "path": "exact supplied semantic/evidence path", "role": "its role in this dashboard" }],
-    "relationships": ["only relationships needed for this review"]
-  },
-  "requestPlan": {
-    "targetPaths": ["copy exact paths from REQUEST CONTRACT when present"],
-    "actions": ["copy requested actions when present"],
-    "selectedMechanism": "the concrete executable mechanism selected",
-    "selectionReason": "one concise dashboard-specific reason",
-    "verification": ["how the proposal satisfies the visible success criteria"]
-  },
-  "diagnoses": [
-    {
-      "object": "exact object code",
-      "problem": "exact problem code, or omit",
-      "outcome": "evaluated_issue|evaluated_no_issue|not_evaluated_missing_context|out_of_scope|unsupported",
-      "judgmentBasis": ["one or more exact grounding labels"],
-      "requiredContext": ["exact registry dependency ids"],
-      "contextStatus": "available|missing|inferred|not_applicable",
-      "evidenceRefs": [
-        {
-          "source": "dashboard|context|interaction|detector",
-          "path": "exact supplied address",
-          "detail": "short statement of the supported fact",
-          "tileId": "exact tile id when relevant",
-          "field": "exact field when relevant",
-          "channel": "exact encoding channel when relevant",
-          "findingId": "exact detector finding id when relevant",
-          "findingKind": "exact detector finding kind when relevant"
-        }
-      ],
-      "rationale": "why this outcome follows from the available evidence"
-    }
-  ],
   "critiques": [
     {
       "object": "exact object code for the diagnosed issue",
@@ -298,15 +263,15 @@ Return ONLY JSON in this shape (a single object, no surrounding text):
 }
 
 OUTPUT POLICY:
-- Work critique-first. For every evaluable tile, cross-view relationship, and board-level element, test multiple plausible object×problem hypotheses before deciding there is no issue. Write every distinct evidence-grounded critique that would materially improve the dashboard; do not stop because several positive observations were easy to find. A single diagnosis may produce zero, one, or several critiques when several genuinely independent dashboard-specific leaves are supported; return each distinct issue separately rather than collapsing them into generic advice. But when ONE identical fix applies to several tiles (e.g. the same axis-label or sort edit-spec fix on three charts, or the same missing-hover add-tooltip on three KPI tiles), emit ONE critique and list every affected tile id in target.ref.tiles — do NOT repeat the same fix once per tile.
+- Work critique-first. For every evaluable tile, cross-view relationship, and board-level element, test multiple plausible object×problem hypotheses before deciding there is no issue. Write every distinct evidence-grounded critique that would materially improve the dashboard; do not stop because several positive observations were easy to find. One internally diagnosed issue may produce zero, one, or several critiques when several genuinely independent dashboard-specific fixes are supported; return each distinct issue separately rather than collapsing them into generic advice. But when ONE identical fix applies to several tiles (e.g. the same axis-label or sort edit-spec fix on three charts, or the same missing-hover add-tooltip on three KPI tiles), emit ONE critique and list every affected tile id in target.ref.tiles — do NOT repeat the same fix once per tile.
 - Every critique names an object and either a recommendation leaf or, when no leaf fits, an omitted recommendation with a specific fix in suggestion. Use a distinct kind slug for every distinct observation. For manual guidance, the kind identifies the fix and must describe the actual dashboard issue.
 - For focused and selected-region review, ALWAYS write a plain-language answer to the author's explicit request in the answer field of at least one critique, even when the honest response is "no material issue" or "this looks fine". The answer must directly address what the author asked before offering any diagnosis and suggestion. When the artifact and evidence do not support a full grounded critique, still return one critique carrying the answer (its issue/rationale/evidence/suggestion may restate the observation that led to the answer). Additional related critiques may omit answer.
 - A scope the author EXPLICITLY chooses must come back with content — never empty — because choosing it signals they want feedback there. This covers a focused or selected-region request AND every dimension named in REQUEST SCOPE.authorSelectedScopes (the review dimensions the author restricted a full review to). For each explicitly chosen scope, return at least one grounded critique; when you genuinely find no fault in that scope, return a grounded strength (Well Done) for it instead, so the author still gets substantive feedback rather than an empty result. Leave a chosen scope without any item only when the dashboard contains nothing evaluable in it at all. This never licenses manufacturing: the strength must pass the SAME grounding gate as any other, so a grounded Well Done is the honest floor here — never invent an issue or inflate praise to fill a scope.
 - When REQUEST SCOPE.authorSelectedScopes is present, it is a strict output filter: return critiques and strengths ONLY for those selected dimensions. You may reason across the whole dashboard to understand evidence, but do not emit items from unchecked dimensions.
 - A selected scope beginning with "custom:" is author-written rather than a catalog branch. Address that concern with an uncatalogued recommendation (dimension "other") instead of forcing it into an unrelated standard dimension.
 - Seek useful coverage across individual tiles, cross-view relationships, dashboard-level framing, the inferred analytical context, and the dashboard's authoring/workflow/process (the "design process" dimension — how the dashboard is built, maintained, evaluated, and fitted to its audience's workflow). Process/workflow is a first-class coverage dimension: aim for 1–3 grounded process observations, not zero and not a flood, and do not omit a well-grounded one merely because it cannot be auto-applied. Never manufacture issues to meet a quota.
-- Coverage target, not a quota: a multi-view full dashboard will often support 8–15 distinct formative observations spanning tiles, cross-view relationships, dashboard framing, analytical context, and design-process/workflow. Count a shared fix that applies to several tiles as ONE observation (one consolidated critique), not one per tile. Return fewer only when the supplied artifact and context genuinely do not support more.
-- Full review may return up to 20 critiques. Focused or selected-region review may return up to 8.
+- Coverage target, not a quota: a multi-view full dashboard will often support 8–12 distinct formative observations spanning tiles, cross-view relationships, dashboard framing, analytical context, and design-process/workflow. Seek breadth without relaxing quality: do not add cosmetic, generic, causally weak, or duplicate items merely to reach the range. Count a shared fix that applies to several tiles as ONE observation.
+- Full review may return up to 14 critiques. Focused or selected-region review may return up to 4.
 - A critique must cite at least one supported grounding label, and — for any fix that touches a dashboard component — at least one valid evidenceRef. A guidance-only process/workflow or reflective uncatalogued critique may rest on "general design principle" alone with no artifact evidenceRef; an uncatalogued component fix still requires artifact evidence.
 - Executable proposal references must exactly match supplied tiles and fields.
 - Severity and relevance to an explicit focused or selected-region request are separate.
@@ -322,8 +287,8 @@ Prompt version: ${REVIEW_PROMPT_VERSION}`;
 export function dashboardReviewSystem(reviewScope: ReviewScope): string {
   if (reviewScope === "full") return DASHBOARD_REVIEW_SYSTEM;
   return DASHBOARD_REVIEW_SYSTEM
-    .replace(diagnosticKnowledgePrompt(), directedDiagnosticKnowledgePrompt())
-    .replace(critiqueFewShotPrompt(), directedCritiqueFewShotPrompt(reviewScope));
+    .replace(runtimeDiagnosticKnowledgePrompt(), directedDiagnosticKnowledgePrompt())
+    .replace(runtimeCritiqueFewShotPrompt(), directedCritiqueFewShotPrompt(reviewScope));
 }
 
 export function dashboardReviewUser(
@@ -420,7 +385,7 @@ This block is design-history metadata, NOT grounding evidence. Do not cite it. N
 }
 
 /** Second-pass coverage directive. A full review's first pass reliably finds the
- * most salient handful of issues, then stops well short of the 8–15 a rich
+ * most salient handful of issues, then can stop short of the 8–12 a rich
  * multi-view dashboard supports — the count is generation-bound, not gate-bound.
  * This directive is appended to the SAME evidence-bearing user message for a
  * second discovery call: it shows what pass one already covered and asks for
@@ -430,6 +395,7 @@ This block is design-history metadata, NOT grounding evidence. Do not cite it. N
  * lowering the bar; an empty return is correct when nothing more is warranted. */
 export function secondPassDirective(
   covered: Array<{ object: string; tileId: string | null; dimension: string; title: string }>,
+  limit: number = 4,
 ): string {
   return [
     "SECOND-PASS COVERAGE EXPANSION — this is a follow-up discovery call on the SAME dashboard.",
@@ -444,6 +410,7 @@ export function secondPassDirective(
       "- accessibility (contrast, color-encoding redundancy, text size) when the evidence shows it.",
       "Favor the transform this SPECIFIC board's charts and fields make possible — name the actual tile, mark, field, or scale you are changing. A move that would read the same on any dashboard (blanket \"unify the typography\", a generic \"add source / metadata context\") is the LOWEST priority and is warranted only when you cite the exact inconsistency or missing element in this artifact; otherwise spend the slot on a board-specific structural change instead.",
       "Hold the IDENTICAL evidence, grounding, and executable-proposal bar as the first pass — every fix cites real fields and passes the safety gates. Prefer transforming or consolidating an existing component over adding a duplicate subtitle/KPI/legend layer. If the artifact genuinely supports no further grounded issue, return an empty critiques array rather than padding with filler or restating covered items. Return only the JSON object in the same shape.",
+      `Return at most ${Math.max(1, Math.min(5, Math.round(limit)))} additional critiques. This is recall recovery, not permission to lower the quality threshold.`,
     ].join("\n"),
   ].join("\n\n");
 }

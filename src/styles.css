@@ -9607,6 +9607,33 @@ body.panel-resizing * {
   text-align: center;
 }
 
+.checkpoint-preview-recovery {
+  position: absolute;
+  inset: 0;
+  z-index: 84;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgb(248 250 252 / 94%);
+  color: color-mix(in srgb, var(--brand) 72%, var(--ink));
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.checkpoint-preview-recovery-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid color-mix(in srgb, var(--brand) 22%, #fff);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: background-critique-refresh-spin .72s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .checkpoint-preview-recovery-spinner { animation: none; }
+}
+
 .canvas-viewport:has(.revision-dock.expanded) .zoom-controls {
   bottom: calc(var(--revision-dock-height) + 14px);
 }

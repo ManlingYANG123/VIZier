@@ -13,8 +13,10 @@ panel expand/collapse, a selection, a form submit. These are signals the system
 observes unambiguously.
 
 We do **not** instrument **perception or attention** — where the eye went, what was
-read, hover, scan, dwell. Those are noisy or impossible to capture in-app and are
-better recovered from **think-aloud + screen recording**.
+read, hover, or scan. Those are noisy or impossible to capture in-app and are
+better recovered from **think-aloud + screen recording**. We do measure the UI
+interval between opening and closing a critique, but interpret it only as the
+detail view being open—not as proof that its contents were read.
 
 Important nuance: "did the participant look at the rationale/evidence" is an
 attention question (→ think-aloud), but "did the participant **open** the Why &
@@ -46,7 +48,8 @@ Every recorded event carries a schema-v2 envelope, stamped in `recordStudyEvent`
 | `logId` / `sequenceNumber` | monotonic per-session sequence (same value; use to detect gaps) |
 | `dashboardId` | current artifact id |
 | `dashboardVersion` | working-draft version at event time |
-| `appVersion` | VIZier build id (`0.2.0`) |
+| `appVersion` | release plus deployment id (for example `0.2.0+4f18a61d9c2b`) |
+| `buildId` | Heroku/source commit (12 characters), or `dev`/`test` outside a deployment |
 
 ## Captured event catalog
 
@@ -58,7 +61,7 @@ the product and are mirrored into the study log automatically (the hook in
 |---|---|---|---|
 | `session_started` | session starts | | |
 | `logging_status_changed` | logging started / degraded / recovered / stopped | status | ✅ |
-| `study_phase_changed` | researcher sets practice / brief_reading / timed_task / post_session | from, to | ✅ |
+| `study_phase_changed` | runner moves among practice / formal use / questionnaire & interview | from, to | ✅ |
 | `researcher_annotation` | researcher notes assistance, interruption, technical problem, deviation, bookmark | annotationKind, note | ✅ |
 | `session_ended` | End & save | reason, eventCount | ✅ |
 | `final_state_captured` | End & save, immediately before deactivate | critiqueIds, dashboardVersion | ✅ |
@@ -70,8 +73,10 @@ the product and are mirrored into the study log automatically (the hook in
 | `critique_requested` | Generate / regenerate / focused Ask / local / stale recovery | **requestId, requestMode, parentRequestId, scope, queryText, dashboardVersion** | ✅ |
 | `local_critique_requested` | region select + submit | detail, bounds, requestId | |
 | `critiques_displayed` | a review **successfully** renders | requestId, critiqueIds, critiqueCount, latencyMs, model/prompt/systemVersion | ✅ |
-| `critique_regenerated` | stale-dashboard recovery resolves | requestId, outcome (`updated` \| `retired`) | ✅ |
+| `critique_regenerated` | stale-dashboard recovery or on-demand refinement generation resolves | requestId, outcome (`updated` \| `retired` \| `choices_generated`), reviewMeta | ✅ |
+| `refinement_alternative_selected` | author chooses one generated alternative | requestId, selectedAlternative, alternativeCount, rationale | ✅ |
 | `critique_request_failed` | a review request does not complete | requestId, requestMode, reason, latencyMs | ✅ |
+| `critique_request_cancelled` / `_discarded` | request is aborted or its late result no longer matches live state | requestId, requestMode, reason, latencyMs | ✅ |
 | `critique_opened` | click a critique card / history item | critiqueId | |
 | `critique_details_expanded` / `_collapsed` | toggle "Why & Evidence" | critiqueId, dimension | ✅ |
 | `evidence_region_revealed` | "recall region" jump on the canvas | critiqueId | ✅ |
@@ -79,7 +84,9 @@ the product and are mirrored into the study log automatically (the hook in
 | `preview_viewed` | Original/Proposed (before/after) toggle | phase | |
 | `critique_closed` | Back to the critique list | critiqueId, **dwellMs** | ✅ |
 | `recommendation_accepted` | Accept Change **or** Mark as Considered | **decision** (`apply` \| `considered`), applyId, dashboardVersion, reason | ✅ (fields) |
-| `recommendation_deferred` | Defer | decision=`defer` | ✅ |
+| `batch_mode_entered` / `_exited` | enter or leave multi-selection | eligible ids / whether a preview existed | ✅ |
+| `batch_selection_changed` | toggle, Select all, or Clear all | action, selectedIds, selectedCount | ✅ |
+| `batch_preview_requested` / `_ready` / `_failed` / `_cancelled` / `_exited` | combined preview lifecycle | previewId, selected/previewed/excluded ids, validation, latency | ✅ |
 | `recommendation_apply_requested` | author starts an apply (denominator) | applyId, via, requestedCritiqueIds | ✅ |
 | `changes_applied` | a successful apply commits | applyId, committedCritiqueIds, before/after version | |
 | `dashboard_changed` | dashboard version actually moved | source (`vizier_apply` \| `system`), operation, relatedCritiqueIds, relatedApplyId | ✅ |
@@ -90,7 +97,7 @@ the product and are mirrored into the study log automatically (the hook in
 | `critique_rationale_added` / `_updated` / `_removed` | rationale modal | critiqueId, dimension | |
 | `dashboard_state_restored` | Reset demo **or** restore a saved checkpoint | source, checkpointId, before/after version | ✅ |
 
-`requestMode` is one of: `generate` | `regenerate_all` | `focused_ask` | `stale_recovery` | `local`.
+`requestMode` is one of: `generate` | `regenerate_all` | `focused_ask` | `stale_recovery` | `solution_refinement` | `local`.
 
 `recommendation_accepted` with `decision:"apply"` is **intent/commit of an engine apply**, not a substitute for `recommendation_apply_requested`. `decision:"considered"` is Mark as Considered (guidance). Ignore/unresolved is derived at session end: ids in `critiques_displayed` with no later decision.
 
@@ -134,15 +141,16 @@ Batch-vs-single apply is explicit on `via` and also derivable from `requestedCri
   `local_critique_requested`. Per-checkbox toggles are not logged individually.
 - B11 select a region for a local critique — **[CAPTURE]** `local_critique_requested`
   (with bounds + exact text).
-- B12 cancel an in-flight request — **[SKIP — not supported]** (no abort path).
+- B12 cancel or supersede an in-flight request — **[CAPTURE]**
+  `critique_request_cancelled` or `critique_request_discarded`, sharing the original `requestId`.
 - B13 resubmit / regenerate — **[CAPTURE]** as `hadPriorCritiques:true` (+ `trigger`)
   on `critique_requested`. Regenerating a *single* stale critique (the
   stale-dashboard recovery path) additionally emits `critique_regenerated` with
   the `outcome` — `updated` when a fresh solution replaces it, `retired` when the
   issue no longer applies to the current dashboard.
-- B14 follow-up sub-types (ask-why / clarify / alternative / elaborate) —
-  **[SKIP — not supported]** (no follow-up affordance). *What a participant would ask
-  next is a think-aloud signal.*
+- B14 request an alternative solution — **[CAPTURE]** on demand through Refine
+  Solution (`requestMode:"solution_refinement"`); generation, cancellation/failure,
+  and the selected alternative are separate terminal events.
 - B15 narrow / broaden scope — **[CAPTURE]** via the `activeScopes` snapshot on each
   request (the effect is visible in the set); no per-toggle event.
 - B16 reference a previous critique — **[SKIP — not supported]** (only implicit, via
@@ -186,8 +194,8 @@ Batch-vs-single apply is explicit on `via` and also derivable from `requestedCri
   `changes_applied`, and `dashboard_changed`. Mark as Considered is
   `recommendation_accepted` with `decision:"considered"` — not an apply.
 - D32 reject / dismiss — **[CAPTURE]** `recommendation_rejected` (`decision:"reject"`).
-- D33 request a different recommendation — **[SKIP — not supported]** (only whole-set
-  regenerate, captured by B13).
+- D33 request a different solution — **[CAPTURE]** as the solution-refinement
+  request lifecycle and `refinement_alternative_selected` decision.
 - D34 refine / edit before applying — **[SKIP — not supported]** (no in-app spec editor,
   so `dashboard_changed.source=manual` is not emitted).
 - D35 apply success vs failure — **[CAPTURE]** requested = `recommendation_apply_requested`;
@@ -196,8 +204,8 @@ Batch-vs-single apply is explicit on `via` and also derivable from `requestedCri
   emits `dashboard_state_restored`.
 - D37 reverse a prior accept/reject decision — **[SKIP — not supported]** (those
   decisions stay in history).
-- D38 defer — **[CAPTURE]** `recommendation_deferred`. Ignore/unresolved is emitted at
-  End as `critiques_unresolved` (displayed IDs with no later decision).
+- D38 leave unresolved — **[CAPTURE]** at formal-task completion as
+  `critiques_unresolved` (displayed IDs with no later apply/consider/reject decision).
 
 ## What think-aloud + screen recording covers (not telemetry)
 
@@ -208,8 +216,8 @@ These are the perception/reasoning signals we intentionally leave to the video:
 - Hover / highlight behavior (C22).
 - Scanning the list and skipping critiques without opening them (C27 — partly
   derivable, but the *why* is think-aloud).
-- What the participant would have asked as a follow-up (B14, D33 — features that do
-  not exist). Manual in-spec edits (D34) also still need think-aloud.
+- Follow-up reasoning beyond the supported Refine Solution direction. Manual
+  in-spec edits (D34) also still need think-aloud.
 - The reasoning behind any accept/reject/skip decision.
 
 ## Derived metrics (no extra instrumentation needed)
@@ -229,6 +237,21 @@ These are the perception/reasoning signals we intentionally leave to the video:
   `recommendation_apply_failed` joined on `applyId`.
 - **Request latency**: `critiques_displayed.latencyMs` or failed counterpart,
   joined on `requestId`.
+- **Combined-preview funnel**: join `batch_preview_requested` to exactly one of
+  ready / failed / cancelled, then use selection, exclusion, review, and apply events.
+
+## Refresh and stage-boundary durability
+
+The group runner debounces a phase-local workspace snapshot after each recorded
+product mutation and synchronously flushes it on `visibilitychange:hidden`,
+`pagehide`, navigation, and stage completion. Practice and formal use have
+separate workspace keys. Timers start automatically when each workspace or the
+questionnaire mounts, so a missed manual click cannot create an untimed phase.
+
+At formal-task completion VIZier records `critiques_unresolved` and
+`final_state_captured` before collecting the final JSON/PNG artifacts. Critique
+payloads in `critiques_displayed` include the diagnosis, rationale, suggestion,
+evidence, target, proposal, review request/scope, and evaluated dashboard version.
 
 ## Where the new hooks live (`src/app.js`)
 

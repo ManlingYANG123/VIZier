@@ -68,6 +68,9 @@ let assessmentCanvasTelemetryTimer = null;
 let stageTimerInterval = null;
 let studyNavigationBusy = false;
 let studyBrowserHistoryBound = false;
+let workspaceAutosaveTimer = null;
+let workspaceAutosaveApp = null;
+let workspaceAutosavePhase = null;
 
 function escapeHTML(value) {
   return String(value ?? "")
@@ -98,9 +101,61 @@ function loadRunnerState() {
 }
 
 function persistRunnerState() {
-  if (!runnerState) return;
-  runnerState.updatedAt = new Date().toISOString();
-  localStorage.setItem(runnerKey(), JSON.stringify(runnerState));
+  if (!runnerState) return false;
+  try {
+    runnerState.updatedAt = new Date().toISOString();
+    localStorage.setItem(runnerKey(), JSON.stringify(runnerState));
+    return true;
+  } catch (error) {
+    console.warn("[study-runner] state persistence failed", error);
+    return false;
+  }
+}
+
+function captureMountedWorkspace(source = "autosave") {
+  if (!runnerState || !workspaceAutosaveApp || runnerState.phase !== workspaceAutosavePhase) return false;
+  if (typeof workspaceAutosaveApp.captureStudyRunnerWorkspaceState !== "function") return false;
+  try {
+    runnerState.workspaces ||= {};
+    runnerState.workspaces[workspaceAutosavePhase] = workspaceAutosaveApp.captureStudyRunnerWorkspaceState();
+    return persistRunnerState();
+  } catch (error) {
+    console.warn(`[study-runner] ${source} workspace capture failed`, error);
+    return false;
+  }
+}
+
+function scheduleWorkspaceAutosave() {
+  clearTimeout(workspaceAutosaveTimer);
+  workspaceAutosaveTimer = setTimeout(() => {
+    workspaceAutosaveTimer = null;
+    captureMountedWorkspace("debounced-autosave");
+  }, 250);
+}
+
+function handleWorkspaceVisibilityChange() {
+  if (document.visibilityState === "hidden") captureMountedWorkspace("visibility-hidden");
+}
+
+function detachWorkspaceAutosave({ flush = true } = {}) {
+  if (flush) captureMountedWorkspace("workspace-unmount");
+  clearTimeout(workspaceAutosaveTimer);
+  workspaceAutosaveTimer = null;
+  document.removeEventListener("vizier:study-workspace-changed", scheduleWorkspaceAutosave);
+  document.removeEventListener("visibilitychange", handleWorkspaceVisibilityChange);
+  window.removeEventListener("pagehide", captureMountedWorkspace);
+  workspaceAutosaveApp = null;
+  workspaceAutosavePhase = null;
+}
+
+function attachWorkspaceAutosave(app) {
+  detachWorkspaceAutosave({ flush: false });
+  workspaceAutosaveApp = app;
+  workspaceAutosavePhase = runnerState.phase;
+  document.addEventListener("vizier:study-workspace-changed", scheduleWorkspaceAutosave);
+  document.addEventListener("visibilitychange", handleWorkspaceVisibilityChange);
+  window.addEventListener("pagehide", captureMountedWorkspace);
+  captureMountedWorkspace("workspace-mounted");
 }
 
 function ensureAssessmentState(key) {
@@ -1232,6 +1287,7 @@ function scaleSectionMarkup(section, responseMap) {
 
 function renderQuestionnaire() {
   cleanupAssessmentViews();
+  startPhaseTimer(runnerState.phase, new Date().toISOString(), "questionnaire-mounted");
   const key = assessmentKeyForPhase(runnerState.phase);
   const assessment = ensureAssessmentState(key);
   const questions = POST_QUESTIONS;
@@ -1409,6 +1465,13 @@ async function mountVizierPhase() {
     if (savedWorkspace && studyWorkspaceMatchesMaterial(savedWorkspace, material)
       && typeof app.restoreStudyRunnerWorkspaceState === "function") {
       await app.restoreStudyRunnerWorkspaceState(savedWorkspace);
+      // The restore path may migrate an older checkpoint snapshot by rebuilding
+      // its missing thumbnail. Capture and persist that repaired workspace now
+      // so another refresh does not repeat the migration or lose the preview.
+      if (typeof app.captureStudyRunnerWorkspaceState === "function") {
+        runnerState.workspaces[runnerState.phase] = app.captureStudyRunnerWorkspaceState();
+        persistRunnerState();
+      }
       recordStudyAction("study_workspace_restored", `Restored ${studyPhaseLabel(runnerState.phase)} workspace`, {
         phase: runnerState.phase,
         materialCode: material.code,
@@ -1433,7 +1496,9 @@ async function mountVizierPhase() {
     return;
   }
   document.body.classList.remove("study-workspace-booting");
+  attachWorkspaceAutosave(app);
   document.body.classList.add("study-workspace-phase");
+  startPhaseTimer(runnerState.phase, new Date().toISOString(), "workspace-mounted");
   document.querySelectorAll("[data-study-session]").forEach((element) => { element.hidden = true; });
   const topbar = document.querySelector(".topbar");
   const title = studyPhaseLabel(runnerState.phase);
@@ -1529,6 +1594,7 @@ async function mountVizierPhase() {
 
 async function renderCurrentPhase() {
   clearStageTimerTicker();
+  detachWorkspaceAutosave();
   document.body.classList.remove("study-workspace-booting", "study-workspace-phase");
   if (!runnerState) {
     renderWelcome();

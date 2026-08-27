@@ -253,6 +253,42 @@ export function directedCritiqueFewShotPrompt(scope: "focused" | "selected-regio
     "DIRECTED REVIEW DEMONSTRATION",
     "Use this only for target resolution and evidence→proposal structure. Never copy its content.",
     `INPUT:\n${JSON.stringify(example.input, null, 2)}`,
-    `EXPECTED OUTPUT:\n${JSON.stringify(example.expectedOutput, null, 2)}`,
+    `EXPECTED OUTPUT:\n${JSON.stringify(runtimeExpectedOutput(example.expectedOutput), null, 2)}`,
   ].join("\n");
+}
+
+/** Production review calls return only author-facing results. The engine
+ * reconstructs diagnosis provenance from the critiques that survive its
+ * grounding, executable, and quality gates, so demonstrations should not teach
+ * the model to repeat every issue in a second top-level array. */
+function runtimeExpectedOutput(expectedOutput: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  return {
+    critiques: expectedOutput.critiques,
+    strengths: expectedOutput.strengths,
+  };
+}
+
+/** Deliberately diverse production subset. It preserves one concrete
+ * evidence-to-executable example plus analytical and infographic genre
+ * examples without making all six demonstrations compete with the live case. */
+export function runtimeCritiqueFewShotPrompt(): string {
+  const ids = new Set([
+    "fs-01-evidence-to-executable-fix",
+    "fs-03-analytical-interaction-applicability",
+    "fs-04-infographic-interaction-nonapplicability",
+  ]);
+  const examples = CRITIQUE_FEW_SHOT_SET.examples.filter((example) => ids.has(example.id));
+  const lines = [
+    "CURATED END-TO-END CRITIQUE DEMONSTRATIONS",
+    "Use these for judgment structure and genre sensitivity only. Never copy their artifact content.",
+  ];
+  for (const example of examples) {
+    lines.push(
+      "",
+      `DEMONSTRATION ${example.id} — ${example.purpose}`,
+      `INPUT:\n${JSON.stringify(example.input, null, 2)}`,
+      `EXPECTED OUTPUT:\n${JSON.stringify(runtimeExpectedOutput(example.expectedOutput), null, 2)}`,
+    );
+  }
+  return lines.join("\n");
 }

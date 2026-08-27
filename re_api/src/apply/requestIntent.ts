@@ -45,6 +45,27 @@ function contractChangedRequestedTarget(
   return false;
 }
 
+function proposalTargetChanged(
+  critique: Critique,
+  originalBoard: BoardMeta,
+  nextBoard: BoardMeta,
+  originalSpecs: SpecMap,
+  nextSpecs: SpecMap,
+): boolean {
+  const ref = critique.target?.ref || {};
+  const tileIds = new Set([
+    critique.tileId,
+    typeof ref.tile === "string" ? ref.tile : null,
+    typeof ref.source === "string" ? ref.source : null,
+    ...(Array.isArray(ref.tiles) ? ref.tiles.filter((id): id is string => typeof id === "string") : []),
+    ...(Array.isArray(ref.targets) ? ref.targets.filter((id): id is string => typeof id === "string") : []),
+  ].filter((id): id is string => Boolean(id)));
+  if ([...tileIds].some((tileId) =>
+    changed(originalSpecs[tileId], nextSpecs[tileId]) ||
+    changed(tileMeta(originalBoard, tileId), tileMeta(nextBoard, tileId)))) return true;
+  return critique.target?.granularity === "dashboard" && changed(originalBoard, nextBoard);
+}
+
 function validateOne(
   critique: Critique,
   originalBoard: BoardMeta,
@@ -55,7 +76,10 @@ function validateOne(
   const contract = critique.requestContract;
   if (!contract?.explicitChange) return [];
   const errors: string[] = [];
-  if (!contractChangedRequestedTarget(contract, originalBoard, nextBoard, originalSpecs, nextSpecs)) {
+  const changedRequestedTarget = contract.targetPaths.length
+    ? contractChangedRequestedTarget(contract, originalBoard, nextBoard, originalSpecs, nextSpecs)
+    : proposalTargetChanged(critique, originalBoard, nextBoard, originalSpecs, nextSpecs);
+  if (!changedRequestedTarget) {
     errors.push(`${critique.id}: the proposal did not change any requested semantic target`);
   }
   if (contract.targetPaths.includes("board.title") && contract.actions.includes("shorten") &&

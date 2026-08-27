@@ -50,7 +50,9 @@ import { hasEmbeddedKpis } from "../detect/kpi.ts";
 import { specHasField } from "../detect/filterControl.ts";
 import { computeKpis } from "../compute/kpis.ts";
 import { repairGuidanceToExecutable } from "./repair.ts";
+import { judgeSolutionQuality } from "./solution-quality.ts";
 import { filterConflictingCritiques } from "./conflict-filter.ts";
+import { applyProposals } from "../apply/index.ts";
 import { RECOMMENDATION_BRANCHES, RECOMMENDATION_LEAF_BY_ID } from "./recommendations.ts";
 import { dimensionEmphasis, suppressedDetectorsFor } from "./dashboard-type.ts";
 import {
@@ -102,6 +104,13 @@ const EXECUTABLE_PROPOSALS = new Set([
   // The board-layout primitive: move/resize tiles (bounds live on the board,
   // not in any spec, so this is the only executable route for a layout change).
   "edit-layout",
+]);
+const SPEC_PREFLIGHT_PROPOSALS = new Set([
+  "edit-spec",
+  "add-tooltip",
+  "add-cross-filter",
+  "v2-palette",
+  "preserve-brand-palette",
 ]);
 /** Aggregates a KPI definition may name; mirrors KpiAggregate in contracts.ts. */
 const KPI_AGGREGATES = new Set(["count", "sum", "avg", "min", "max", "distinct"]);
@@ -328,7 +337,11 @@ export function scopeLocalReviewInput(
   };
 }
 
-export function normalizeFocusedReview(focus: FocusedReviewRequest | undefined): FocusedReviewRequest | undefined {
+export function normalizeFocusedReview(
+  focus: FocusedReviewRequest | undefined,
+  specMap?: SpecMap,
+  board?: BoardMeta,
+): FocusedReviewRequest | undefined {
   if (!focus) return undefined;
   const request = text(focus.request)?.replace(/\s+/g, " ").slice(0, 600);
   if (!request) throw new Error("FOCUSED_REVIEW_INVALID: enter a specific review question");
@@ -336,6 +349,26 @@ export function normalizeFocusedReview(focus: FocusedReviewRequest | undefined):
     ? focus.purpose
     : "author-request";
   const requestContract = buildReviewRequestContract(request);
+  // Focused requests do not carry the browser's selected-region semantic hits.
+  // Resolve an explicitly named chart title or tile id against the current
+  // board so the acceptance gate checks the component the author actually
+  // named (for example, "Project Status Distribution" → project-status).
+  if (!requestContract.targetPaths.length && specMap) {
+    const normalizedRequest = request.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const namedTileIds = new Set<string>();
+    for (const tileId of Object.keys(specMap)) {
+      const normalizedId = tileId.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      if (normalizedId && normalizedRequest.includes(normalizedId)) namedTileIds.add(tileId);
+    }
+    for (const tile of board?.tiles || []) {
+      const normalizedTitle = String(tile.title || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      if (normalizedTitle && normalizedRequest.includes(normalizedTitle)) namedTileIds.add(tile.id);
+    }
+    if (namedTileIds.size) {
+      requestContract.targetPaths = [...namedTileIds].slice(0, 12).map((id) => `tile.${id}`);
+      requestContract.targetKinds = ["tile", "chart"];
+    }
+  }
   // A stale-card refresh quotes the old suggestion so the model can reassess
   // it. That quoted verb is not a new author instruction and must not bypass
   // materiality checks or force the old solution to be regenerated.
@@ -1713,6 +1746,20 @@ function critiqueLocationKey(value: { critique: Critique }): string {
   return `${value.critique.object}|${value.critique.problem ?? ""}|${location}`;
 }
 
+/** A detector and the model can describe the same executable remedy with
+ * different taxonomy labels (for example `interaction/limited affordance`
+ * versus `tooltip/missing`).  The author should still see one fix, not two.
+ * Keep this key deliberately narrow: only identical executable proposal kinds
+ * on the same resolved location suppress a detector fallback. */
+function executableRemedyLocationKey(value: { critique: Critique }): string {
+  if (value.critique.proposal.mode !== "executable") return "";
+  const location = value.critique.tileId ||
+    text(object(value.critique.target?.ref).source) ||
+    text(object(value.critique.target?.ref).tile) ||
+    "dashboard";
+  return `${value.critique.proposal.kind}|${location}`;
+}
+
 // Kinds whose fix is tile-PORTABLE — the identical operation applies to any tile
 // because it derives its payload from that tile at apply time (add-tooltip reads
 // the tile's own encoded fields). Such N-per-tile duplicates can collapse into
@@ -2009,7 +2056,7 @@ export async function discoverDashboardCritiques(
   if (!client?.available()) throw new Error("LLM_REQUIRED: the unified review engine requires a configured model");
   if (region && focus) throw new Error("REVIEW_SCOPE_CONFLICT: use either a canvas region or a full-dashboard focused request");
   const scoped = scopeLocalReviewInput(specMap, board, region);
-  const normalizedFocus = normalizeFocusedReview(focus);
+  const normalizedFocus = normalizeFocusedReview(focus, specMap, board);
   const reviewScope: ReviewScope = scoped.region ? "selected-region" : normalizedFocus ? "focused" : "full";
   const snapshot = buildContextSnapshot(context);
   const packet = buildEvidencePacket(scoped.specMap, scoped.board, interactionState);
@@ -2030,7 +2077,7 @@ export async function discoverDashboardCritiques(
         constraintSet,
         designDocumentText,
       ),
-      { system: dashboardReviewSystem(reviewScope), temperature, maxTokens: 16000, onToken },
+      { system: dashboardReviewSystem(reviewScope), temperature, maxTokens: 9000, onToken },
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -2072,7 +2119,7 @@ export async function discoverDashboardCritiques(
     .filter((item): item is Strength => Boolean(item))
     .filter((item) => !narrowedScope || narrowedScope.has(item.dimension));
 
-  const resultLimit = reviewScope === "full" ? 20 : 8;
+  const resultLimit = reviewScope === "full" ? 14 : 4;
   const authorRequest = scoped.region?.request || normalizedFocus?.request;
   const requestContract = scoped.region?.requestContract || normalizedFocus?.requestContract;
   const focusPurpose = normalizedFocus?.purpose;
@@ -2093,23 +2140,26 @@ export async function discoverDashboardCritiques(
     .filter((item): item is NonNullable<typeof item> => Boolean(item));
   // ── Lever I: second discovery pass (full reviews only) ────────────────────
   // The first pass reliably surfaces the most salient handful of issues, then
-  // stops well short of the 8–15 a rich multi-view board supports — the ceiling
+  // can stop short of the 8–12 a rich multi-view board supports — the ceiling
   // is GENERATION, not the executable gate (which now clears ~0.9 of critiques).
   // One additional call — SAME evidence, SAME grounding/sanitize/compile gates —
   // asks for genuinely distinct, structurally executable issues the first pass
   // left on the table, told what is already covered so it does not repeat. It is
   // best-effort: a failure here never sinks the run (pass one already produced a
   // valid review), and mergeAndRank dedupes any overlap by slot + payload. It is
-  // gated on RE_API_SECOND_PASS === "1" because it adds one full LLM call of
-  // latency per review. The running SERVER turns it ON by default (server.ts),
-  // and an operator opts out with RE_API_SECOND_PASS=0; engine-library consumers
-  // that never boot the server (unit tests driving an exact call sequence,
-  // measurement scripts) leave it unset and are therefore unaffected.
+  // gated on an explicit coverage experiment OR adaptively when the production
+  // server sees fewer than nine validated first-pass candidates. The adaptive
+  // call is bounded to the small number of missing slots and keeps every normal
+  // quality/safety gate; library/test callers remain single-pass by default.
+  // Judge + executable preflight can legitimately remove several grounded
+  // drafts. Trigger recall recovery below nine first-pass survivors so those
+  // quality gates still have enough headroom to leave a useful 8-ish set.
+  const adaptiveCoverage = process.env.RE_API_ADAPTIVE_COVERAGE === "1" && validated.length < 9;
   if (
     reviewScope === "full" &&
     !normalizedFocus &&
     !scoped.region &&
-    process.env.RE_API_SECOND_PASS === "1"
+    (process.env.RE_API_SECOND_PASS === "1" || adaptiveCoverage)
   ) {
     const covered = validated.map((item) => ({
       object: item.critique.object || "component",
@@ -2119,8 +2169,11 @@ export async function discoverDashboardCritiques(
     }));
     try {
       const secondResponse = await client.completeJson<JsonObject>(
-        `${dashboardReviewUser(snapshot, packet, grounding, undefined, undefined, savedRationales, iterationContext, constraintSet, designDocumentText)}\n\n${secondPassDirective(covered)}`,
-        { system: DASHBOARD_REVIEW_SYSTEM, temperature, maxTokens: 16000 },
+        // Leave headroom for the downstream quality judge and executable
+        // preflight to reject weak/no-op drafts. The author-facing target is
+        // eight or more strong critiques, not merely eight raw candidates.
+        `${dashboardReviewUser(snapshot, packet, grounding, undefined, undefined, savedRationales, iterationContext, constraintSet, designDocumentText)}\n\n${secondPassDirective(covered, 11 - validated.length)}`,
+        { system: DASHBOARD_REVIEW_SYSTEM, temperature, maxTokens: 4500, onToken },
       );
       const secondRawDiagnoses = Array.isArray(secondResponse.diagnoses) ? secondResponse.diagnoses : [];
       const secondRawCritiques = Array.isArray(secondResponse.critiques) ? secondResponse.critiques.slice(0, 24) : [];
@@ -2198,8 +2251,15 @@ export async function discoverDashboardCritiques(
       .filter((item) => item.critique.supportStatus === "validated")
       .map(critiqueLocationKey)
   );
+  const coveredExecutableRemedies = new Set(
+    validated
+      .filter((item) => item.critique.supportStatus === "validated")
+      .map(executableRemedyLocationKey)
+      .filter(Boolean)
+  );
   const uncoveredFallback = deterministic.filter((item) =>
-    !coveredLocations.has(critiqueLocationKey(item))
+    !coveredLocations.has(critiqueLocationKey(item)) &&
+    !coveredExecutableRemedies.has(executableRemedyLocationKey(item))
   );
   const scopedFallback = uncoveredFallback.filter((item) =>
     !narrowedScope || narrowedScope.has(item.critique.dimension)
@@ -2251,12 +2311,78 @@ export async function discoverDashboardCritiques(
     !priorSignatures.has(iterationProposalSignature(item.critique))
   );
   const ranked = mergeAndRank(novelCandidates, context, resultLimit, packet.specMap, iterationContext);
+
+  // A compact judge checks the part deterministic validators cannot: whether a
+  // safe executable proposal actually resolves its critique with a visible,
+  // dashboard-specific change. The running server opts into this quality gate;
+  // library callers keep an exact single-model-call contract unless they opt in.
+  const qualityDecisions = process.env.RE_API_SOLUTION_JUDGE === "1"
+    ? await judgeSolutionQuality(ranked, packet, context, reviewScope, requestContract, client)
+    : new Map();
+  const qualityChecked: typeof ranked = [];
+  for (const item of ranked) {
+    const decision = qualityDecisions.get(item.critique.id);
+    if (!decision || decision.verdict === "pass") {
+      qualityChecked.push(item);
+      continue;
+    }
+    if (decision.verdict === "drop" || !decision.proposal || !decision.target) continue;
+
+    const rewritten = validatedProposal(
+      { proposal: decision.proposal, target: decision.target },
+      item.critique.tileId,
+      packet,
+    );
+    if (rewritten.proposal.mode !== "executable") continue;
+    const targetRaw = object(decision.target);
+    const replacement: Critique = {
+      ...item.critique,
+      suggestion: decision.suggestion || item.critique.suggestion,
+      proposal: rewritten.proposal,
+      target: {
+        granularity: text(targetRaw.granularity) || item.critique.target.granularity,
+        ref: rewritten.ref,
+      },
+    };
+    if (SPEC_PREFLIGHT_PROPOSALS.has(replacement.proposal.kind)) {
+      try {
+        const outcome = await applyProposals(packet.specMap, [replacement], [replacement.id]);
+        if (outcome.rollback.rolledBack || !outcome.changedTargets.length) continue;
+      } catch {
+        continue;
+      }
+    }
+    item.critique = replacement;
+    item.finding.proposalKind = replacement.proposal.kind;
+    qualityChecked.push(item);
+  }
+
+  // Exercise the final, merged candidates through the real apply/compile path.
+  // Running this after merge matters: a consolidated multi-tile fix is judged
+  // as the one transaction the author will actually preview and apply.
+  const preflighted: typeof ranked = [];
+  for (const item of qualityChecked) {
+    if (
+      process.env.RE_API_PROPOSAL_PREFLIGHT !== "1" ||
+      item.critique.proposal.mode !== "executable" ||
+      !SPEC_PREFLIGHT_PROPOSALS.has(item.critique.proposal.kind)
+    ) {
+      preflighted.push(item);
+      continue;
+    }
+    try {
+      const outcome = await applyProposals(packet.specMap, [item.critique], [item.critique.id]);
+      if (!outcome.rollback.rolledBack && outcome.changedTargets.length) preflighted.push(item);
+    } catch {
+      // Keep a no-op or compile failure out of the author-facing list.
+    }
+  }
   // Silently drop critiques that conflict with an uploaded design document's
   // hard constraints (e.g. a recolor when the brand palette is locked). A
   // critique that directly answers a focused/region ask is exempt. When no
   // constraintSet is supplied this returns `ranked` unchanged (byte-identical),
   // and a filter failure keeps every critique — it never fails the review.
-  const { kept: filtered, dropped } = await filterConflictingCritiques(ranked, constraintSet, client);
+  const { kept: filtered, dropped } = await filterConflictingCritiques(preflighted, constraintSet, client);
   // Prefer the answer already attached to a surviving direct critique so the
   // response-level answer stays consistent with what the card shows; otherwise
   // fall back to the salvaged raw answer.
@@ -2267,15 +2393,44 @@ export async function discoverDashboardCritiques(
     ? requestGuidanceFallback(packet, snapshot, reviewScope, authorRequest, scoped.region, requestContract, answer)
     : null;
   if (requestFallback) answer = requestFallback.critique.answer;
+  const finalCritiques = [
+    ...filtered.map((item) => item.critique),
+    ...(requestFallback ? [requestFallback.critique] : []),
+  ];
+  // Production prompts no longer ask the model to repeat every issue in a
+  // separate diagnoses array. Preserve the research/trace contract by deriving
+  // one diagnosis from each critique that actually survived grounding,
+  // executable preflight, quality judging, and constraint filtering. This also
+  // prevents rejected draft candidates from appearing as study provenance.
+  if (!rawDiagnoses.length) {
+    const finalByDiagnosis = new Map<string, Diagnosis>();
+    for (const critique of finalCritiques) {
+      if (!critique.object || !isObjectCode(critique.object)) continue;
+      const problem = critique.problem && isProblemCode(critique.problem)
+        ? critique.problem
+        : undefined;
+      const key = comboKey(critique.object, problem);
+      if (finalByDiagnosis.has(key)) continue;
+      finalByDiagnosis.set(key, {
+        object: critique.object,
+        ...(problem ? { problem } : {}),
+        outcome: critique.diagnosisOutcome || "evaluated_issue",
+        judgmentBasis: critique.judgmentBasis || [],
+        priorWeight: critique.priorWeight || priorWeightFor(critique.object, problem),
+        requiredContext: critique.requiredContext || [],
+        contextStatus: critique.contextStatus || "not_applicable",
+        evidenceRefs: critique.evidenceRefs || [],
+        rationale: critique.rationale,
+      });
+    }
+    diagnoses = [...finalByDiagnosis.values()];
+  }
   return {
     findings: [
       ...filtered.map((item) => item.finding),
       ...(requestFallback ? [requestFallback.finding] : []),
     ],
-    critiques: [
-      ...filtered.map((item) => item.critique),
-      ...(requestFallback ? [requestFallback.critique] : []),
-    ],
+    critiques: finalCritiques,
     diagnoses,
     strengths,
     contextSnapshotId: snapshot.id,

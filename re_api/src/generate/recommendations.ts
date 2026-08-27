@@ -196,3 +196,23 @@ export function recommendationCatalogPrompt(): string {
   }
   return lines.join("\n");
 }
+
+/** Production catalog without the repeated empirical excerpts. Every exact
+ * leaf id and definition remains available to the model; the full examples stay
+ * available through recommendationCatalogPrompt() for offline analysis. */
+export function recommendationCatalogDefinitionsPrompt(): string {
+  const byBranch = new Map<Dimension, RecommendationLeaf[]>();
+  for (const leaf of RECOMMENDATION_LEAVES) {
+    const list = byBranch.get(leaf.branch) ?? [];
+    list.push(leaf);
+    byBranch.set(leaf.branch, list);
+  }
+  const lines: string[] = [];
+  for (const branch of RECOMMENDATION_BRANCHES) {
+    const leaves = byBranch.get(branch);
+    if (!leaves?.length) continue;
+    lines.push(`[${branch}]`);
+    for (const leaf of leaves) lines.push(`  - ${leaf.id} — ${leaf.definition}`);
+  }
+  return lines.join("\n");
+}

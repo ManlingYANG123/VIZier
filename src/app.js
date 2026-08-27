@@ -58,6 +58,7 @@ import {
   setStudyPhase,
   startStudySession,
   stashStudyTaskCapture,
+  compactVersionMediaForWorkspace,
   stripVersionMedia,
   studyEventLog,
   studySessionInfo,
@@ -2379,6 +2380,51 @@ async function rememberDashboardExport(target) {
   }
 }
 
+async function restoreMissingCheckpointPreviews() {
+  const missing = state.versions.filter((version) =>
+    version?.afterSnapshot && !version.afterScreenshot && !version.afterSvg
+  );
+  if (!missing.length) return;
+
+  // Older study-runner snapshots removed every media field. Rebuild those
+  // thumbnails from the durable checkpoint JSON without replacing the live
+  // Working Draft. The canvas is covered while its renderer briefly visits the
+  // saved states, so authors never see checkpoints flash through the workspace.
+  const liveSnapshot = {
+    specMap: buildEngineSpecMap(),
+    board: buildEngineBoardMeta(),
+  };
+  const status = document.createElement("div");
+  status.className = "checkpoint-preview-recovery";
+  status.setAttribute("role", "status");
+  status.setAttribute("aria-live", "polite");
+  status.innerHTML = `<span class="checkpoint-preview-recovery-spinner" aria-hidden="true"></span><span>Restoring checkpoint previews…</span>`;
+  els.canvasViewport?.append(status);
+  els.canvasViewport?.setAttribute("aria-busy", "true");
+
+  try {
+    for (const version of missing) {
+      applyLiveSnapshot(version.afterSnapshot);
+      renderDashboardChrome({ renderContext: false });
+      await renderTiles();
+      const captured = await captureDashboardExport().catch((error) => {
+        console.warn("[revision-screenshot] checkpoint preview recovery failed", error);
+        return null;
+      });
+      if (!captured) continue;
+      version.afterScreenshot = captured.screenshot || null;
+      version.afterPng = captured.png || null;
+      version.afterSvg = captured.svg || null;
+    }
+  } finally {
+    applyLiveSnapshot(liveSnapshot);
+    renderDashboardChrome({ renderContext: false });
+    await renderTiles();
+    status.remove();
+    els.canvasViewport?.removeAttribute("aria-busy");
+  }
+}
+
 // A checkpoint's applied recommendation is summarized in the rail by the chart
 // it changed (its lead label segment), not the full critique title — the title
 // stays available on hover and the full detail one click away.
@@ -2876,7 +2922,15 @@ function appendInteractionEvent(input, { synthesize = true } = {}) {
   state.interactionJournal.push(event);
   state.interactionJournal = state.interactionJournal.slice(-100);
   if (synthesize && isStrongInteractionEvent(event)) schedulePreferenceSynthesis();
+  notifyStudyWorkspaceChanged(event.kind);
   return event;
+}
+
+export function notifyStudyWorkspaceChanged(reason = "workspace-change") {
+  if (!isStudyActive() || typeof document === "undefined") return;
+  document.dispatchEvent(new CustomEvent("vizier:study-workspace-changed", {
+    detail: { reason, dashboardVersion: Number(state.version) || 1 },
+  }));
 }
 
 function resetInteractionMemory() {
@@ -3552,6 +3606,37 @@ function critiqueInspectDwellMs(critiqueId = null) {
   if (!current?.openedAtMs) return null;
   if (critiqueId && current.critiqueId !== critiqueId) return null;
   return Math.max(0, Date.now() - current.openedAtMs);
+}
+
+function recordCritiqueInspectionClosed(reason = "closed") {
+  const current = state.critiqueInspect;
+  if (!current?.critiqueId || !current.openedAtMs) return;
+  appendInteractionEvent({
+    kind: "critique_closed",
+    summary: "Closed critique details",
+    critiqueId: current.critiqueId,
+    data: {
+      reason,
+      dwellMs: critiqueInspectDwellMs(current.critiqueId),
+      openedAtMs: current.openedAtMs,
+    },
+  }, { synthesize: false });
+  state.critiqueInspect = { critiqueId: null, openedAtMs: 0 };
+}
+
+function recordCritiqueOpened(critique, source = "critique-list") {
+  if (!critique) return;
+  if (state.critiqueInspect?.critiqueId === critique.id) return;
+  recordCritiqueInspectionClosed("switched_critique");
+  appendInteractionEvent({
+    kind: "critique_opened",
+    summary: `Opened critique: ${critique.title}`,
+    critiqueId: critique.id,
+    dimension: critique.dimension,
+    proposalKind: critique.proposal?.kind,
+    data: { source, openedAtMs: Date.now() },
+  }, { synthesize: false });
+  markCritiqueInspected(critique.id);
 }
 
 function protocolRequestScope(requestMode) {
@@ -5042,14 +5127,7 @@ function renderCritiqueHistory() {
       if (!critique) return;
       state.selectedCritiqueId = critique.id;
       state.selectedTileId = critique.tileId || null;
-      appendInteractionEvent({
-        kind: "critique_opened",
-        summary: `Opened critique from history: ${critique.title}`,
-        critiqueId: critique.id,
-        dimension: critique.dimension,
-        proposalKind: critique.proposal?.kind,
-      });
-      markCritiqueInspected(critique.id);
+      recordCritiqueOpened(critique, "history");
       await renderTiles();
       renderCritiques();
       renderMarkers();
@@ -5247,15 +5325,7 @@ async function openCritiqueDetail(critique) {
   ) startBackgroundCritiqueRefresh(critique, { render: false });
   state.selectedCritiqueId = critique.id;
   state.selectedTileId = critique.tileId || null;
-  appendInteractionEvent({
-    kind: "critique_opened",
-    summary: `Opened critique: ${critique.title}`,
-    critiqueId: critique.id,
-    dimension: critique.dimension,
-    proposalKind: critique.proposal?.kind,
-    data: { dwellFromMs: Date.now() },
-  });
-  markCritiqueInspected(critique.id);
+  recordCritiqueOpened(critique, state.batchMode ? "batch-review" : "critique-list");
   renderCritiques();
   renderMarkers();
   await renderInspector();
@@ -5383,6 +5453,14 @@ function renderCritiques() {
         if (state.batchSelection.has(critique.id)) state.batchSelection.delete(critique.id);
         else state.batchSelection.add(critique.id);
         if (!state.batchSelection.size) state.batchPreviewEnabled = false;
+        recordStudyAction("batch_selection_changed", "Changed the combined-preview selection", {
+          action: "toggle",
+          critiqueId: critique.id,
+          selected: state.batchSelection.has(critique.id),
+          selectedIds: [...state.batchSelection],
+          selectedCount: state.batchSelection.size,
+        });
+        notifyStudyWorkspaceChanged("batch_selection_changed");
         renderCritiques();
         if (state.batchPreviewEnabled) await refreshBatchPreview();
         else {
@@ -5513,6 +5591,10 @@ async function setBatchMode(on) {
     state.batchPreviewToken += 1; // invalidate any in-flight preview
     syncBatchToggle();
     renderCritiques();
+    recordStudyAction("batch_mode_entered", "Entered multiple-selection preview", {
+      eligibleCritiqueIds: filteredCritiques().filter(critiqueBatchEligible).map((item) => item.id),
+    });
+    notifyStudyWorkspaceChanged("batch_mode_entered");
     emitPracticeAction("batch:entered");
     return;
   }
@@ -5521,6 +5603,10 @@ async function setBatchMode(on) {
   const hadBatchPreview = Boolean(state.canvasPreview?.batch);
   resetBatchState();
   renderCritiques();
+  recordStudyAction("batch_mode_exited", "Exited multiple-selection preview", {
+    hadPreview: hadBatchPreview,
+  });
+  notifyStudyWorkspaceChanged("batch_mode_exited");
   if (hadBatchPreview) {
     renderCanvasPreviewControl();
     renderDashboardChrome({ renderContext: false });
@@ -5814,6 +5900,8 @@ async function recoverEngineBatchPreview(selectedIds, token) {
 async function refreshBatchPreview() {
   const token = ++state.batchPreviewToken;
   const selectedIds = [...state.batchSelection];
+  const previewId = newStudyId();
+  const previewStartedAt = Date.now();
   invalidateBatchCanvasPreview();
   state.batchPreviewValidated = false;
   state.batchPreviewFailure = null;
@@ -5825,6 +5913,12 @@ async function refreshBatchPreview() {
     renderBatchApplyBar();
     return;
   }
+  recordStudyAction("batch_preview_requested", "Requested a combined dashboard preview", {
+    previewId,
+    selectedIds,
+    selectedCount: selectedIds.length,
+    dashboardVersion: Number(state.version) || 1,
+  });
   setBatchPreviewPending(true);
   // Compare the proposed render against the committed dashboard so a known,
   // pre-existing clipping/overlap issue does not block an unrelated preview.
@@ -5833,15 +5927,31 @@ async function refreshBatchPreview() {
   const baselineErrors = renderedBatchPreviewErrors();
   renderBatchApplyBar();
   let outcome = await computeBatchPreview(selectedIds);
-  if (token !== state.batchPreviewToken) return; // superseded by a newer selection
+  if (token !== state.batchPreviewToken) {
+    recordStudyAction("batch_preview_cancelled", "Combined preview was superseded", {
+      previewId, selectedIds, reason: "superseded", latencyMs: Date.now() - previewStartedAt,
+    });
+    return;
+  }
   if (!outcome.ok) {
     const recovered = await recoverEngineBatchPreview(selectedIds, token);
-    if (token !== state.batchPreviewToken) return;
+    if (token !== state.batchPreviewToken) {
+      recordStudyAction("batch_preview_cancelled", "Combined preview was superseded", {
+        previewId, selectedIds, reason: "superseded", latencyMs: Date.now() - previewStartedAt,
+      });
+      return;
+    }
     if (!recovered) {
       setBatchPreviewPending(false);
       state.batchPreviewEnabled = false;
       await failBatchPreview(outcome.reason);
       renderBatchApplyBar(outcome.plan);
+      recordStudyAction("batch_preview_failed", "Combined preview failed quality checks", {
+        previewId,
+        selectedIds,
+        reason: outcome.reason || state.batchPreviewFailure,
+        latencyMs: Date.now() - previewStartedAt,
+      });
       return outcome;
     }
     outcome = recovered;
@@ -5858,18 +5968,49 @@ async function refreshBatchPreview() {
   if (presentation.ok) {
     cacheCurrentBatchCanvasPreview();
     setBatchPreviewPending(false);
+    recordStudyAction("batch_preview_ready", "Combined preview is ready for review", {
+      previewId,
+      selectedIds,
+      previewedIds: [...state.batchPreviewIds],
+      excluded: [...state.batchPreviewExcluded].map(([id, reason]) => ({ id, reason })),
+      validated: true,
+      latencyMs: Date.now() - previewStartedAt,
+    });
+    notifyStudyWorkspaceChanged("batch_preview_ready");
     return outcome;
   }
   const recovered = await recoverRenderedBatchPreview(selectedIds, outcome, baselineErrors, token);
   if (recovered) {
     cacheCurrentBatchCanvasPreview();
     setBatchPreviewPending(false);
+    recordStudyAction("batch_preview_ready", "Recovered a safe combined preview", {
+      previewId,
+      selectedIds,
+      previewedIds: [...state.batchPreviewIds],
+      excluded: [...state.batchPreviewExcluded].map(([id, reason]) => ({ id, reason })),
+      validated: true,
+      recovered: true,
+      latencyMs: Date.now() - previewStartedAt,
+    });
+    notifyStudyWorkspaceChanged("batch_preview_ready");
     return recovered;
+  }
+  if (token !== state.batchPreviewToken) {
+    recordStudyAction("batch_preview_cancelled", "Combined preview was superseded", {
+      previewId, selectedIds, reason: "superseded", latencyMs: Date.now() - previewStartedAt,
+    });
+    return;
   }
   setBatchPreviewPending(false);
   state.batchPreviewEnabled = false;
   await failBatchPreview(state.batchPreviewFailure);
   renderBatchApplyBar(outcome.plan);
+  recordStudyAction("batch_preview_failed", "Combined preview failed rendered layout checks", {
+    previewId,
+    selectedIds,
+    reason: state.batchPreviewFailure,
+    latencyMs: Date.now() - previewStartedAt,
+  });
   return { ...outcome, ok: false, reason: state.batchPreviewFailure };
 }
 
@@ -6560,7 +6701,20 @@ async function applySelectionResolvingConflicts(selectedIds) {
     }
     conflictChoices = { ...conflictChoices, ...choices };
   }
-  return { ok: false, reason: "Could not resolve the conflicting fixes.", applyId };
+  const reason = "Could not resolve the conflicting fixes.";
+  recordStudyAction("recommendation_apply_failed", `Apply failed (${via})`, {
+    applyId,
+    via,
+    requestedCritiqueIds: [...selectedIds],
+    committedCritiqueIds: [],
+    failedCritiqueIds: [...selectedIds],
+    failureStage: "conflict_resolution_exhausted",
+    failureCode: "conflict_resolution_exhausted",
+    reason,
+    rollback: false,
+    dashboardVersion: Number(state.version) || 1,
+  });
+  return { ok: false, reason, applyId };
 }
 
 function showFocusApplyFailure(reason) {
@@ -6592,6 +6746,7 @@ async function saveWorkingDraftCheckpoint() {
       kind: "checkpoint_saved",
       summary: `Saved Checkpoint ${checkpointId} with ${recommendationIds.length} ${recommendationIds.length === 1 ? "change" : "changes"}`,
       data: {
+        checkpointId,
         baseCheckpointId: state.workingDraft.baseCheckpointId,
         recommendationIds,
       },
@@ -7533,6 +7688,7 @@ async function setCanvasPreviewPhase(phase) {
 }
 
 async function closeCritiqueFocus() {
+  recordCritiqueInspectionClosed("returned_to_list");
   const restoreCombinedRevision = state.batchMode
     && state.batchPreviewEnabled
     && state.batchSelection.size > 0;
@@ -8089,13 +8245,9 @@ async function renderInspector() {
           decision: "keep_in_preview",
           committed: false,
           dashboardVersion: Number(state.version) || 1,
+          reviewedCount: state.batchReviewedIds.size,
+          previewCount: state.batchPreviewIds.size,
         },
-      });
-      recordStudyAction("critique_reviewed_for_preview", `Kept in preview: ${critique.title}`, {
-        critiqueId: critique.id,
-        dimension: critique.dimension,
-        reviewedCount: state.batchReviewedIds.size,
-        previewCount: state.batchPreviewIds.size,
       });
       const nextCritique = critiqueById(batchReviewContext(critique.id).nextId);
       if (nextCritique) {
@@ -8526,6 +8678,7 @@ async function generateRefinementAlternatives(critique, rationale, isCancelled) 
         status: "choices",
         alternatives: viable.map((item) => item.replacement),
         previewResults: viable.map((item) => item.previewResult),
+        reviewMeta: result.reviewMeta || null,
       };
     }
     const reason = failureMessages.find(Boolean)
@@ -8555,7 +8708,7 @@ async function commitRefinementAlternative(critique, replacement, rationale, met
     state.batchReviewedIds.delete(current.id);
     state.batchPreviewValidated = false;
   }
-  recordStudyAction("critique_regenerated", `Selected a refined solution for: ${current.title}`, {
+  recordStudyAction("refinement_alternative_selected", `Selected a refined solution for: ${current.title}`, {
     requestId: meta.requestId || null,
     critiqueId: current.id,
     outcome: "selected",
@@ -8596,12 +8749,35 @@ function critiqueNeedsBackgroundRefresh(critique) {
   );
 }
 
-function cancelBackgroundCritiqueRefresh(critiqueId) {
+function cancelBackgroundCritiqueRefresh(critiqueId, reason = "participant_or_state_change") {
   if (!critiqueId) return;
+  const job = state.backgroundCritiqueRefreshes.get(critiqueId);
+  if (job?.status === "updating") {
+    recordStudyAction("critique_request_cancelled", "Cancelled automatic critique refresh", {
+      requestId: job.requestId,
+      requestMode: "stale_recovery",
+      critiqueId,
+      reason,
+      latencyMs: Date.now() - job.startedAtMs,
+    });
+  }
+  job?.controller?.abort();
   state.backgroundCritiqueRefreshes.delete(critiqueId);
 }
 
-function cancelAllBackgroundCritiqueRefreshes() {
+function cancelAllBackgroundCritiqueRefreshes(reason = "workspace_reset") {
+  for (const job of state.backgroundCritiqueRefreshes.values()) {
+    if (job.status === "updating") {
+      recordStudyAction("critique_request_cancelled", "Cancelled automatic critique refresh", {
+        requestId: job.requestId,
+        requestMode: "stale_recovery",
+        critiqueId: job.critiqueId,
+        reason,
+        latencyMs: Date.now() - job.startedAtMs,
+      });
+    }
+    job.controller?.abort();
+  }
   state.backgroundCritiqueRefreshes.clear();
 }
 
@@ -8627,13 +8803,16 @@ function startBackgroundCritiqueRefresh(critiqueOrId, { render = true } = {}) {
   const token = ++state.nextBackgroundCritiqueRefreshToken;
   const requestId = newStudyId();
   const requestStartedAt = Date.now();
+  const controller = new AbortController();
   const job = {
     critiqueId,
     token,
     baseVersion,
     requestId,
+    startedAtMs: requestStartedAt,
     status: "updating",
     error: null,
+    controller,
     promise: null,
   };
   state.backgroundCritiqueRefreshes.set(critiqueId, job);
@@ -8654,14 +8833,31 @@ function startBackgroundCritiqueRefresh(critiqueOrId, { render = true } = {}) {
 
   const promise = (async () => {
     try {
-      const { critiques: incoming, answer } = await generateCritiquesFromEngine(
+      const { critiques: incoming, answer, reviewMeta } = await generateCritiquesFromEngine(
         critiqueRefreshRequest(critiqueSnapshot),
-        { persistReviewMeta: false, trace: false, focusPurpose: "stale-refresh" },
+        {
+          persistReviewMeta: false,
+          trace: false,
+          focusPurpose: "stale-refresh",
+          signal: controller.signal,
+        },
       );
       const activeJob = state.backgroundCritiqueRefreshes.get(critiqueId);
-      if (activeJob?.token !== token) return "discarded";
+      if (activeJob?.token !== token) {
+        recordStudyAction("critique_request_discarded", "Discarded a superseded critique refresh", {
+          requestId, requestMode: "stale_recovery", critiqueId, reason: "superseded",
+          latencyMs: Date.now() - requestStartedAt,
+        });
+        return "discarded";
+      }
       if (Number(state.version) !== baseVersion) {
         state.backgroundCritiqueRefreshes.delete(critiqueId);
+        recordStudyAction("critique_request_discarded", "Discarded a critique refresh for an older dashboard", {
+          requestId, requestMode: "stale_recovery", critiqueId, reason: "dashboard_version_changed",
+          requestedDashboardVersion: baseVersion,
+          currentDashboardVersion: Number(state.version),
+          latencyMs: Date.now() - requestStartedAt,
+        });
         const latest = critiqueById(critiqueId);
         if (critiqueNeedsBackgroundRefresh(latest)) {
           return startBackgroundCritiqueRefresh(latest);
@@ -8671,6 +8867,10 @@ function startBackgroundCritiqueRefresh(critiqueOrId, { render = true } = {}) {
       const current = critiqueById(critiqueId);
       if (!current || !["pending", "updated"].includes(current.status)) {
         state.backgroundCritiqueRefreshes.delete(critiqueId);
+        recordStudyAction("critique_request_discarded", "Discarded a refresh for a decided critique", {
+          requestId, requestMode: "stale_recovery", critiqueId, reason: "critique_no_longer_pending",
+          latencyMs: Date.now() - requestStartedAt,
+        });
         return "discarded";
       }
 
@@ -8678,6 +8878,10 @@ function startBackgroundCritiqueRefresh(critiqueOrId, { render = true } = {}) {
       const currentIndex = state.critiques.findIndex((item) => item.id === critiqueId);
       if (currentIndex < 0) {
         state.backgroundCritiqueRefreshes.delete(critiqueId);
+        recordStudyAction("critique_request_discarded", "Discarded a refresh for a missing critique", {
+          requestId, requestMode: "stale_recovery", critiqueId, reason: "critique_missing",
+          latencyMs: Date.now() - requestStartedAt,
+        });
         return "discarded";
       }
       if (replacement) {
@@ -8708,6 +8912,7 @@ function startBackgroundCritiqueRefresh(critiqueOrId, { render = true } = {}) {
           requestMode: "stale_recovery",
           dimension: current.dimension,
           latencyMs: Date.now() - requestStartedAt,
+          reviewMeta,
         });
         await renderBackgroundCritiqueRefreshState(critiqueId);
         return "updated";
@@ -8740,12 +8945,21 @@ function startBackgroundCritiqueRefresh(critiqueOrId, { render = true } = {}) {
         requestMode: "stale_recovery",
         dimension: current.dimension,
         latencyMs: Date.now() - requestStartedAt,
+        reviewMeta,
       });
       await renderBackgroundCritiqueRefreshState(critiqueId);
       return "retired";
     } catch (error) {
       const activeJob = state.backgroundCritiqueRefreshes.get(critiqueId);
       if (activeJob?.token !== token) return "discarded";
+      if (controller.signal.aborted || error?.name === "AbortError") {
+        state.backgroundCritiqueRefreshes.delete(critiqueId);
+        recordStudyAction("critique_request_cancelled", "Automatic critique refresh was aborted", {
+          requestId, requestMode: "stale_recovery", critiqueId, reason: "aborted",
+          latencyMs: Date.now() - requestStartedAt,
+        });
+        return "cancelled";
+      }
       activeJob.status = "failed";
       activeJob.error = error instanceof Error ? error.message : String(error);
       recordStudyAction("critique_request_failed", "Automatic stale-critique recovery failed", {
@@ -8808,7 +9022,16 @@ async function regenerateOneCritique(critique, {
         refinementRationale,
         isCancelled,
       );
-      if (outcome === "cancelled" || isCancelled()) return "cancelled";
+      if (outcome === "cancelled" || isCancelled()) {
+        recordStudyAction("critique_request_cancelled", "Cancelled solution refinement", {
+          requestId,
+          requestMode: "solution_refinement",
+          critiqueId: targetId,
+          reason: "dialog_closed_or_superseded",
+          latencyMs: Date.now() - requestStartedAt,
+        });
+        return "cancelled";
+      }
       if (outcome.status === "choices") {
         recordStudyAction("critique_regenerated", `Generated solution options for: ${critique.title}`, {
           requestId,
@@ -8819,6 +9042,7 @@ async function regenerateOneCritique(critique, {
           alternativeCount: outcome.alternatives.length,
           dimension: critique.dimension,
           latencyMs: Date.now() - requestStartedAt,
+          reviewMeta: outcome.reviewMeta || null,
         });
         return {
           ...outcome,
@@ -8836,7 +9060,7 @@ async function regenerateOneCritique(critique, {
       });
       return outcome;
     }
-    const { critiques: incoming, answer } = await generateCritiquesFromEngine(
+    const { critiques: incoming, answer, reviewMeta } = await generateCritiquesFromEngine(
       critiqueRefreshRequest(critique),
       {
         persistReviewMeta: false,
@@ -8844,7 +9068,16 @@ async function regenerateOneCritique(critique, {
         focusPurpose: "stale-refresh",
       },
     );
-    if (isCancelled()) return "cancelled";
+    if (isCancelled()) {
+      recordStudyAction("critique_request_cancelled", "Cancelled critique regeneration", {
+        requestId,
+        requestMode: "stale_recovery",
+        critiqueId: targetId,
+        reason: "superseded",
+        latencyMs: Date.now() - requestStartedAt,
+      });
+      return "cancelled";
+    }
     const replacement = pickCritiqueRefreshReplacement(critique, incoming, answer);
     if (replacement) {
       const refreshed = {
@@ -8880,13 +9113,9 @@ async function regenerateOneCritique(critique, {
           requestMode: "stale_recovery",
           dimension: critique.dimension,
           latencyMs: Date.now() - requestStartedAt,
+          reviewMeta,
         },
       );
-      recordCritiquesDisplayed("focused", critique.askId || null, {
-        requestId,
-        requestMode: "stale_recovery",
-        latencyMs: Date.now() - requestStartedAt,
-      });
       renderMarkers();
       renderCritiques();
       await renderInspector();
@@ -8928,7 +9157,16 @@ async function regenerateOneCritique(critique, {
     await renderInspector();
     return "retired";
   } catch (err) {
-    if (isCancelled()) return "cancelled";
+    if (isCancelled()) {
+      recordStudyAction("critique_request_cancelled", "Cancelled critique regeneration", {
+        requestId,
+        requestMode: isSolutionRefinement ? "solution_refinement" : "stale_recovery",
+        critiqueId: targetId,
+        reason: "dialog_closed_or_superseded",
+        latencyMs: Date.now() - requestStartedAt,
+      });
+      return "cancelled";
+    }
     const message = err instanceof Error ? err.message : String(err);
     tracePanel.fail(`${isSolutionRefinement ? "Could not generate another solution" : "Could not refresh this critique"} — ${message}`);
     showFocusApplyFailure(message);
@@ -8991,6 +9229,7 @@ async function generateCritiquesFromEngine(focusedRequest = "", options = {}) {
             : {}),
         },
         (event) => { if (traceEnabled) tracePanel.event(event); },
+        { signal: options.signal },
       );
   if (traceEnabled) tracePanel.done();
   if (!resp) throw new Error("The review engine returned no result.");
@@ -9109,15 +9348,17 @@ async function generateLocalCritiques({ bounds, request, dimension }) {
 }
 
 function recordCritiquesDisplayed(scope, askId, extra = {}) {
-  const critiqueIds = state.critiques.map((critique) => critique.id);
+  const displayedCritiques = filteredCritiques();
+  const critiqueIds = displayedCritiques.map((critique) => critique.id);
   recordStudyAction(
     "critiques_displayed",
-    `Displayed ${state.critiques.length} critique${state.critiques.length === 1 ? "" : "s"} after a ${scope} review`,
+    `Displayed ${displayedCritiques.length} critique${displayedCritiques.length === 1 ? "" : "s"} after a ${scope} review`,
     {
       scope,
       askId,
-      count: state.critiques.length,
-      critiqueCount: state.critiques.length,
+      count: displayedCritiques.length,
+      critiqueCount: displayedCritiques.length,
+      totalCritiqueHistoryCount: state.critiques.length,
       critiqueIds,
       dashboardVersion: Number(state.version) || 1,
       promptVersion: extra.promptVersion || null,
@@ -9131,13 +9372,26 @@ function recordCritiquesDisplayed(scope, askId, extra = {}) {
       latencyMs: extra.latencyMs ?? null,
       requestId: extra.requestId || null,
       requestMode: extra.requestMode || null,
-      critiques: state.critiques.map((critique) => ({
+      critiques: displayedCritiques.map((critique) => ({
         id: critique.id,
         title: critique.title,
+        issue: critique.issue || critique.problem || null,
+        rationale: critique.rationale || critique.detail || null,
+        suggestion: critique.suggestion || critique.recommendation || null,
+        evidence: clone(critique.evidence || []),
+        judgmentBasis: clone(critique.judgmentBasis || null),
         dimension: critique.dimension,
         priority: critique.priority,
         status: critique.status,
         revision: critique.revision || null,
+        tileId: critique.tileId || null,
+        target: clone(critique.target || null),
+        proposalKind: critique.proposal?.kind || null,
+        proposalMode: critique.proposal?.mode || null,
+        proposal: clone(critique.proposal || null),
+        reviewScope: critique.reviewScope || critique.askScope || scope,
+        reviewRequest: critique.reviewRequest || null,
+        lastEvaluatedVersion: Number(critique.lastEvaluatedVersion) || null,
       })),
     },
   );
@@ -9237,7 +9491,7 @@ async function runAIAssist(options = {}) {
       || null;
     state.selectedCritiqueId = opened?.id || null;
     state.selectedTileId = opened?.tileId || null;
-    if (opened?.id) markCritiqueInspected(opened.id);
+    if (opened?.id) recordCritiqueOpened(opened, "review-result");
     renderRubrics();
     await renderTiles();
     renderMarkers();
@@ -9522,10 +9776,11 @@ async function collectStudyDashboardArtifacts() {
   });
 }
 
-function studyUnresolvedCritiqueIds() {
+function studyUnresolvedCritiqueIds(phase = null) {
   const displayed = new Set();
   const decided = new Set();
   for (const event of studyEventLog()) {
+    if (phase && event.studyPhase !== phase) continue;
     const kind = event.kind || event.eventName;
     const data = event.data || {};
     if (kind === "critiques_displayed") {
@@ -9546,27 +9801,41 @@ function studyUnresolvedCritiqueIds() {
   return [...displayed].filter((id) => !decided.has(id));
 }
 
+export function recordStudyFinalState({ reason = "capture", phase = null } = {}) {
+  if (!isStudyActive()) return null;
+  const resolvedPhase = phase || studySessionInfo()?.studyPhase || null;
+  const captureId = newStudyId();
+  const unresolvedCritiqueIds = studyUnresolvedCritiqueIds(resolvedPhase);
+  recordStudyAction("critiques_unresolved", "Critiques displayed without a later decision", {
+    captureId,
+    phase: resolvedPhase,
+    critiqueIds: unresolvedCritiqueIds,
+    critiqueCount: unresolvedCritiqueIds.length,
+  });
+  recordStudyAction("final_state_captured", "Captured the final dashboard and critique state", {
+    captureId,
+    reason,
+    phase: resolvedPhase,
+    dashboardId: state.artifact?.id || state.artifact?.libraryId || null,
+    dashboardVersion: Number(state.version) || 1,
+    critiqueIds: state.critiques.map((critique) => critique.id),
+    critiqueCount: state.critiques.length,
+    critiqueStatuses: state.critiques.map((critique) => ({
+      id: critique.id,
+      status: critique.status || null,
+      decision: critique.lifecycle || critique.status || null,
+    })),
+    checkpointIds: (state.versions || []).map((version) => version.id),
+    checkpointCount: (state.versions || []).length,
+    contextVersion: Number(studySessionInfo()?.contextVersion) || Number(state.studyContextVersion) || 0,
+    unresolvedCritiqueIds,
+  });
+  return { captureId, unresolvedCritiqueIds };
+}
+
 async function saveStudyBundle(reason) {
   if (reason === "end" && isStudyActive()) {
-    const unresolvedCritiqueIds = studyUnresolvedCritiqueIds();
-    recordStudyAction("critiques_unresolved", "Critiques displayed without a later decision", {
-      critiqueIds: unresolvedCritiqueIds,
-      critiqueCount: unresolvedCritiqueIds.length,
-    });
-    recordStudyAction("final_state_captured", "Captured the final dashboard and critique state", {
-      dashboardId: state.artifact?.id || state.artifact?.libraryId || null,
-      dashboardVersion: Number(state.version) || 1,
-      critiqueIds: state.critiques.map((critique) => critique.id),
-      critiqueCount: state.critiques.length,
-      critiqueStatuses: state.critiques.map((critique) => ({
-        id: critique.id,
-        status: critique.status || null,
-        decision: critique.lifecycle || critique.status || null,
-      })),
-      checkpointCount: (state.versions || []).length,
-      contextVersion: Number(studySessionInfo()?.contextVersion) || Number(state.studyContextVersion) || 0,
-      unresolvedCritiqueIds,
-    });
+    recordStudyFinalState({ reason: "manual-study-end" });
     endStudySession({ reason: "end" });
   }
   const artifacts = await collectStudyDashboardArtifacts();
@@ -9787,13 +10056,6 @@ function mountStudyUI() {
 restoreStudySession();
 mountStudyUI();
 document.getElementById("focusBackButton").addEventListener("click", async () => {
-  // Study telemetry: closing the detail bounds the viewing interval (open -> close),
-  // giving a reliable time-on-critique without any attention/gaze tracking.
-  recordStudyAction("critique_closed", "Returned to the critique list", {
-    critiqueId: state.selectedCritiqueId || null,
-    dwellMs: critiqueInspectDwellMs(state.selectedCritiqueId),
-  });
-  state.critiqueInspect = { critiqueId: null, openedAtMs: 0 };
   await closeCritiqueFocus();
 });
 // Both mode triggers hide themselves on activation (the face swap sets the
@@ -9815,6 +10077,12 @@ document.getElementById("batchSelectAllButton").addEventListener("click", async 
   state.batchPreviewFailure = null;
   state.batchPreviewIds = new Set();
   state.batchPreviewExcluded = new Map();
+  recordStudyAction("batch_selection_changed", "Selected all eligible critiques", {
+    action: "select_all",
+    selectedIds: [...state.batchSelection],
+    selectedCount: state.batchSelection.size,
+  });
+  notifyStudyWorkspaceChanged("batch_selection_changed");
   renderCritiques();
   if (state.batchPreviewEnabled) await refreshBatchPreview();
   else renderBatchApplyBar();
@@ -9834,6 +10102,15 @@ document.getElementById("batchClearButton").addEventListener("click", async () =
   state.batchPreviewFailure = null;
   state.batchPreviewIds = new Set();
   state.batchPreviewExcluded = new Map();
+  recordStudyAction("batch_selection_changed", "Cleared the combined-preview selection", {
+    action: "clear",
+    selectedIds: [],
+    selectedCount: 0,
+  });
+  recordStudyAction("batch_preview_exited", "Cleared the combined dashboard preview", {
+    reason: "selection_cleared",
+  });
+  notifyStudyWorkspaceChanged("batch_selection_changed");
   renderCritiques();
   await clearBatchPreview();
   renderBatchApplyBar();
@@ -9857,6 +10134,11 @@ document.getElementById("batchPreviewToggle").addEventListener("click", async ()
     return;
   }
   state.batchPreviewToken += 1;
+  recordStudyAction("batch_preview_exited", "Turned off the combined dashboard preview", {
+    reason: "participant_toggle",
+    selectedIds: [...state.batchSelection],
+  });
+  notifyStudyWorkspaceChanged("batch_preview_exited");
   setBatchPreviewPending(false);
   await clearBatchPreview();
   renderBatchApplyBar();
@@ -11099,7 +11381,7 @@ export function captureStudyRunnerWorkspaceState() {
         reviewTemperature: state["reviewTemperature"],
         nextAskId: state.nextAskId,
         nextLocalReviewId: state.nextLocalReviewId,
-        versions: stripVersionMedia(state.versions),
+        versions: compactVersionMediaForWorkspace(state.versions),
         selectedVersionId: state.selectedVersionId,
         checkpointComparison: state.checkpointComparison,
         workingDraft: state.workingDraft,
@@ -11188,6 +11470,8 @@ export async function restoreStudyRunnerWorkspaceState(snapshot) {
   renderRubrics();
   syncReviewReadiness();
   await refreshAfterDashboardMutation();
+  await restoreMissingCheckpointPreviews();
+  renderVersions();
   applyDrawers();
   applyViewTransform();
   requestAnimationFrame(() => {
@@ -11225,6 +11509,8 @@ export async function openStudyMaterialForRunner(code, { practice = false } = {}
 
 /** Capture the dashboard-task board so the phase save can write it immediately. */
 export async function captureStudyRunnerTaskDashboard() {
+  recordCritiqueInspectionClosed("formal_task_finished");
+  recordStudyFinalState({ reason: "formal-task-finished", phase: "dashboard_task" });
   const artifacts = await collectStudyDashboardArtifacts();
   stashStudyTaskCapture(collectStudySnapshot(), artifacts);
 }

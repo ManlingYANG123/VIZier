@@ -41,16 +41,19 @@ import { saveStudySession, studyStorageMode } from "./study-store.ts";
 const PORT = Number(process.env.PORT || process.env.RE_API_PORT || 8091);
 const HOST = process.env.RE_API_HOST || (process.env.PORT ? "0.0.0.0" : "127.0.0.1");
 
-// Deployment default (Lever I): the full-review SECOND discovery pass is ON in
-// the running server, so a full review reaches the ~10 executable, board-specific
-// critiques a rich multi-view board supports (measured: mean 5.6 -> ~10). It
-// remains a per-process env switch: an operator can set RE_API_SECOND_PASS=0 to
-// turn it off if the extra ~one LLM call of latency per full review is not worth
-// the coverage. Only the running SERVER opts in by default — engine-library
-// consumers that never boot this module (unit tests, measurement scripts) keep
-// their exact LLM call sequences unless they set the flag themselves. discover.ts
-// reads the flag per request, so this default is in effect before any request.
-if (process.env.RE_API_SECOND_PASS === undefined) process.env.RE_API_SECOND_PASS = "1";
+// The second discovery pass is an explicit evaluation/debug option. Production
+// defaults to one stronger, compact pass: doubling the complete dashboard
+// prompt added substantial latency and tended to pad the review with weaker
+// observations. Set RE_API_SECOND_PASS=1 only for coverage experiments.
+if (process.env.RE_API_SECOND_PASS === undefined) process.env.RE_API_SECOND_PASS = "0";
+// Preserve the high precision of one-pass review while recovering breadth only
+// when the first pass is genuinely sparse. The second call still runs through
+// the same judge, apply preflight, and conflict gates.
+if (process.env.RE_API_ADAPTIVE_COVERAGE === undefined) process.env.RE_API_ADAPTIVE_COVERAGE = "1";
+// The semantic solution judge is part of the production quality path, but stays
+// opt-in for engine-library tests and deterministic measurement harnesses.
+if (process.env.RE_API_SOLUTION_JUDGE === undefined) process.env.RE_API_SOLUTION_JUDGE = "1";
+if (process.env.RE_API_PROPOSAL_PREFLIGHT === undefined) process.env.RE_API_PROPOSAL_PREFLIGHT = "1";
 const FRONTEND_DIST = resolve(fileURLToPath(new URL("../../dist/", import.meta.url)));
 const MIME_TYPES: Record<string, string> = {
   ".css": "text/css; charset=utf-8",

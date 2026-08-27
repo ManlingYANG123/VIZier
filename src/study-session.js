@@ -27,7 +27,10 @@ import { dashboardDocumentFromSnapshot } from "./vega-dashboard-adapter.js";
  * keep-list in app.js) so a mid-session refresh or crash does not lose data. */
 export const STUDY_STORAGE_KEY = "vizierStudySession";
 export const STUDY_SCHEMA_VERSION = 2;
-export const STUDY_APP_VERSION = "0.2.0";
+export const STUDY_BUILD_ID = typeof __VIZIER_BUILD_ID__ !== "undefined"
+  ? String(__VIZIER_BUILD_ID__)
+  : "test";
+export const STUDY_APP_VERSION = `0.2.0+${STUDY_BUILD_ID}`;
 export const STUDY_PHASES = [
   "pre_assessment",
   "training",
@@ -208,6 +211,7 @@ export function startStudySession(info = {}) {
     studyPhase: null,
     schemaVersion: STUDY_SCHEMA_VERSION,
     appVersion: STUDY_APP_VERSION,
+    buildId: STUDY_BUILD_ID,
     contextVersion: 0,
     lastRequestId: null,
   };
@@ -232,6 +236,7 @@ export function recordStudyEvent(event, extra = null) {
     const logId = nextLogId++;
     const kind = String(event.kind || extra?.kind || "study_action");
     const dash = dashboardContext();
+    const phaseTransition = kind === "study_phase_changed";
     const record = {
       ...event,
       ...(extra && typeof extra === "object" ? extra : null),
@@ -245,9 +250,10 @@ export function recordStudyEvent(event, extra = null) {
       logId,
       sequenceNumber: logId,
       studyPhase: session.studyPhase || null,
-      dashboardId: dash.dashboardId,
-      dashboardVersion: dash.dashboardVersion,
+      dashboardId: phaseTransition ? null : dash.dashboardId,
+      dashboardVersion: phaseTransition ? null : dash.dashboardVersion,
       appVersion: STUDY_APP_VERSION,
+      buildId: STUDY_BUILD_ID,
     };
     events.push(record);
     schedulePersist();
@@ -309,6 +315,24 @@ export function stripVersionMedia(versions = []) {
       ...rest
     } = version;
     return rest;
+  });
+}
+
+/** Keep only the compact checkpoint thumbnail for phase-local workspace
+ * persistence. Full PNG/SVG exports are intentionally omitted from
+ * localStorage, but dropping the thumbnail as well makes every checkpoint look
+ * broken after a refresh or study-stage restore. */
+export function compactVersionMediaForWorkspace(versions = []) {
+  return (Array.isArray(versions) ? versions : []).map((version) => {
+    if (!version || typeof version !== "object") return version;
+    const {
+      beforeScreenshot: _beforeScreenshot,
+      afterPng: _afterPng,
+      afterSvg: _afterSvg,
+      screenshot: _screenshot,
+      ...compact
+    } = version;
+    return compact;
   });
 }
 
@@ -537,6 +561,7 @@ export function buildStudyBundle(snapshot = null, reason = "manual", options = {
     schema: "vizier-study-session/2",
     schemaVersion: STUDY_SCHEMA_VERSION,
     appVersion: STUDY_APP_VERSION,
+    buildId: STUDY_BUILD_ID,
     recordKind,
     studyPhase: phase,
     phase,
@@ -575,6 +600,7 @@ export function buildStudyScaleRecord({
     schema: "vizier-study-scale/1",
     schemaVersion: 1,
     appVersion: STUDY_APP_VERSION,
+    buildId: STUDY_BUILD_ID,
     recordKind: "scale",
     assessment: "post",
     phase: phase || "post_assessment",
@@ -654,11 +680,11 @@ export function exportStudyBackupZip(artifacts = [], bundle = {}) {
 export function endStudySession({ reason = "end", recordEvent = true } = {}) {
   if (!session) return null;
   if (recordEvent && session.active) {
+    noteLoggingStatus("stopped", reason);
     recordStudyAction("session_ended", "Study session ended", {
       reason,
       eventCount: events.length + 1,
     });
-    noteLoggingStatus("stopped", reason);
   } else if (session) {
     session.loggingStatus = "stopped";
   }

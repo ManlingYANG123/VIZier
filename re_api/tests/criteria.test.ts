@@ -29,6 +29,7 @@ import {
   CRITIQUE_FEW_SHOT_IDS,
   CRITIQUE_FEW_SHOT_SET,
   critiqueFewShotPrompt,
+  runtimeCritiqueFewShotPrompt,
   parseCritiqueFewShotSet,
 } from "../src/generate/critique-few-shots.ts";
 
@@ -66,7 +67,8 @@ test("the review prompt frames DIAGNOSING, PRESENTING, and uniform grounding", (
   assert.match(DASHBOARD_REVIEW_SYSTEM, /not a checklist/i);
   assert.match(DASHBOARD_REVIEW_SYSTEM, /no default VIZier look/i);
   assert.match(DASHBOARD_REVIEW_SYSTEM, /any branch: the recommendation branch is a grouping label/i);
-  assert.match(DASHBOARD_REVIEW_SYSTEM, /Full review may return up to 20 critiques/);
+  assert.match(DASHBOARD_REVIEW_SYSTEM, /Full review may return up to 14 critiques/);
+  assert.match(DASHBOARD_REVIEW_SYSTEM, /8–12 distinct formative observations/);
   assert.match(DASHBOARD_REVIEW_SYSTEM, /inferred is a usable working hypothesis/);
 });
 
@@ -172,11 +174,17 @@ test("few-shot parsing fails fast for unknown catalog codes", () => {
   );
 });
 
-test("the system prompt includes full demonstrations in addition to mapping cues", () => {
-  assert.match(DASHBOARD_REVIEW_SYSTEM, /END-TO-END CRITIQUE DEMONSTRATIONS/);
+test("the production system prompt uses a compact, genre-diverse demonstration set", () => {
+  const runtime = runtimeCritiqueFewShotPrompt();
+  assert.match(DASHBOARD_REVIEW_SYSTEM, /CURATED END-TO-END CRITIQUE DEMONSTRATIONS/);
   assert.match(DASHBOARD_REVIEW_SYSTEM, /evidence→diagnosis→critique/);
   assert.match(DASHBOARD_REVIEW_SYSTEM, /fs-03-analytical-interaction-applicability/);
   assert.match(DASHBOARD_REVIEW_SYSTEM, /fs-04-infographic-interaction-nonapplicability/);
+  assert.doesNotMatch(runtime, /fs-05-keep-local-issue-local/);
+  assert.doesNotMatch(runtime, /"diagnoses"\s*:/);
+  assert.doesNotMatch(DASHBOARD_REVIEW_SYSTEM, /"diagnoses"\s*:/);
+  assert.match(DASHBOARD_REVIEW_SYSTEM, /do not return a separate diagnoses array/);
+  assert.ok(DASHBOARD_REVIEW_SYSTEM.length < 60_000, `runtime prompt is ${DASHBOARD_REVIEW_SYSTEM.length} chars`);
 });
 
 test("context provenance distinguishes missing, inferred, and confirmed values", () => {

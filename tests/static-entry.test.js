@@ -220,6 +220,9 @@ test("group study routes boot the neutral runner before VIZier", async () => {
   assert.match(runner, /study_phase_intro_completed/);
   assert.match(runner, /study_phase_timer_started/);
   assert.match(runner, /study_phase_timer_completed/);
+  assert.match(app, /versions: compactVersionMediaForWorkspace\(state\.versions\)/);
+  assert.match(app, /await restoreMissingCheckpointPreviews\(\)/);
+  assert.match(runner, /runnerState\.workspaces\[runnerState\.phase\] = app\.captureStudyRunnerWorkspaceState\(\)/);
   assert.match(runner, /id="studyStageTimer"/);
   assert.match(runner, /id="studyStartStageTimer">Start timer/);
   assert.match(runner, /"operation-page"/);
@@ -736,10 +739,13 @@ test("overlapping critiques refresh independently in the background after Apply"
   assert.match(source, /backgroundCritiqueRefreshes: new Map\(\)/);
   assert.match(source, /function queueAffectedCritiqueRefreshes/);
   assert.match(source, /void Promise\.allSettled\(promises\)/);
-  assert.match(source, /\{ persistReviewMeta: false, trace: false, focusPurpose: "stale-refresh" \}/);
+  assert.match(source, /focusPurpose: "stale-refresh",\s+signal: controller\.signal/);
   assert.match(source, /activeJob\?\.token !== token/);
   assert.match(source, /Number\(state\.version\) !== baseVersion/);
   assert.match(source, /cancelBackgroundCritiqueRefresh\(critique\.id\)/);
+  assert.match(source, /const job = state\.backgroundCritiqueRefreshes\.get\(critiqueId\)/);
+  assert.match(source, /job\?\.controller\?\.abort\(\)/);
+  assert.match(source, /for \(const job of state\.backgroundCritiqueRefreshes\.values\(\)\)/);
   assert.match(source, /Updating this fix for the current dashboard/);
   assert.match(source, /Accept and Refine will unlock automatically/);
   assert.match(source, /aria-describedby="focusActionUpdate"/);
@@ -1015,6 +1021,35 @@ test("study telemetry pairs review requests with displayed or failed, and checkp
   assert.match(source, /const recommendationIds = \[\.\.\.\(state\.workingDraft\.applicationOrder \|\| \[\]\)\];/);
   assert.match(source, /const committedIds = Array\.isArray\(result\.applicationOrder\)/);
   assert.match(source, /workingDraft\.applicationOrder \|\| \[\]\)\.length/);
+});
+
+test("study telemetry survives refresh and closes preview, request, inspection, and final-state lifecycles", async () => {
+  const [app, runner, session, vite] = await Promise.all([
+    readFile(new URL("../src/app.js", import.meta.url), "utf8"),
+    readFile(new URL("../src/study-runner.js", import.meta.url), "utf8"),
+    readFile(new URL("../src/study-session.js", import.meta.url), "utf8"),
+    readFile(new URL("../vite.config.js", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(runner, /vizier:study-workspace-changed/);
+  assert.match(runner, /visibilitychange/);
+  assert.match(runner, /pagehide/);
+  assert.match(runner, /captureMountedWorkspace\("workspace-mounted"\)/);
+  assert.match(runner, /"workspace-mounted"/);
+  assert.match(runner, /"questionnaire-mounted"/);
+  assert.match(app, /batch_preview_requested/);
+  assert.match(app, /batch_preview_ready/);
+  assert.match(app, /batch_preview_failed/);
+  assert.match(app, /batch_preview_cancelled/);
+  assert.match(app, /batch_selection_changed/);
+  assert.doesNotMatch(app, /critique_reviewed_for_preview/);
+  assert.match(app, /critique_request_cancelled/);
+  assert.match(app, /critique_request_discarded/);
+  assert.match(app, /recordCritiqueInspectionClosed\("switched_critique"\)/);
+  assert.match(app, /recordStudyFinalState\(\{ reason: "formal-task-finished"/);
+  assert.match(app, /proposal: clone\(critique\.proposal \|\| null\)/);
+  assert.match(session, /STUDY_BUILD_ID/);
+  assert.match(vite, /SOURCE_VERSION/);
 });
 
 test("the public app has no basic-auth login gate or completion cheerleading", async () => {

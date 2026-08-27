@@ -1,5 +1,8 @@
 import type { JudgmentBasis, Priority } from "../contracts.ts";
-import { recommendationCatalogPrompt } from "./recommendations.ts";
+import {
+  recommendationCatalogDefinitionsPrompt,
+  recommendationCatalogPrompt,
+} from "./recommendations.ts";
 
 /** Research content is versioned independently from engine and prompt code.
  * The identifiers are kept stable (imported across the engine); only the
@@ -40,7 +43,7 @@ export const CRITERION_REGISTRY_VERSION = "diagnostic-knowledge-v4-2026-08-23";
 // v24: six fixed, provenance-tracked end-to-end critique demonstrations teach
 // evidence→diagnosis→critique structure, genre applicability, target level,
 // recommendation choice, and focused-scope discipline.
-export const REVIEW_PROMPT_VERSION = "diagnostic-review-v27-2026-08-26";
+export const REVIEW_PROMPT_VERSION = "diagnostic-review-v30-2026-08-26";
 // v3.2: the engine now assembles and returns the grounded `strengths` array
 // alongside critiques/diagnoses (rendered as inline positive cards in the
 // critique list, grouped by dimension).
@@ -61,12 +64,15 @@ export const REVIEW_PROMPT_VERSION = "diagnostic-review-v27-2026-08-26";
 // v3.9: (I) a full review can run a second discovery pass — same evidence and
 // gates, told what pass one covered — to reach the coverage a rich multi-view
 // board supports (the ceiling was generation, not the executable gate).
-// v3.10: the second pass is now ON by default in the running server (server.ts
-// sets RE_API_SECOND_PASS=1 unless already set); operators opt out with
-// RE_API_SECOND_PASS=0. It still costs one extra LLM call per full review.
-// Engine-library consumers (tests, scripts) that never boot the server keep the
-// flag unset and so run a single pass unless they set it themselves.
-export const REVIEW_ENGINE_VERSION = "diagnostic-engine-v3.13";
+// v3.10 introduced an optional second pass. It remains available for coverage
+// experiments but is now off by default because one focused pass plus the
+// solution judge produces stronger results with substantially less waiting.
+// v3.15 removes duplicated model-authored diagnosis output from the runtime
+// call; diagnosis provenance is reconstructed from final validated critiques.
+// v3.16 increases high-quality recall without loosening admission: full reviews
+// target 8–12 candidates (cap 14), with a bounded adaptive coverage pass only
+// when fewer than seven first-pass candidates survive basic validation.
+export const REVIEW_ENGINE_VERSION = "diagnostic-engine-v3.16";
 
 /* ------------------------------------------------------------------ *
  * GROUNDING (uniform authorization / evidence gate)
@@ -363,5 +369,28 @@ export function directedDiagnosticKnowledgePrompt(): string {
     grounding,
     "",
     "The author's explicit request is the solution brief. Omit recommendation when no catalog leaf is supplied; use the executable proposal kinds directly.",
+  ].join("\n");
+}
+
+/** Compact production vocabulary. Exact diagnostic codes and every catalog leaf
+ * remain available, while repeated priors/examples stay out of the hot path so
+ * dashboard-specific evidence receives most of the model's attention. */
+export function runtimeDiagnosticKnowledgePrompt(): string {
+  const objects = clusteredVocabPrompt(OBJECTS);
+  const problems = clusteredVocabPrompt(PROBLEMS);
+  const grounding = JUDGMENT_BASIS_LABELS.map((label) => `  - ${label}`).join("\n");
+  return [
+    "RUNTIME DIAGNOSTIC VOCABULARY",
+    "OBJECTS (choose exactly one exact code):",
+    objects,
+    "",
+    "PROBLEMS (optional; choose one exact code or omit):",
+    problems,
+    "",
+    "GROUNDING LABELS:",
+    grounding,
+    "",
+    "RECOMMENDATION CATALOG (exact leaf ids and definitions; omit when no leaf fits):",
+    recommendationCatalogDefinitionsPrompt(),
   ].join("\n");
 }

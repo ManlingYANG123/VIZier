@@ -22,7 +22,7 @@ test("a combined preview is validated again after the browser renders it", async
   assert.match(source, /has labels clipped outside its chart frame/);
   assert.match(source, /await afterDashboardPaint\(\)/);
   assert.match(source, /state\.batchPreviewValidated = true;\s*if \(renderBar\)/);
-  assert.match(source, /state\.batchPreviewEnabled = false;[\s\S]{0,220}?await clearBatchPreview\(\)/);
+  assert.match(source, /state\.batchPreviewEnabled = false;[\s\S]*?await failBatchPreview\(state\.batchPreviewFailure\)/);
 });
 
 test("Preview is explicit and Apply uses the exact reviewed subset shown on canvas", async () => {

@@ -97,6 +97,27 @@ test("open-ended review uses the model's dynamic finding set", async () => {
   assert.equal(result.findings[0].kind, "dense-category-labels");
 });
 
+test("runtime reviews reconstruct diagnosis provenance from final critiques", async () => {
+  const result = await discoverDashboardCritiques(
+    dashboardSpecMap(),
+    {},
+    dashboardBoard(),
+    new StubClient({ critiques: [critique], strengths: [] }),
+  );
+  assert.ok(result.critiques.length >= 1);
+  assert.equal(result.diagnoses.length, new Set(
+    result.critiques.map((item) => `${item.object}|${item.problem || ""}`),
+  ).size);
+  for (const diagnosis of result.diagnoses) {
+    const critiqueMatch = result.critiques.find((item) =>
+      item.object === diagnosis.object && item.problem === diagnosis.problem
+    );
+    assert.ok(critiqueMatch);
+    assert.equal(diagnosis.outcome, "evaluated_issue");
+    assert.equal(diagnosis.rationale, critiqueMatch.rationale);
+  }
+});
+
 test("a narrowed Feedback Scope strictly excludes unchecked dimensions", async () => {
   const textCritique = {
     ...critique,
@@ -195,7 +216,7 @@ test("one object×problem can retain multiple dashboard-specific manual leaves o
   );
 });
 
-test("full review retains at most twenty distinct critique leaves", async () => {
+test("full review retains at most fourteen distinct critique leaves", async () => {
   const leaves = Array.from({ length: 25 }, (_, index) => ({
     ...critique,
     kind: `legibility-leaf-${index + 1}`,
@@ -208,7 +229,80 @@ test("full review retains at most twenty distinct critique leaves", async () => 
     dashboardBoard(),
     new StubClient(diagnosisPayload(leaves)),
   );
-  assert.equal(result.critiques.length, 20);
+  assert.equal(result.critiques.length, 14);
+});
+
+test("a sparse production first pass triggers bounded adaptive coverage without lowering validation", async () => {
+  const previousAdaptive = process.env.RE_API_ADAPTIVE_COVERAGE;
+  const previousSecondPass = process.env.RE_API_SECOND_PASS;
+  process.env.RE_API_ADAPTIVE_COVERAGE = "1";
+  process.env.RE_API_SECOND_PASS = "0";
+  const secondLeaf = {
+    ...critique,
+    recommendation: "text:use familiar terms",
+    kind: "clarify-department-abbreviations",
+    title: "Clarify compact department abbreviations",
+    issue: "Compact department labels may be unfamiliar to some readers.",
+  };
+  const client = new SequenceClient([
+    diagnosisPayload([critique]),
+    diagnosisPayload([secondLeaf]),
+  ]);
+  try {
+    const result = await discoverDashboardCritiques(
+      dashboardSpecMap(),
+      {},
+      dashboardBoard(),
+      client,
+    );
+    assert.equal(result.critiques.length, 2);
+    assert.match(client.userTexts[1], /SECOND-PASS COVERAGE EXPANSION/);
+    assert.match(client.userTexts[1], /Return at most 5 additional critiques/);
+  } finally {
+    if (previousAdaptive === undefined) delete process.env.RE_API_ADAPTIVE_COVERAGE;
+    else process.env.RE_API_ADAPTIVE_COVERAGE = previousAdaptive;
+    if (previousSecondPass === undefined) delete process.env.RE_API_SECOND_PASS;
+    else process.env.RE_API_SECOND_PASS = previousSecondPass;
+  }
+});
+
+test("eight grounded first-pass candidates still receive quality-gate headroom", async () => {
+  const previousAdaptive = process.env.RE_API_ADAPTIVE_COVERAGE;
+  const previousSecondPass = process.env.RE_API_SECOND_PASS;
+  process.env.RE_API_ADAPTIVE_COVERAGE = "1";
+  process.env.RE_API_SECOND_PASS = "0";
+  const firstPass = Array.from({ length: 8 }, (_, index) => ({
+    ...critique,
+    kind: `grounded-first-pass-${index + 1}`,
+    title: `Grounded observation ${index + 1}`,
+    issue: `Supported label issue ${index + 1}.`,
+  }));
+  const recoveryLeaf = {
+    ...critique,
+    recommendation: "text:use familiar terms",
+    kind: "recovery-department-abbreviations",
+    title: "Clarify compact department abbreviations",
+    issue: "Compact department labels may be unfamiliar to some readers.",
+  };
+  const client = new SequenceClient([
+    diagnosisPayload(firstPass),
+    diagnosisPayload([recoveryLeaf]),
+  ]);
+  try {
+    const result = await discoverDashboardCritiques(
+      dashboardSpecMap(),
+      {},
+      dashboardBoard(),
+      client,
+    );
+    assert.equal(result.critiques.length, 9);
+    assert.match(client.userTexts[1], /Return at most 3 additional critiques/);
+  } finally {
+    if (previousAdaptive === undefined) delete process.env.RE_API_ADAPTIVE_COVERAGE;
+    else process.env.RE_API_ADAPTIVE_COVERAGE = previousAdaptive;
+    if (previousSecondPass === undefined) delete process.env.RE_API_SECOND_PASS;
+    else process.env.RE_API_SECOND_PASS = previousSecondPass;
+  }
 });
 
 test("valid shorthand evidence is canonicalized and unsupported basis labels are dropped", async () => {
@@ -1426,8 +1520,8 @@ test("advisory guidance-only critiques are capped at the reserve so they cannot 
 });
 
 test("a validated design-process critique is reserved a slot instead of being crowded out by executable fixes", async () => {
-  // Twenty strong, validated executable critiques would fill every slot on their
-  // own (limit 20). Two tentative design-process critiques rank below them, so
+  // Fourteen strong, validated executable critiques would fill every slot on their
+  // own (limit 14). Two tentative design-process critiques rank below them, so
   // pure ranking would cut both; the reserve guarantees they still appear.
   const chartLeaves = Array.from({ length: 20 }, (_, index) => ({
     ...critique,
@@ -1445,7 +1539,7 @@ test("a validated design-process critique is reserved a slot instead of being cr
     dashboardBoard(),
     new StubClient(diagnosisPayload([...chartLeaves, ...processLeaves])),
   );
-  assert.equal(result.critiques.length, 20);
+  assert.equal(result.critiques.length, 14);
   const processCount = result.critiques.filter((c) => c.dimension === "design process").length;
   assert.equal(processCount, 2);
 });
@@ -2074,13 +2168,13 @@ test("consolidation is order-insensitive for the edit value payload", async () =
 });
 
 test("collapsing duplicates frees limit slots for other non-advisory critiques", async () => {
-  // Four per-tile duplicates of one fix + seventeen distinct other critiques =
-  // 21 candidates. Without consolidation the 20-critique cap would crowd one out;
-  // collapsing the four into one leaves room for all seventeen (1 + 17 = 18).
+  // Four per-tile duplicates of one fix + thirteen distinct other critiques =
+  // 17 candidates. Without consolidation the 14-critique cap would crowd some
+  // out; collapsing the four into one leaves room for all thirteen (1 + 13 = 14).
   const duplicates = ["task-velocity", "department-tasks", "sprint-burndown", "project-status"].map((tileId) =>
     editSpecCritique({ tileId, edits: LABEL_ANGLE_EDIT, priority: "high" }),
   );
-  const others = Array.from({ length: 17 }, (_, index) => ({
+  const others = Array.from({ length: 13 }, (_, index) => ({
     ...critique,
     kind: `distinct-observation-${index + 1}`,
     title: `Distinct observation ${index + 1}`,
@@ -2092,13 +2186,13 @@ test("collapsing duplicates frees limit slots for other non-advisory critiques",
     dashboardBoard(),
     new StubClient(diagnosisPayload([...duplicates, ...others])),
   );
-  assert.equal(result.critiques.length, 18);
+  assert.equal(result.critiques.length, 14);
   const consolidated = result.critiques.find((c) => tilesOf(c));
   assert.ok(consolidated, "expected one consolidated critique");
   assert.equal(new Set(tilesOf(consolidated)).size, 4);
-  // Every one of the seventeen distinct critiques survived (none crowded out).
+  // Every one of the thirteen distinct critiques survived (none crowded out).
   const keptKinds = new Set(result.findings.map((finding) => finding.kind));
-  for (let index = 1; index <= 17; index += 1) {
+  for (let index = 1; index <= 13; index += 1) {
     assert.ok(keptKinds.has(`distinct-observation-${index}`), `missing distinct-observation-${index}`);
   }
 });
@@ -2150,6 +2244,27 @@ function addTooltipCritique(options: {
     },
   };
 }
+
+test("a detector tooltip fallback does not duplicate the model's same executable remedy", async () => {
+  const result = await discoverDashboardCritiques(
+    dashboardSpecMap(),
+    {},
+    dashboardBoard(),
+    new StubClient(diagnosisPayload([
+      // Deliberately use a different taxonomy pair from the tooltip detector.
+      // Remedy + location are still identical, so this must remain one card.
+      addTooltipCritique({
+        tileId: "task-velocity",
+        object: "interaction",
+        problem: "limited affordance",
+      }),
+    ])),
+  );
+  const taskVelocityTooltips = result.critiques.filter((critique) =>
+    critique.tileId === "task-velocity" && critique.proposal.kind === "add-tooltip"
+  );
+  assert.equal(taskVelocityTooltips.length, 1);
+});
 
 test("the engine backstop collapses per-tile add-tooltip duplicates into one card", async () => {
   const result = await discoverDashboardCritiques(

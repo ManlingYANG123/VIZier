@@ -1,6 +1,16 @@
 import { defineConfig } from 'vite';
 
+const buildId = String(
+  process.env.VITE_BUILD_ID
+  || process.env.SOURCE_VERSION
+  || process.env.HEROKU_SLUG_COMMIT
+  || 'dev',
+).slice(0, 12);
+
 export default defineConfig({
+  define: {
+    __VIZIER_BUILD_ID__: JSON.stringify(buildId),
+  },
   server: {
     port: 8082,
     strictPort: true,

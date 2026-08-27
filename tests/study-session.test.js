@@ -5,6 +5,7 @@ import {
   buildStudyBackupFiles,
   buildStudyScaleRecord,
   buildStudyDashboardArtifacts,
+  compactVersionMediaForWorkspace,
   buildUncompressedZip,
   endStudySession,
   recordStudyAction,
@@ -54,6 +55,17 @@ test("stripVersionMedia drops in-app screenshots so the session JSON stays small
   assert.equal(stripped[0].beforeScreenshot, undefined);
   assert.equal(stripped[0].afterPng, undefined);
   assert.equal(stripped[0].afterSvg, undefined);
+});
+
+test("workspace persistence keeps the compact checkpoint thumbnail only", () => {
+  const compact = compactVersionMediaForWorkspace([
+    version(1, "initial", "data:image/png;base64,aaa"),
+  ]);
+  assert.equal(compact[0].afterScreenshot, "data:image/webp;base64,thumb");
+  assert.equal(compact[0].beforeScreenshot, undefined);
+  assert.equal(compact[0].afterPng, undefined);
+  assert.equal(compact[0].afterSvg, undefined);
+  assert.ok(compact[0].afterSnapshot.specMap.trend);
 });
 
 test("buildStudyDashboardArtifacts writes PNG and JSON for every checkpoint plus final", () => {
@@ -132,7 +144,8 @@ test("study events carry schema v2 envelope fields and request parent links", ()
   assert.equal(first.sequenceNumber, first.logId);
   assert.equal(typeof first.tRelMs, "number");
   assert.ok("dashboardVersion" in first);
-  assert.equal(first.appVersion, "0.2.0");
+  assert.match(first.appVersion, /^0\.2\.0\+/);
+  assert.equal(first.buildId, "test");
   const linkA = takeStudyRequestLink("req-a");
   const linkB = takeStudyRequestLink("req-b");
   assert.equal(linkA.requestId, "req-a");
@@ -178,6 +191,7 @@ test("ending a session records session_ended then stops logging", () => {
   const kinds = bundle.events.map((event) => event.kind);
   assert.ok(kinds.includes("session_started"));
   assert.ok(kinds.includes("session_ended"));
+  assert.equal(kinds.at(-1), "session_ended");
   assert.equal(recordStudyAction("should_not_log", "no"), null);
 });
 

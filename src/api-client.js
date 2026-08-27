@@ -89,7 +89,7 @@ export function loadDashboardFromLibrary(id) {
   }
 })();
 
-async function streamSSE(path, body, onEvent) {
+async function streamSSE(path, body, onEvent, { signal } = {}) {
   console.info(`[re_api] → ${reApiBase()}${path} (engine=real)`);
   let res;
   try {
@@ -97,6 +97,7 @@ async function streamSSE(path, body, onEvent) {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
+      signal,
     });
   } catch (err) {
     throw new Error(
@@ -145,12 +146,12 @@ async function streamSSE(path, body, onEvent) {
   return result;
 }
 
-export function streamCritique(request, onEvent) {
-  return streamSSE("/critique", request, onEvent);
+export function streamCritique(request, onEvent, options) {
+  return streamSSE("/critique", request, onEvent, options);
 }
 
-export function streamApply(request, onEvent) {
-  return streamSSE("/apply", request, onEvent);
+export function streamApply(request, onEvent, options) {
+  return streamSSE("/apply", request, onEvent, options);
 }
 
 /** Parse first-stage author material into the living DashboardContext. This
