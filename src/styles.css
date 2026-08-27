@@ -3101,6 +3101,7 @@ button { font: inherit; }
   .preview-bouncing-dots i { animation: none; opacity: 1; transform: none; }
 }
 .batch-apply-actions { display: flex; gap: 8px; }
+.batch-apply-actions #batchSelectAllButton:not(:disabled) { color: var(--ink-medium); }
 .batch-apply-actions #batchApplyButton {
   position: relative;
   isolation: isolate;
