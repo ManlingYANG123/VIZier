@@ -52,6 +52,7 @@ import {
   studyRunnerStorageKey,
   studyScreenDescriptor,
   studyScreenIdForState,
+  studyWorkspaceMatchesMaterial,
 } from "./study-runner-model.js";
 
 let runnerState = null;
@@ -1405,12 +1406,24 @@ async function mountVizierPhase() {
       practice: runnerState.phase === "training",
     });
     const savedWorkspace = runnerState.workspaces?.[runnerState.phase];
-    if (savedWorkspace && typeof app.restoreStudyRunnerWorkspaceState === "function") {
+    if (savedWorkspace && studyWorkspaceMatchesMaterial(savedWorkspace, material)
+      && typeof app.restoreStudyRunnerWorkspaceState === "function") {
       await app.restoreStudyRunnerWorkspaceState(savedWorkspace);
       recordStudyAction("study_workspace_restored", `Restored ${studyPhaseLabel(runnerState.phase)} workspace`, {
         phase: runnerState.phase,
         materialCode: material.code,
         capturedAt: savedWorkspace.capturedAt || null,
+      });
+    } else if (savedWorkspace) {
+      delete runnerState.workspaces[runnerState.phase];
+      persistRunnerState();
+      recordStudyAction("study_workspace_stale_ignored", `Loaded the current ${studyPhaseLabel(runnerState.phase)} stimulus`, {
+        phase: runnerState.phase,
+        materialCode: material.code,
+        expectedDashboardId: material.dashboardId,
+        savedDashboardId: savedWorkspace.workspace?.artifactLibraryId
+          || savedWorkspace.dashboard?.board?.id
+          || null,
       });
     }
   } catch (error) {

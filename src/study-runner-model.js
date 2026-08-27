@@ -12,8 +12,8 @@ export const STUDY_MATERIAL_MAP = Object.freeze({
   }),
   B: Object.freeze({
     code: "B",
-    title: "Retail Sales Command Center",
-    dashboardId: "sales-command-center-new",
+    title: "Workspace Overview",
+    dashboardId: "workspace-overview",
     dashboardUrl: "/study-materials/dashboards/B_retail-sales-command-center.json",
     docId: "study-b",
     pdfUrl: "/study-materials/pdfs/B_tableau-dashboard-best-practices.pdf",
@@ -192,6 +192,20 @@ export function studyGroupIdFromPath(pathname = "") {
 export function studyRunnerStorageKey(groupId) {
   if (!STUDY_GROUPS[groupId]) throw new Error(`Unknown study group: ${groupId}`);
   return `${STUDY_RUNNER_STORAGE_PREFIX}:${groupId}`;
+}
+
+/** A runner snapshot may be resumed only when it belongs to the material that
+ * is currently assigned to the phase. This prevents a replaced study stimulus
+ * from being overwritten by an older dashboard saved in localStorage. */
+export function studyWorkspaceMatchesMaterial(snapshot, material) {
+  if (!snapshot || !material) return false;
+  const savedMaterialId = String(snapshot.workspace?.artifactLibraryId || "").trim();
+  const savedDashboardId = String(snapshot.dashboard?.board?.id || "").trim();
+  const expectedId = String(material.dashboardId || "").trim();
+  if (!expectedId) return false;
+  return savedMaterialId
+    ? savedMaterialId === expectedId
+    : savedDashboardId === expectedId;
 }
 
 export function createStudyRunnerState(groupId, participantId) {

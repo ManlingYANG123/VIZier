@@ -185,7 +185,7 @@ test("study onboarding binds each assigned dashboard to its protocol PDF", async
   assert.match(source, /Choose a material/);
   assert.match(source, /const STUDY_MATERIALS = \[/);
   assert.match(source, /code: "A",\s+dashboardId: "garden-birds-new",[\s\S]*?docId: "study-a"/);
-  assert.match(source, /code: "B",\s+dashboardId: "sales-command-center-new",[\s\S]*?docId: "study-b"/);
+  assert.match(source, /code: "B",\s+dashboardId: "workspace-overview",[\s\S]*?docId: "study-b"/);
   assert.match(source, /code: "1",\s+dashboardId: "air-quality-new",[\s\S]*?docId: ""/);
   assert.match(source, /code: "2",\s+dashboardId: "ocean-life",[\s\S]*?docId: ""/);
   assert.match(source, /\/study-materials\/pdfs\/A_bbc-gel-infographics\.pdf/);

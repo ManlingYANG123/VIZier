@@ -20,6 +20,7 @@ import {
   studyPhaseNumber,
   studyPhaseTimerElapsedMs,
   studyPhaseUsesVizier,
+  studyWorkspaceMatchesMaterial,
 } from "../src/study-runner-model.js";
 
 test("only the two fixed group routes start the study runner", () => {
@@ -41,6 +42,20 @@ test("group routes preserve the counterbalanced three-stage assignment", () => {
   assert.equal(materialForPhase("group-1", "timed_task").code, "B");
   assert.equal(materialForPhase("group-1", "post_assessment"), null);
   assert.match(materialForPhase("group-1", "training").pdfUrl, /\.pdf$/);
+  assert.equal(materialForPhase("group-1", "dashboard_task").title, "Workspace Overview");
+  assert.equal(materialForPhase("group-1", "dashboard_task").dashboardId, "workspace-overview");
+});
+
+test("a replaced study stimulus cannot be overwritten by a stale workspace snapshot", () => {
+  const material = materialForPhase("group-1", "dashboard_task");
+  assert.equal(studyWorkspaceMatchesMaterial({
+    workspace: { artifactLibraryId: "sales-command-center-new" },
+    dashboard: { board: { id: "sales-command-center-new" } },
+  }, material), false);
+  assert.equal(studyWorkspaceMatchesMaterial({
+    workspace: { artifactLibraryId: "workspace-overview" },
+    dashboard: { board: { id: "workspace-overview" } },
+  }, material), true);
 });
 
 test("a participant starts in practice and advances through three stages", () => {

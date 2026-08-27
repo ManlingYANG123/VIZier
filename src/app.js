@@ -10672,7 +10672,7 @@ const STUDY_MATERIALS = [
   },
   {
     code: "B",
-    dashboardId: "sales-command-center-new",
+    dashboardId: "workspace-overview",
     dashboardUrl: "/study-materials/dashboards/B_retail-sales-command-center.json",
     docId: "study-b",
     documentLabel: "Tableau — Dashboard Best Practices",
@@ -11231,6 +11231,7 @@ export async function captureStudyRunnerTaskDashboard() {
 
 const DASHBOARD_DESIGN_DOC_BINDINGS = {
   "garden-birds-new": "study-a",
+  "workspace-overview": "study-b",
   "sales-command-center-new": "study-b",
   "air-quality-new": "",
   "ocean-life": "",

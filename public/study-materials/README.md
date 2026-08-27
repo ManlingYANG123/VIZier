@@ -7,7 +7,7 @@ This directory contains the four dashboard stimuli and the two design-guideline 
 | Code | Dashboard | Study role | Design PDF |
 | --- | --- | --- | --- |
 | A | Britain's Garden Birds | VIZier training or controlled revision task | `A_bbc-gel-infographics.pdf` |
-| B | Retail Sales Command Center | VIZier training or controlled revision task | `B_tableau-dashboard-best-practices.pdf` |
+| B | Workspace Overview | VIZier training or controlled revision task | `B_tableau-dashboard-best-practices.pdf` |
 | 1 | Air Quality Where You Live | Pre- or post-session assessment | None |
 | 2 | Ocean Biodiversity Atlas | Pre- or post-session assessment | None |
 

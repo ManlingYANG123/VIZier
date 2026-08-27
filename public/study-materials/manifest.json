@@ -10,7 +10,7 @@
     },
     "B": {
       "dashboardFile": "dashboards/B_retail-sales-command-center.json",
-      "title": "Retail Sales Command Center",
+      "title": "Workspace Overview",
       "role": "vizier-counterbalanced",
       "designPdf": "pdfs/B_tableau-dashboard-best-practices.pdf"
     },
