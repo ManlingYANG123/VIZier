@@ -239,7 +239,8 @@ test("group study routes boot the neutral runner before VIZier", async () => {
   assert.match(runner, /scaleResponses: serializeScaleResponses/);
   assert.doesNotMatch(runner, /study-runner-state\.json/);
   assert.doesNotMatch(runner, /questionnaires\//);
-  assert.match(runner, /scale-post-\$\{studyFileStamp/);
+  assert.match(runner, /path: "scale-post\.json"/);
+  assert.match(runner, /runnerCompletionPromise/);
   assert.doesNotMatch(runner, /<textarea id="studyQuestion-/);
   assert.match(runner, /class="study-scale-interview-question"/);
   assert.doesNotMatch(runner, /study-interview-section/);

@@ -7,10 +7,10 @@
  * local-fallback path works even when `@aws-sdk/client-s3` is not installed and
  * no upload is ever attempted.
  *
- * Each participant gets one folder under `studies/`. Dashboard captures, the
- * session log, and the post-session scale sit together in that folder. Filenames
- * still start with the session id so two visits from the same person do not
- * overwrite each other.
+ * Each participant/session pair gets its own folder under `studies/`. Dashboard
+ * captures, the session log, and the post-session scale use short, stable names
+ * inside it. Repeated saves for one session replace the same files instead of
+ * creating timestamped duplicates.
  *
  * Credentials come only from environment variables (STUDY_S3_BUCKET, AWS_REGION,
  * AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) and are never sent to the browser.
@@ -49,12 +49,7 @@ function safeSegment(value: unknown, fallback: string): string {
 }
 
 function jsonFileName(record: Record<string, unknown>): string {
-  const raw = String(record.fileName || "").replace(/\\/g, "/").split("/").pop() || "";
-  const stem = safeSegment(raw.replace(/\.json$/i, ""), "");
-  if (stem) return `${stem}.json`;
-  const stamp = safeSegment(String(record.savedAt || record.endedAt || "snapshot").replace(/:/g, "-"), "snapshot");
-  const phase = safeSegment(record.phase || record.reason || "record", "record");
-  return `${phase}-${stamp}.json`;
+  return record.recordKind === "scale" ? "scale-post.json" : "session.json";
 }
 
 function localDataDir(): string {
@@ -78,7 +73,7 @@ export function studyStorageMode(): "s3" | "local" {
 }
 
 function studyObjectKey(participant: string, session: string, fileName: string): string {
-  return `studies/${participant}/${session}_${fileName}`;
+  return `studies/${participant}/${session}/${fileName}`;
 }
 
 function safeArtifactFileName(raw: unknown): string {
@@ -167,7 +162,9 @@ export async function saveStudySession(bundle: unknown): Promise<StudySaveResult
   }
   record.artifactFiles = prepared.map((item) => item.relative);
 
-  const key = studyObjectKey(participant, session, jsonFileName(record));
+  const fileName = jsonFileName(record);
+  record.fileName = fileName;
+  const key = studyObjectKey(participant, session, fileName);
   const json = JSON.stringify(record);
   const bytes = Buffer.byteLength(json, "utf8");
   const files = [key];

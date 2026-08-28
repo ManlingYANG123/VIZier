@@ -307,6 +307,8 @@ export function stripVersionMedia(versions = []) {
   return (Array.isArray(versions) ? versions : []).map((version) => {
     if (!version || typeof version !== "object") return version;
     const {
+      beforeSnapshot: _beforeSnapshot,
+      afterSnapshot: _afterSnapshot,
       beforeScreenshot: _beforeScreenshot,
       afterScreenshot: _afterScreenshot,
       afterPng: _afterPng,
@@ -545,11 +547,9 @@ export function studyFileStamp(iso = nowIso()) {
 
 export function studyRecordFileName({
   recordKind = "phase-log",
-  savedAt,
 } = {}) {
-  const stamp = studyFileStamp(savedAt);
-  if (recordKind === "scale") return `scale-post-${stamp}.json`;
-  return `session-${stamp}.json`;
+  if (recordKind === "scale") return "scale-post.json";
+  return "session.json";
 }
 
 export function buildStudyBundle(snapshot = null, reason = "manual", options = {}) {

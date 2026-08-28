@@ -47,10 +47,11 @@ function version(id, kind, png) {
   };
 }
 
-test("stripVersionMedia drops in-app screenshots so the session JSON stays small", () => {
+test("stripVersionMedia drops dashboard and image payloads so the session JSON stays small", () => {
   const stripped = stripVersionMedia([version(1, "initial", "data:image/png;base64,aaa")]);
   assert.equal(stripped[0].id, 1);
-  assert.ok(stripped[0].afterSnapshot.specMap.trend);
+  assert.equal(stripped[0].beforeSnapshot, undefined);
+  assert.equal(stripped[0].afterSnapshot, undefined);
   assert.equal(stripped[0].afterScreenshot, undefined);
   assert.equal(stripped[0].beforeScreenshot, undefined);
   assert.equal(stripped[0].afterPng, undefined);
@@ -132,7 +133,8 @@ test("a study bundle keeps the event log and omits screenshot payloads", () => {
   assert.equal(bundle.dashboard.versions[0].afterScreenshot, undefined);
   assert.equal(bundle.dashboard.versions[0].afterPng, undefined);
   assert.equal(bundle.dashboard.versions[0].afterSvg, undefined);
-  assert.ok(bundle.dashboard.versions[0].afterSnapshot);
+  assert.equal(bundle.dashboard.versions[0].beforeSnapshot, undefined);
+  assert.equal(bundle.dashboard.versions[0].afterSnapshot, undefined);
 });
 
 test("study events carry schema v2 envelope fields and request parent links", () => {
@@ -153,23 +155,23 @@ test("study events carry schema v2 envelope fields and request parent links", ()
   assert.equal(linkB.parentRequestId, "req-a");
 });
 
-test("study records use one session log and a post scale file", () => {
+test("study records use stable short names for one session log and post scale", () => {
   startStudySession({ participantId: "P03" });
   assert.equal(
     studyRecordFileName({ savedAt: "2026-08-23T22:21:41.333Z" }),
-    "session-2026-08-23T22-21-41Z.json",
+    "session.json",
   );
   assert.equal(
     studyRecordFileName({ recordKind: "scale", savedAt: "2026-08-23T22:22:12.000Z" }),
-    "scale-post-2026-08-23T22-22-12Z.json",
+    "scale-post.json",
   );
   const bundle = buildStudyBundle(null, "runner-complete", { recordKind: "phase-log", phase: "complete" });
   assert.equal(bundle.recordKind, "phase-log");
-  assert.match(bundle.fileName, /^session-/);
+  assert.equal(bundle.fileName, "session.json");
   const scale = buildStudyScaleRecord({ scaleResponses: [{ itemId: "a", value: 7 }] });
   assert.equal(scale.recordKind, "scale");
   assert.equal(scale.assessment, "post");
-  assert.match(scale.fileName, /^scale-post-/);
+  assert.equal(scale.fileName, "scale-post.json");
   assert.equal(studyFileStamp("2026-08-23T22:21:41.333Z"), "2026-08-23T22-21-41Z");
 });
 
@@ -211,13 +213,13 @@ test("buildUncompressedZip stores named files that start with a ZIP signature", 
 
 test("a complete backup contains the session record and flat study artifacts", () => {
   const files = buildStudyBackupFiles([
-    { path: "scale-post-2026-08-21T17-00-00Z.json", text: '{"assessment":"post"}' },
+    { path: "scale-post.json", text: '{"assessment":"post"}' },
     { path: "dashboards/final.json", text: '{"dashboard":{}}' },
     { path: "final.png", encoding: "base64", data: "iVBORw0KGgo=" },
   ], { participantId: "P01", events: [{ eventName: "session_ended" }] });
   assert.deepEqual(files.map((file) => file.name), [
     "session.json",
-    "scale-post-2026-08-21T17-00-00Z.json",
+    "scale-post.json",
     "final.json",
     "final.png",
   ]);

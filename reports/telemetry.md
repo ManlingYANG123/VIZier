@@ -277,16 +277,23 @@ final dashboard, beside the event log:
 
 ```
 studies/{participant}/
-  {session}_{stamp}.json            ← event log (no embedded images)
-  {session}_checkpoint-01.json
-  {session}_checkpoint-01.png
-  {session}_checkpoint-02.json
-  ...
-  {session}_final.json
-  {session}_final.png
-  {session}_scale-post-{stamp}.json
+  {session}/
+    session.json                    ← event log (no embedded images)
+    checkpoint-01.json
+    checkpoint-01.png
+    checkpoint-02.json
+    ...
+    final.json
+    final.png
+    scale-post.json
 ```
 
 PNGs are 2× the canvas CSS size. JSON is `{ dashboard, tiles }` and can be
 re-opened in VIZier. The in-app revision rail still uses 770px WebP thumbnails.
 A local zip of the dashboard files is also downloaded on End.
+
+`session.json` is the telemetry record: session metadata, the event stream, and
+lightweight critique/version metadata. It does not repeat checkpoint dashboard
+specifications or image payloads; those live only in `checkpoint-*.json` and the
+corresponding image files. `final.json` is the reloadable dashboard at the formal
+task boundary, while `scale-post.json` contains the closing questionnaire.

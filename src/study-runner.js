@@ -19,7 +19,6 @@ import {
   saveStudySessionToServer,
   setStudyPhase,
   startStudySession,
-  studyFileStamp,
   studySessionInfo,
   studyTaskCapture,
 } from "./study-session.js";
@@ -71,6 +70,7 @@ let studyBrowserHistoryBound = false;
 let workspaceAutosaveTimer = null;
 let workspaceAutosaveApp = null;
 let workspaceAutosavePhase = null;
+let runnerCompletionPromise = null;
 
 function escapeHTML(value) {
   return String(value ?? "")
@@ -1340,6 +1340,9 @@ function renderQuestionnaire() {
   });
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    const submitButton = form.querySelector('button[type="submit"]');
+    if (submitButton?.disabled) return;
+    if (submitButton) submitButton.disabled = true;
     saveDraft();
     assessment.submittedAt = new Date().toISOString();
     appendAssessmentSubmission(assessment, {
@@ -1369,26 +1372,35 @@ function renderQuestionnaire() {
 }
 
 async function completeRunnerSession() {
-  recordStudyAction("study_runner_completed", "Completed all study runner phases", {
-    groupId: runnerGroup.id,
-    postScaleResponses: serializeScaleResponses(scaleSectionsForAssessment("post"), ensureAssessmentState("post").scales),
-    phaseTimers: clone(runnerState.phaseTimers || {}),
-  });
-  endStudySession({ reason: "runner-complete" });
-  runnerState.completedAt = new Date().toISOString();
-  runnerState.saveStatus = "saving";
-  persistRunnerState();
-  const backup = buildRunnerBackup();
-  const bundle = buildStudyBundle(backup.snapshot, "runner-complete");
+  if (runnerCompletionPromise) return runnerCompletionPromise;
+  if (["saved", "local-only"].includes(runnerState?.saveStatus)) return null;
+  runnerCompletionPromise = (async () => {
+    recordStudyAction("study_runner_completed", "Completed all study runner phases", {
+      groupId: runnerGroup.id,
+      postScaleResponses: serializeScaleResponses(scaleSectionsForAssessment("post"), ensureAssessmentState("post").scales),
+      phaseTimers: clone(runnerState.phaseTimers || {}),
+    });
+    endStudySession({ reason: "runner-complete" });
+    runnerState.completedAt = new Date().toISOString();
+    runnerState.saveStatus = "saving";
+    persistRunnerState();
+    const backup = buildRunnerBackup();
+    const bundle = buildStudyBundle(backup.snapshot, "runner-complete");
+    try {
+      const result = await saveStudySessionToServer({ ...bundle, artifacts: backup.artifacts });
+      runnerState.saveStatus = "saved";
+      runnerState.saveLocation = result.location || "";
+    } catch (error) {
+      runnerState.saveStatus = "local-only";
+      runnerState.saveError = error?.message || String(error);
+    }
+    persistRunnerState();
+  })();
   try {
-    const result = await saveStudySessionToServer({ ...bundle, artifacts: backup.artifacts });
-    runnerState.saveStatus = "saved";
-    runnerState.saveLocation = result.location || "";
-  } catch (error) {
-    runnerState.saveStatus = "local-only";
-    runnerState.saveError = error?.message || String(error);
+    return await runnerCompletionPromise;
+  } finally {
+    runnerCompletionPromise = null;
   }
-  persistRunnerState();
 }
 
 function questionnaireBackupArtifact() {
@@ -1396,7 +1408,7 @@ function questionnaireBackupArtifact() {
   const questions = POST_QUESTIONS;
   const sections = scaleSectionsForAssessment("post");
   return {
-    path: `scale-post-${studyFileStamp(assessment.submittedAt)}.json`,
+    path: "scale-post.json",
     contentType: "application/json",
     text: JSON.stringify({
       schema: "vizier-study-questionnaire/1",
