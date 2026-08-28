@@ -1,0 +1,1818 @@
+{
+  "schemaVersion": 1,
+  "dashboardCode": "B",
+  "createdAt": "2026-08-28T00:25:48.951Z",
+  "requestedRunsPerDashboard": 5,
+  "apiBase": "http://127.0.0.1:8091",
+  "material": {
+    "dashboard": "public/study-materials/dashboards/B_retail-sales-command-center.json",
+    "pdf": "public/study-materials/pdfs/B_tableau-dashboard-best-practices.pdf"
+  },
+  "hashes": {
+    "dashboardSha256": "2af8ac70cf377964b352c9ef7eff812f4a13ee7133c108813411fbc87d8a039b",
+    "pdfSha256": "2efc8f4d1fcaf3823d912b08f6d9651f63c0c11f8a9b7245536ce7bf501cf43e",
+    "requestBaseSha256": "18808a27a119e24b07ec2d86d7f6d1ecd78fb1a597451ac6185da1c87c394d5d"
+  },
+  "policy": {
+    "context": "Generated once with /scaffold, accepted unchanged, then frozen across critique repetitions.",
+    "constraints": "Extracted once from the bound PDF; all extracted rules active, matching the UI default.",
+    "repetitions": "Identical version-1 full-review requests with no iteration history or saved rationale."
+  },
+  "scaffoldRequest": {
+    "rawText": "",
+    "mode": "dashboard-draft",
+    "requireLLM": true,
+    "dashboard": {
+      "title": "Workspace Overview",
+      "tileTitles": [
+        "Task Velocity",
+        "Tasks by Department",
+        "Sprint Burndown",
+        "Project Status Distribution"
+      ],
+      "visibleMetrics": [
+        "Task Velocity",
+        "Tasks by Department",
+        "Sprint Burndown",
+        "Project Status Distribution"
+      ]
+    },
+    "specMap": {
+      "task-velocity": {
+        "background": null,
+        "autosize": {
+          "type": "fit",
+          "contains": "padding",
+          "resize": false
+        },
+        "config": {
+          "view": {
+            "stroke": null
+          },
+          "axis": {
+            "domain": false,
+            "tickSize": 0,
+            "labelColor": "#8b9ab2",
+            "labelFont": "ui-monospace",
+            "labelFontSize": 11,
+            "title": null,
+            "gridColor": "#edf0f5"
+          },
+          "legend": {
+            "labelColor": "#526078",
+            "labelFontSize": 11,
+            "title": null,
+            "symbolSize": 70
+          }
+        },
+        "data": {
+          "values": [
+            {
+              "month": "Jan",
+              "completed": 3,
+              "target": 3,
+              "department": "Design"
+            },
+            {
+              "month": "Feb",
+              "completed": 3,
+              "target": 3,
+              "department": "Design"
+            },
+            {
+              "month": "Mar",
+              "completed": 3,
+              "target": 4,
+              "department": "Design"
+            },
+            {
+              "month": "Apr",
+              "completed": 4,
+              "target": 4,
+              "department": "Design"
+            },
+            {
+              "month": "May",
+              "completed": 5,
+              "target": 4,
+              "department": "Design"
+            },
+            {
+              "month": "Jun",
+              "completed": 6,
+              "target": 5,
+              "department": "Design"
+            },
+            {
+              "month": "Jul",
+              "completed": 5,
+              "target": 5,
+              "department": "Design"
+            },
+            {
+              "month": "Jan",
+              "completed": 5,
+              "target": 6,
+              "department": "Eng"
+            },
+            {
+              "month": "Feb",
+              "completed": 6,
+              "target": 6,
+              "department": "Eng"
+            },
+            {
+              "month": "Mar",
+              "completed": 5,
+              "target": 7,
+              "department": "Eng"
+            },
+            {
+              "month": "Apr",
+              "completed": 8,
+              "target": 7,
+              "department": "Eng"
+            },
+            {
+              "month": "May",
+              "completed": 10,
+              "target": 7,
+              "department": "Eng"
+            },
+            {
+              "month": "Jun",
+              "completed": 11,
+              "target": 9,
+              "department": "Eng"
+            },
+            {
+              "month": "Jul",
+              "completed": 9,
+              "target": 9,
+              "department": "Eng"
+            },
+            {
+              "month": "Jan",
+              "completed": 2,
+              "target": 3,
+              "department": "Research"
+            },
+            {
+              "month": "Feb",
+              "completed": 3,
+              "target": 3,
+              "department": "Research"
+            },
+            {
+              "month": "Mar",
+              "completed": 2,
+              "target": 3,
+              "department": "Research"
+            },
+            {
+              "month": "Apr",
+              "completed": 3,
+              "target": 3,
+              "department": "Research"
+            },
+            {
+              "month": "May",
+              "completed": 4,
+              "target": 3,
+              "department": "Research"
+            },
+            {
+              "month": "Jun",
+              "completed": 4,
+              "target": 4,
+              "department": "Research"
+            },
+            {
+              "month": "Jul",
+              "completed": 4,
+              "target": 4,
+              "department": "Research"
+            },
+            {
+              "month": "Jan",
+              "completed": 3,
+              "target": 3,
+              "department": "QA"
+            },
+            {
+              "month": "Feb",
+              "completed": 3,
+              "target": 3,
+              "department": "QA"
+            },
+            {
+              "month": "Mar",
+              "completed": 3,
+              "target": 4,
+              "department": "QA"
+            },
+            {
+              "month": "Apr",
+              "completed": 4,
+              "target": 4,
+              "department": "QA"
+            },
+            {
+              "month": "May",
+              "completed": 5,
+              "target": 4,
+              "department": "QA"
+            },
+            {
+              "month": "Jun",
+              "completed": 6,
+              "target": 5,
+              "department": "QA"
+            },
+            {
+              "month": "Jul",
+              "completed": 5,
+              "target": 5,
+              "department": "QA"
+            },
+            {
+              "month": "Jan",
+              "completed": 2,
+              "target": 3,
+              "department": "Ops"
+            },
+            {
+              "month": "Feb",
+              "completed": 3,
+              "target": 3,
+              "department": "Ops"
+            },
+            {
+              "month": "Mar",
+              "completed": 3,
+              "target": 3,
+              "department": "Ops"
+            },
+            {
+              "month": "Apr",
+              "completed": 4,
+              "target": 3,
+              "department": "Ops"
+            },
+            {
+              "month": "May",
+              "completed": 4,
+              "target": 4,
+              "department": "Ops"
+            },
+            {
+              "month": "Jun",
+              "completed": 5,
+              "target": 4,
+              "department": "Ops"
+            },
+            {
+              "month": "Jul",
+              "completed": 4,
+              "target": 4,
+              "department": "Ops"
+            }
+          ]
+        },
+        "transform": [
+          {
+            "fold": [
+              "completed",
+              "target"
+            ],
+            "as": [
+              "series",
+              "value"
+            ]
+          }
+        ],
+        "mark": {
+          "type": "line",
+          "point": false,
+          "strokeWidth": 2
+        },
+        "encoding": {
+          "x": {
+            "field": "month",
+            "type": "ordinal",
+            "sort": null
+          },
+          "y": {
+            "field": "value",
+            "type": "quantitative",
+            "aggregate": "sum"
+          },
+          "color": {
+            "field": "series",
+            "type": "nominal",
+            "scale": {
+              "range": [
+                "#1f3b64",
+                "#aeb9ca"
+              ]
+            },
+            "legend": {
+              "orient": "top-right"
+            }
+          },
+          "strokeDash": {
+            "field": "series",
+            "scale": {
+              "domain": [
+                "completed",
+                "target"
+              ],
+              "range": [
+                [
+                  1,
+                  0
+                ],
+                [
+                  5,
+                  4
+                ]
+              ]
+            },
+            "legend": null
+          }
+        }
+      },
+      "department-tasks": {
+        "background": null,
+        "autosize": {
+          "type": "fit",
+          "contains": "padding",
+          "resize": false
+        },
+        "config": {
+          "view": {
+            "stroke": null
+          },
+          "axis": {
+            "domain": false,
+            "tickSize": 0,
+            "labelColor": "#8b9ab2",
+            "labelFont": "ui-monospace",
+            "labelFontSize": 11,
+            "title": null,
+            "gridColor": "#edf0f5"
+          },
+          "legend": {
+            "labelColor": "#526078",
+            "labelFontSize": 11,
+            "title": null,
+            "symbolSize": 70
+          }
+        },
+        "data": {
+          "values": [
+            {
+              "department": "Design",
+              "tasks": 34
+            },
+            {
+              "department": "Eng",
+              "tasks": 58
+            },
+            {
+              "department": "Research",
+              "tasks": 21
+            },
+            {
+              "department": "QA",
+              "tasks": 17
+            },
+            {
+              "department": "Ops",
+              "tasks": 12
+            }
+          ]
+        },
+        "params": [
+          {
+            "name": "department_select",
+            "select": {
+              "type": "point",
+              "fields": [
+                "department"
+              ]
+            }
+          }
+        ],
+        "mark": {
+          "type": "bar",
+          "cornerRadiusTopLeft": 4,
+          "cornerRadiusTopRight": 4,
+          "color": "#23446f",
+          "cursor": "pointer"
+        },
+        "encoding": {
+          "x": {
+            "field": "department",
+            "type": "nominal",
+            "sort": null
+          },
+          "y": {
+            "field": "tasks",
+            "type": "quantitative"
+          },
+          "opacity": {
+            "condition": {
+              "param": "department_select",
+              "value": 1
+            },
+            "value": 0.35
+          },
+          "tooltip": [
+            {
+              "field": "department",
+              "type": "nominal"
+            },
+            {
+              "field": "tasks",
+              "type": "quantitative"
+            }
+          ]
+        },
+        "usermeta": {
+          "crossFilter": {
+            "role": "source",
+            "param": "department_select",
+            "field": "department",
+            "source": "department-tasks",
+            "targets": [
+              "task-velocity",
+              "project-status"
+            ]
+          }
+        }
+      },
+      "sprint-burndown": {
+        "background": null,
+        "autosize": {
+          "type": "fit",
+          "contains": "padding",
+          "resize": false
+        },
+        "config": {
+          "view": {
+            "stroke": null
+          },
+          "axis": {
+            "domain": false,
+            "tickSize": 0,
+            "labelColor": "#8b9ab2",
+            "labelFont": "ui-monospace",
+            "labelFontSize": 11,
+            "title": null,
+            "gridColor": "#edf0f5"
+          },
+          "legend": {
+            "labelColor": "#526078",
+            "labelFontSize": 11,
+            "title": null,
+            "symbolSize": 70
+          }
+        },
+        "data": {
+          "values": [
+            {
+              "week": "W1",
+              "remaining": 142
+            },
+            {
+              "week": "W2",
+              "remaining": 118
+            },
+            {
+              "week": "W3",
+              "remaining": 97
+            },
+            {
+              "week": "W4",
+              "remaining": 81
+            },
+            {
+              "week": "W5",
+              "remaining": 60
+            },
+            {
+              "week": "W6",
+              "remaining": 44
+            },
+            {
+              "week": "W7",
+              "remaining": 31
+            }
+          ]
+        },
+        "mark": {
+          "type": "line",
+          "point": {
+            "filled": true,
+            "size": 55
+          },
+          "strokeWidth": 2.4,
+          "color": "#cc5f17"
+        },
+        "encoding": {
+          "x": {
+            "field": "week",
+            "type": "ordinal",
+            "sort": null
+          },
+          "y": {
+            "field": "remaining",
+            "type": "quantitative"
+          },
+          "tooltip": [
+            {
+              "field": "week",
+              "type": "ordinal"
+            },
+            {
+              "field": "remaining",
+              "type": "quantitative"
+            }
+          ]
+        }
+      },
+      "project-status": {
+        "background": null,
+        "autosize": {
+          "type": "fit",
+          "contains": "padding",
+          "resize": false
+        },
+        "config": {
+          "view": {
+            "stroke": null
+          },
+          "axis": {
+            "domain": false,
+            "tickSize": 0,
+            "labelColor": "#8b9ab2",
+            "labelFont": "ui-monospace",
+            "labelFontSize": 11,
+            "title": null,
+            "gridColor": "#edf0f5"
+          },
+          "legend": {
+            "labelColor": "#526078",
+            "labelFontSize": 11,
+            "title": null,
+            "symbolSize": 70
+          }
+        },
+        "data": {
+          "values": [
+            {
+              "status": "On Track",
+              "value": 2,
+              "department": "Design"
+            },
+            {
+              "status": "At Risk",
+              "value": 1,
+              "department": "Design"
+            },
+            {
+              "status": "Completed",
+              "value": 1,
+              "department": "Design"
+            },
+            {
+              "status": "On Track",
+              "value": 5,
+              "department": "Eng"
+            },
+            {
+              "status": "At Risk",
+              "value": 2,
+              "department": "Eng"
+            },
+            {
+              "status": "Blocked",
+              "value": 1,
+              "department": "Eng"
+            },
+            {
+              "status": "Completed",
+              "value": 2,
+              "department": "Eng"
+            },
+            {
+              "status": "On Track",
+              "value": 2,
+              "department": "Research"
+            },
+            {
+              "status": "At Risk",
+              "value": 1,
+              "department": "Research"
+            },
+            {
+              "status": "On Track",
+              "value": 1,
+              "department": "QA"
+            },
+            {
+              "status": "At Risk",
+              "value": 1,
+              "department": "QA"
+            },
+            {
+              "status": "Blocked",
+              "value": 1,
+              "department": "QA"
+            },
+            {
+              "status": "On Track",
+              "value": 1,
+              "department": "Ops"
+            },
+            {
+              "status": "Blocked",
+              "value": 1,
+              "department": "Ops"
+            }
+          ]
+        },
+        "mark": {
+          "type": "arc",
+          "innerRadius": 48,
+          "outerRadius": 82,
+          "padAngle": 0.025,
+          "cornerRadius": 2
+        },
+        "encoding": {
+          "theta": {
+            "field": "value",
+            "type": "quantitative",
+            "aggregate": "sum"
+          },
+          "color": {
+            "field": "status",
+            "type": "nominal",
+            "scale": {
+              "domain": [
+                "On Track",
+                "At Risk",
+                "Blocked",
+                "Completed"
+              ],
+              "range": [
+                "#2e7356",
+                "#dc7900",
+                "#f14242",
+                "#95a5bd"
+              ]
+            },
+            "legend": {
+              "orient": "right"
+            }
+          },
+          "tooltip": [
+            {
+              "field": "status",
+              "type": "nominal"
+            },
+            {
+              "field": "value",
+              "type": "quantitative",
+              "aggregate": "sum",
+              "title": "Projects"
+            }
+          ]
+        }
+      }
+    },
+    "board": {
+      "id": "workspace-overview",
+      "title": "Workspace Overview",
+      "subtitle": "Track delivery momentum and project health across departments",
+      "typography": {
+        "titleFontPx": 30,
+        "subtitleFontPx": 13,
+        "titleFontFamily": "Georgia",
+        "subtitleFontFamily": "system-ui",
+        "titleToSubtitleRatio": 2.31
+      },
+      "hasKpis": false,
+      "hasEmbeddedKpis": false,
+      "kpis": [],
+      "kpiLayout": "inline-summary",
+      "kpiAlignment": "start",
+      "kpiDensity": "balanced",
+      "kpiChrome": "plain",
+      "kpiReservedHeight": 0,
+      "kpiReservedWidth": 0,
+      "filters": [
+        {
+          "id": "department-filter",
+          "label": "Department",
+          "kind": "category",
+          "field": "department",
+          "targets": [
+            "task-velocity",
+            "department-tasks",
+            "project-status"
+          ],
+          "wired": true,
+          "options": [
+            "Design",
+            "Eng",
+            "Research",
+            "QA",
+            "Ops"
+          ],
+          "value": null,
+          "variant": "select",
+          "placement": "floating",
+          "container": "ruled",
+          "tone": "accent",
+          "accent": "#23446f",
+          "position": {
+            "x": 852,
+            "y": 91,
+            "w": 220
+          }
+        }
+      ],
+      "showChartSubtitles": false,
+      "canvasWidth": 1100,
+      "canvasHeight": 748,
+      "tiles": [
+        {
+          "id": "task-velocity",
+          "title": "Task Velocity",
+          "subtitle": "Monthly completed tasks vs. team target — reflects the selected department (all departments by default).",
+          "hasSubtitle": false,
+          "bounds": {
+            "x": 28,
+            "y": 144,
+            "w": 508,
+            "h": 258
+          }
+        },
+        {
+          "id": "department-tasks",
+          "title": "Tasks by Department",
+          "subtitle": "Engineering carries the largest share — click a bar to filter the other views by department.",
+          "hasSubtitle": false,
+          "bounds": {
+            "x": 564,
+            "y": 144,
+            "w": 508,
+            "h": 258
+          }
+        },
+        {
+          "id": "sprint-burndown",
+          "title": "Sprint Burndown",
+          "subtitle": "Remaining open tasks across the current 7-week sprint — on pace for full clearance by W8.",
+          "hasSubtitle": false,
+          "bounds": {
+            "x": 28,
+            "y": 448,
+            "w": 508,
+            "h": 272
+          }
+        },
+        {
+          "id": "project-status",
+          "title": "Project Status Distribution",
+          "subtitle": "Half of all projects are on track; the rest are at risk, blocked, or complete — reflects the selected department.",
+          "hasSubtitle": false,
+          "bounds": {
+            "x": 564,
+            "y": 448,
+            "w": 508,
+            "h": 272
+          }
+        }
+      ]
+    }
+  },
+  "scaffoldResponse": {
+    "context": {
+      "goal": "Compare delivery pace, workload, burndown progress, and project status across departments to identify teams needing intervention or capacity adjustments.",
+      "audience": "Project managers or department leads monitoring cross-functional delivery health and prioritizing follow-up with struggling teams.",
+      "constraints": "",
+      "dashboardType": "analytical",
+      "scope": [
+        "chart",
+        "color",
+        "layout",
+        "data",
+        "text",
+        "visual design",
+        "cognition",
+        "context",
+        "interaction",
+        "task",
+        "design process",
+        "accessibility"
+      ]
+    },
+    "assumptions": [
+      "I inferred the domain is internal project and task delivery management from titles such as Workspace Overview, Sprint Burndown, and Project Status Distribution.",
+      "I inferred the main comparison is across departments because multiple charts include department-level data: Design, Eng, Research, QA, and Ops.",
+      "I inferred the dashboard supports identifying delivery risk and momentum by combining completed vs target tasks, task volume, remaining sprint work, and status categories like On Track, At Risk, Blocked, and Completed.",
+      "I inferred this is analytical rather than executive or operational because it uses several comparative views without headline KPIs, alerts, or a single annotated conclusion.",
+      "I inferred the pie chart likely aggregates project statuses across departments, although the sample rows show department-level status records feeding the distribution."
+    ],
+    "missingFields": [
+      "goal",
+      "audience",
+      "constraints"
+    ],
+    "source": "llm",
+    "fieldStatus": {
+      "goal": "inferred",
+      "audience": "inferred",
+      "constraints": "missing"
+    },
+    "contextSnapshotId": "ctx-1e5e6d754bd0"
+  },
+  "intakeRequest": {
+    "source": {
+      "kind": "pdf-text",
+      "text": "Best Practices for E ff ective Dashboards  Applies to: Tableau Desktop  A well-designed dashboard can align your organization's efforts, help uncover key insights, and speed up decision-making. Use this topic for tips on best practices for creating effective dashboards in Tableau.  What's your goal?  Know your purpose and audience  The best visualizations have a clear purpose and work for their intended audience. What will you be trying to say with this dashboard? Are you presenting a conclusion or a key question?  In addition to knowing what you're trying to say, it's important to know who you're saying it to. Does your audience know this subject matter extremely well or will it be new to them? What kind of cues will they need? Thinking about these questions before you head into the design phase can help you create a successful dashboard.  8/15/26, 1:46 PM   Best Practices for Effective Dashboards - Tableau  https://help.tableau.com/current/pro/desktop/en-us/dashboards_best_practices.htm   1/10\n\nLeverage the most-viewed spot  Most viewers scan web content starting at the top left of a web page. Once you know your dashboard's main purpose, be sure to place your most important view so that it occupies or spans the upper-left corner of your dashboard. In the dashboard below, the author decided that the map view holds the key message.  8/15/26, 1:46 PM   Best Practices for Effective Dashboards - Tableau  https://help.tableau.com/current/pro/desktop/en-us/dashboards_best_practices.htm   2/10\n\n8/15/26, 1:46 PM   Best Practices for Effective Dashboards - Tableau  https://help.tableau.com/current/pro/desktop/en-us/dashboards_best_practices.htm   3/10\n\nDesign for the real world  Author at your   fi nal display size  By default, Tableau dashboards are set to use a   fi xed size and if you keep this setting, be sure to construct your visualization at the size it will be viewed at. You can also set   Size   to   Automatic , which makes Tableau automatically adapt the overall dimensions of a visualization based on screen size. This means that if you design a dashboard at 1300 x 700 pixels, Tableau will resize it for smaller displays—and sometimes this results in scrunched views or scrollbars. The  Range   sizing feature is helpful for avoiding this.  8/15/26, 1:46 PM   Best Practices for Effective Dashboards - Tableau  https://help.tableau.com/current/pro/desktop/en-us/dashboards_best_practices.htm   4/10\n\nIf you're using   Tableau Desktop   to create dashboards, you can also design for speci fi c device layouts, so that on tablets, for example, your dashboard contains one set of views and objects, and on phones it displays another. See  Create Dashboard Layouts for Different Device Types  (dashboards_dsd_create.htm)   for steps.  Limit the number of views  In general, it's a good idea to limit the number of views you include in your dashboard to two or three. If you add too many views, visual clarity and the big picture can get lost in the details. If you   fi nd that the scope of your story needs to grow beyond two or three views, you can always create more dashboards.  8/15/26, 1:46 PM   Best Practices for Effective Dashboards - Tableau  https://help.tableau.com/current/pro/desktop/en-us/dashboards_best_practices.htm   5/10\n\nToo many views can also interfere with the performance of your dashboard after it's published.   See   Make Visualizations Faster   (perf_visualization.htm)  for more details on performance.  Click the image to replay it.  8/15/26, 1:46 PM   Best Practices for Effective Dashboards - Tableau  https://help.tableau.com/current/pro/desktop/en-us/dashboards_best_practices.htm   6/10\n\nAdd interactivity to encourage exploration  Show   fi lters  Filters help users specify which data is shown in the view.  To turn on   fi lters for a   fi eld:  In   Tableau Desktop —Right-click the   fi eld in the Data window and select  Show Filter .  In Tableau Server or Tableau Cloud—In the toolbar click   Show/Hide Cards  >   Filters .  You can customize each   fi lter for different types of data. For example, you can show   fi lters as multi-select check boxes, single select radio buttons, or drop- down lists, etc. You can include a search button, the option to show all   fi elds, null controls, and more. You can also edit the title of a   fi lter to give your viewers clear instructions for interacting with the data.  8/15/26, 1:46 PM   Best Practices for Effective Dashboards - Tableau  https://help.tableau.com/current/pro/desktop/en-us/dashboards_best_practices.htm   7/10\n\nEnable highlighting  You can use the   Highlight   button on the toolbar to set up highlighting between views. When highlighting is turned on, a selection in one view will highlight related data in the other views. You can turn on highlighting for all   fi elds or select speci fi c   fi elds. For more information about the different methods you can use to highlight data, see   Highlight Actions   .  You can also display a highlighter that allows your customers to highlight parts of a view based on what they enter or select.  To display a highlighter:  8/15/26, 1:46 PM   Best Practices for Effective Dashboards - Tableau  https://help.tableau.com/current/pro/desktop/en-us/dashboards_best_practices.htm   8/10\n\n1.   Go to the worksheet where the view is (or select   Go to Sheet   from the dashboard).  2.   Right-click the   fi eld you want to highlight—it must be a discrete   fi eld— and choose   Show Highlighter :  In the highlighter, your users will be able to select or enter terms to highlight data in the view:  8/15/26, 1:46 PM   Best Practices for Effective Dashboards - Tableau  https://help.tableau.com/current/pro/desktop/en-us/dashboards_best_practices.htm   9/10\n\n8/15/26, 1:46 PM   Best Practices for Effective Dashboards - Tableau  https://help.tableau.com/current/pro/desktop/en-us/dashboards_best_practices.htm   10/10",
+      "filename": "B_tableau-dashboard-best-practices.pdf",
+      "pageCount": 10
+    },
+    "requireLLM": true
+  },
+  "intakeResponse": {
+    "constraintSet": {
+      "id": "ct-57ded667fd8e",
+      "sourceKind": "pdf-text",
+      "provenance": "B_tableau-dashboard-best-practices.pdf · 10 page(s)",
+      "constraints": [
+        {
+          "id": "hc-1-1e98cca1",
+          "category": "layout",
+          "rule": "Place the most important view in the upper-left corner of the dashboard.",
+          "sourceText": "be sure to place your most important view so that it occupies or spans the upper-left corner of your dashboard.",
+          "confidence": "high",
+          "value": {
+            "regionsFixed": true
+          }
+        },
+        {
+          "id": "hc-2-6d88cb1e",
+          "category": "format",
+          "rule": "Design the dashboard at the final display size when using a fixed-size dashboard.",
+          "sourceText": "if you keep this setting, be sure to construct your visualization at the size it will be viewed at.",
+          "confidence": "high"
+        },
+        {
+          "id": "hc-3-24b73b7b",
+          "category": "format",
+          "rule": "Use Automatic sizing with caution because resizing for smaller displays can cause scrunched views or scrollbars.",
+          "sourceText": "You can also set Size to Automatic , which makes Tableau automatically adapt the overall dimensions of a visualization based on screen size. This means that if you design a dashboard at 1300 x 700 pixels, Tableau will resize it for smaller displays—and sometimes this results in scrunched views or scrollbars.",
+          "confidence": "low"
+        },
+        {
+          "id": "hc-4-e6ac6ca7",
+          "category": "format",
+          "rule": "Use Range sizing to help avoid scrunched views or scrollbars on smaller displays.",
+          "sourceText": "The Range sizing feature is helpful for avoiding this.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-5-08c69652",
+          "category": "format",
+          "rule": "Design specific device layouts for different device types such as tablets and phones.",
+          "sourceText": "you can also design for specific device layouts, so that on tablets, for example, your dashboard contains one set of views and objects, and on phones it displays another.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-6-c892b43a",
+          "category": "layout",
+          "rule": "Limit the dashboard to two or three views.",
+          "sourceText": "In general, it's a good idea to limit the number of views you include in your dashboard to two or three.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-7-6191765e",
+          "category": "other",
+          "rule": "Show filters to let users specify which data is shown in the view.",
+          "sourceText": "Show filters",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-8-c82bfe26",
+          "category": "other",
+          "rule": "Edit filter titles to give viewers clear instructions for interacting with the data.",
+          "sourceText": "You can also edit the title of a filter to give your viewers clear instructions for interacting with the data.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-9-50658e73",
+          "category": "other",
+          "rule": "Enable highlighting between views to support exploration.",
+          "sourceText": "Enable highlighting",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-10-60abd1a5",
+          "category": "other",
+          "rule": "Display a highlighter so users can highlight parts of a view based on what they enter or select.",
+          "sourceText": "You can also display a highlighter that allows your customers to highlight parts of a view based on what they enter or select.",
+          "confidence": "medium"
+        }
+      ]
+    },
+    "source": "llm"
+  },
+  "requestBase": {
+    "version": 1,
+    "context": {
+      "goal": "Compare delivery pace, workload, burndown progress, and project status across departments to identify teams needing intervention or capacity adjustments. Project managers or department leads monitoring cross-functional delivery health and prioritizing follow-up with struggling teams. VIZier read this as an analytical dashboard for open exploration and pattern-finding.",
+      "audience": "",
+      "constraints": "",
+      "scope": [
+        "chart",
+        "color",
+        "layout",
+        "data",
+        "text",
+        "visual design",
+        "cognition",
+        "context",
+        "interaction",
+        "task",
+        "design process"
+      ],
+      "customTypes": [],
+      "notes": [],
+      "dashboardType": "analytical",
+      "fieldStatus": {
+        "goal": "inferred",
+        "audience": "missing",
+        "constraints": "missing"
+      },
+      "snapshotId": "ctx-1e5e6d754bd0"
+    },
+    "specMap": {
+      "task-velocity": {
+        "background": null,
+        "autosize": {
+          "type": "fit",
+          "contains": "padding",
+          "resize": false
+        },
+        "config": {
+          "view": {
+            "stroke": null
+          },
+          "axis": {
+            "domain": false,
+            "tickSize": 0,
+            "labelColor": "#8b9ab2",
+            "labelFont": "ui-monospace",
+            "labelFontSize": 11,
+            "title": null,
+            "gridColor": "#edf0f5"
+          },
+          "legend": {
+            "labelColor": "#526078",
+            "labelFontSize": 11,
+            "title": null,
+            "symbolSize": 70
+          }
+        },
+        "data": {
+          "values": [
+            {
+              "month": "Jan",
+              "completed": 3,
+              "target": 3,
+              "department": "Design"
+            },
+            {
+              "month": "Feb",
+              "completed": 3,
+              "target": 3,
+              "department": "Design"
+            },
+            {
+              "month": "Mar",
+              "completed": 3,
+              "target": 4,
+              "department": "Design"
+            },
+            {
+              "month": "Apr",
+              "completed": 4,
+              "target": 4,
+              "department": "Design"
+            },
+            {
+              "month": "May",
+              "completed": 5,
+              "target": 4,
+              "department": "Design"
+            },
+            {
+              "month": "Jun",
+              "completed": 6,
+              "target": 5,
+              "department": "Design"
+            },
+            {
+              "month": "Jul",
+              "completed": 5,
+              "target": 5,
+              "department": "Design"
+            },
+            {
+              "month": "Jan",
+              "completed": 5,
+              "target": 6,
+              "department": "Eng"
+            },
+            {
+              "month": "Feb",
+              "completed": 6,
+              "target": 6,
+              "department": "Eng"
+            },
+            {
+              "month": "Mar",
+              "completed": 5,
+              "target": 7,
+              "department": "Eng"
+            },
+            {
+              "month": "Apr",
+              "completed": 8,
+              "target": 7,
+              "department": "Eng"
+            },
+            {
+              "month": "May",
+              "completed": 10,
+              "target": 7,
+              "department": "Eng"
+            },
+            {
+              "month": "Jun",
+              "completed": 11,
+              "target": 9,
+              "department": "Eng"
+            },
+            {
+              "month": "Jul",
+              "completed": 9,
+              "target": 9,
+              "department": "Eng"
+            },
+            {
+              "month": "Jan",
+              "completed": 2,
+              "target": 3,
+              "department": "Research"
+            },
+            {
+              "month": "Feb",
+              "completed": 3,
+              "target": 3,
+              "department": "Research"
+            },
+            {
+              "month": "Mar",
+              "completed": 2,
+              "target": 3,
+              "department": "Research"
+            },
+            {
+              "month": "Apr",
+              "completed": 3,
+              "target": 3,
+              "department": "Research"
+            },
+            {
+              "month": "May",
+              "completed": 4,
+              "target": 3,
+              "department": "Research"
+            },
+            {
+              "month": "Jun",
+              "completed": 4,
+              "target": 4,
+              "department": "Research"
+            },
+            {
+              "month": "Jul",
+              "completed": 4,
+              "target": 4,
+              "department": "Research"
+            },
+            {
+              "month": "Jan",
+              "completed": 3,
+              "target": 3,
+              "department": "QA"
+            },
+            {
+              "month": "Feb",
+              "completed": 3,
+              "target": 3,
+              "department": "QA"
+            },
+            {
+              "month": "Mar",
+              "completed": 3,
+              "target": 4,
+              "department": "QA"
+            },
+            {
+              "month": "Apr",
+              "completed": 4,
+              "target": 4,
+              "department": "QA"
+            },
+            {
+              "month": "May",
+              "completed": 5,
+              "target": 4,
+              "department": "QA"
+            },
+            {
+              "month": "Jun",
+              "completed": 6,
+              "target": 5,
+              "department": "QA"
+            },
+            {
+              "month": "Jul",
+              "completed": 5,
+              "target": 5,
+              "department": "QA"
+            },
+            {
+              "month": "Jan",
+              "completed": 2,
+              "target": 3,
+              "department": "Ops"
+            },
+            {
+              "month": "Feb",
+              "completed": 3,
+              "target": 3,
+              "department": "Ops"
+            },
+            {
+              "month": "Mar",
+              "completed": 3,
+              "target": 3,
+              "department": "Ops"
+            },
+            {
+              "month": "Apr",
+              "completed": 4,
+              "target": 3,
+              "department": "Ops"
+            },
+            {
+              "month": "May",
+              "completed": 4,
+              "target": 4,
+              "department": "Ops"
+            },
+            {
+              "month": "Jun",
+              "completed": 5,
+              "target": 4,
+              "department": "Ops"
+            },
+            {
+              "month": "Jul",
+              "completed": 4,
+              "target": 4,
+              "department": "Ops"
+            }
+          ]
+        },
+        "transform": [
+          {
+            "fold": [
+              "completed",
+              "target"
+            ],
+            "as": [
+              "series",
+              "value"
+            ]
+          }
+        ],
+        "mark": {
+          "type": "line",
+          "point": false,
+          "strokeWidth": 2
+        },
+        "encoding": {
+          "x": {
+            "field": "month",
+            "type": "ordinal",
+            "sort": null
+          },
+          "y": {
+            "field": "value",
+            "type": "quantitative",
+            "aggregate": "sum"
+          },
+          "color": {
+            "field": "series",
+            "type": "nominal",
+            "scale": {
+              "range": [
+                "#1f3b64",
+                "#aeb9ca"
+              ]
+            },
+            "legend": {
+              "orient": "top-right"
+            }
+          },
+          "strokeDash": {
+            "field": "series",
+            "scale": {
+              "domain": [
+                "completed",
+                "target"
+              ],
+              "range": [
+                [
+                  1,
+                  0
+                ],
+                [
+                  5,
+                  4
+                ]
+              ]
+            },
+            "legend": null
+          }
+        }
+      },
+      "department-tasks": {
+        "background": null,
+        "autosize": {
+          "type": "fit",
+          "contains": "padding",
+          "resize": false
+        },
+        "config": {
+          "view": {
+            "stroke": null
+          },
+          "axis": {
+            "domain": false,
+            "tickSize": 0,
+            "labelColor": "#8b9ab2",
+            "labelFont": "ui-monospace",
+            "labelFontSize": 11,
+            "title": null,
+            "gridColor": "#edf0f5"
+          },
+          "legend": {
+            "labelColor": "#526078",
+            "labelFontSize": 11,
+            "title": null,
+            "symbolSize": 70
+          }
+        },
+        "data": {
+          "values": [
+            {
+              "department": "Design",
+              "tasks": 34
+            },
+            {
+              "department": "Eng",
+              "tasks": 58
+            },
+            {
+              "department": "Research",
+              "tasks": 21
+            },
+            {
+              "department": "QA",
+              "tasks": 17
+            },
+            {
+              "department": "Ops",
+              "tasks": 12
+            }
+          ]
+        },
+        "params": [
+          {
+            "name": "department_select",
+            "select": {
+              "type": "point",
+              "fields": [
+                "department"
+              ]
+            }
+          }
+        ],
+        "mark": {
+          "type": "bar",
+          "cornerRadiusTopLeft": 4,
+          "cornerRadiusTopRight": 4,
+          "color": "#23446f",
+          "cursor": "pointer"
+        },
+        "encoding": {
+          "x": {
+            "field": "department",
+            "type": "nominal",
+            "sort": null
+          },
+          "y": {
+            "field": "tasks",
+            "type": "quantitative"
+          },
+          "opacity": {
+            "condition": {
+              "param": "department_select",
+              "value": 1
+            },
+            "value": 0.35
+          },
+          "tooltip": [
+            {
+              "field": "department",
+              "type": "nominal"
+            },
+            {
+              "field": "tasks",
+              "type": "quantitative"
+            }
+          ]
+        },
+        "usermeta": {
+          "crossFilter": {
+            "role": "source",
+            "param": "department_select",
+            "field": "department",
+            "source": "department-tasks",
+            "targets": [
+              "task-velocity",
+              "project-status"
+            ]
+          }
+        }
+      },
+      "sprint-burndown": {
+        "background": null,
+        "autosize": {
+          "type": "fit",
+          "contains": "padding",
+          "resize": false
+        },
+        "config": {
+          "view": {
+            "stroke": null
+          },
+          "axis": {
+            "domain": false,
+            "tickSize": 0,
+            "labelColor": "#8b9ab2",
+            "labelFont": "ui-monospace",
+            "labelFontSize": 11,
+            "title": null,
+            "gridColor": "#edf0f5"
+          },
+          "legend": {
+            "labelColor": "#526078",
+            "labelFontSize": 11,
+            "title": null,
+            "symbolSize": 70
+          }
+        },
+        "data": {
+          "values": [
+            {
+              "week": "W1",
+              "remaining": 142
+            },
+            {
+              "week": "W2",
+              "remaining": 118
+            },
+            {
+              "week": "W3",
+              "remaining": 97
+            },
+            {
+              "week": "W4",
+              "remaining": 81
+            },
+            {
+              "week": "W5",
+              "remaining": 60
+            },
+            {
+              "week": "W6",
+              "remaining": 44
+            },
+            {
+              "week": "W7",
+              "remaining": 31
+            }
+          ]
+        },
+        "mark": {
+          "type": "line",
+          "point": {
+            "filled": true,
+            "size": 55
+          },
+          "strokeWidth": 2.4,
+          "color": "#cc5f17"
+        },
+        "encoding": {
+          "x": {
+            "field": "week",
+            "type": "ordinal",
+            "sort": null
+          },
+          "y": {
+            "field": "remaining",
+            "type": "quantitative"
+          },
+          "tooltip": [
+            {
+              "field": "week",
+              "type": "ordinal"
+            },
+            {
+              "field": "remaining",
+              "type": "quantitative"
+            }
+          ]
+        }
+      },
+      "project-status": {
+        "background": null,
+        "autosize": {
+          "type": "fit",
+          "contains": "padding",
+          "resize": false
+        },
+        "config": {
+          "view": {
+            "stroke": null
+          },
+          "axis": {
+            "domain": false,
+            "tickSize": 0,
+            "labelColor": "#8b9ab2",
+            "labelFont": "ui-monospace",
+            "labelFontSize": 11,
+            "title": null,
+            "gridColor": "#edf0f5"
+          },
+          "legend": {
+            "labelColor": "#526078",
+            "labelFontSize": 11,
+            "title": null,
+            "symbolSize": 70
+          }
+        },
+        "data": {
+          "values": [
+            {
+              "status": "On Track",
+              "value": 2,
+              "department": "Design"
+            },
+            {
+              "status": "At Risk",
+              "value": 1,
+              "department": "Design"
+            },
+            {
+              "status": "Completed",
+              "value": 1,
+              "department": "Design"
+            },
+            {
+              "status": "On Track",
+              "value": 5,
+              "department": "Eng"
+            },
+            {
+              "status": "At Risk",
+              "value": 2,
+              "department": "Eng"
+            },
+            {
+              "status": "Blocked",
+              "value": 1,
+              "department": "Eng"
+            },
+            {
+              "status": "Completed",
+              "value": 2,
+              "department": "Eng"
+            },
+            {
+              "status": "On Track",
+              "value": 2,
+              "department": "Research"
+            },
+            {
+              "status": "At Risk",
+              "value": 1,
+              "department": "Research"
+            },
+            {
+              "status": "On Track",
+              "value": 1,
+              "department": "QA"
+            },
+            {
+              "status": "At Risk",
+              "value": 1,
+              "department": "QA"
+            },
+            {
+              "status": "Blocked",
+              "value": 1,
+              "department": "QA"
+            },
+            {
+              "status": "On Track",
+              "value": 1,
+              "department": "Ops"
+            },
+            {
+              "status": "Blocked",
+              "value": 1,
+              "department": "Ops"
+            }
+          ]
+        },
+        "mark": {
+          "type": "arc",
+          "innerRadius": 48,
+          "outerRadius": 82,
+          "padAngle": 0.025,
+          "cornerRadius": 2
+        },
+        "encoding": {
+          "theta": {
+            "field": "value",
+            "type": "quantitative",
+            "aggregate": "sum"
+          },
+          "color": {
+            "field": "status",
+            "type": "nominal",
+            "scale": {
+              "domain": [
+                "On Track",
+                "At Risk",
+                "Blocked",
+                "Completed"
+              ],
+              "range": [
+                "#2e7356",
+                "#dc7900",
+                "#f14242",
+                "#95a5bd"
+              ]
+            },
+            "legend": {
+              "orient": "right"
+            }
+          },
+          "tooltip": [
+            {
+              "field": "status",
+              "type": "nominal"
+            },
+            {
+              "field": "value",
+              "type": "quantitative",
+              "aggregate": "sum",
+              "title": "Projects"
+            }
+          ]
+        }
+      }
+    },
+    "board": {
+      "id": "workspace-overview",
+      "title": "Workspace Overview",
+      "subtitle": "Track delivery momentum and project health across departments",
+      "typography": {
+        "titleFontPx": 30,
+        "subtitleFontPx": 13,
+        "titleFontFamily": "Georgia",
+        "subtitleFontFamily": "system-ui",
+        "titleToSubtitleRatio": 2.31
+      },
+      "hasKpis": false,
+      "hasEmbeddedKpis": false,
+      "kpis": [],
+      "kpiLayout": "inline-summary",
+      "kpiAlignment": "start",
+      "kpiDensity": "balanced",
+      "kpiChrome": "plain",
+      "kpiReservedHeight": 0,
+      "kpiReservedWidth": 0,
+      "filters": [
+        {
+          "id": "department-filter",
+          "label": "Department",
+          "kind": "category",
+          "field": "department",
+          "targets": [
+            "task-velocity",
+            "department-tasks",
+            "project-status"
+          ],
+          "wired": true,
+          "options": [
+            "Design",
+            "Eng",
+            "Research",
+            "QA",
+            "Ops"
+          ],
+          "value": null,
+          "variant": "select",
+          "placement": "floating",
+          "container": "ruled",
+          "tone": "accent",
+          "accent": "#23446f",
+          "position": {
+            "x": 852,
+            "y": 91,
+            "w": 220
+          }
+        }
+      ],
+      "showChartSubtitles": false,
+      "canvasWidth": 1100,
+      "canvasHeight": 748,
+      "tiles": [
+        {
+          "id": "task-velocity",
+          "title": "Task Velocity",
+          "subtitle": "Monthly completed tasks vs. team target — reflects the selected department (all departments by default).",
+          "hasSubtitle": false,
+          "bounds": {
+            "x": 28,
+            "y": 144,
+            "w": 508,
+            "h": 258
+          }
+        },
+        {
+          "id": "department-tasks",
+          "title": "Tasks by Department",
+          "subtitle": "Engineering carries the largest share — click a bar to filter the other views by department.",
+          "hasSubtitle": false,
+          "bounds": {
+            "x": 564,
+            "y": 144,
+            "w": 508,
+            "h": 258
+          }
+        },
+        {
+          "id": "sprint-burndown",
+          "title": "Sprint Burndown",
+          "subtitle": "Remaining open tasks across the current 7-week sprint — on pace for full clearance by W8.",
+          "hasSubtitle": false,
+          "bounds": {
+            "x": 28,
+            "y": 448,
+            "w": 508,
+            "h": 272
+          }
+        },
+        {
+          "id": "project-status",
+          "title": "Project Status Distribution",
+          "subtitle": "Half of all projects are on track; the rest are at risk, blocked, or complete — reflects the selected department.",
+          "hasSubtitle": false,
+          "bounds": {
+            "x": 564,
+            "y": 448,
+            "w": 508,
+            "h": 272
+          }
+        }
+      ]
+    },
+    "iterationContext": {
+      "round": 1,
+      "dashboardVersion": 1,
+      "applied": [],
+      "rejectedSignatures": [],
+      "changedTargets": []
+    },
+    "reviewScope": "full",
+    "requireLLM": true,
+    "reviewTemperature": 0.4,
+    "savedRationales": [],
+    "constraintSet": {
+      "id": "ct-57ded667fd8e",
+      "sourceKind": "pdf-text",
+      "provenance": "B_tableau-dashboard-best-practices.pdf · 10 page(s)",
+      "constraints": [
+        {
+          "id": "hc-1-1e98cca1",
+          "category": "layout",
+          "rule": "Place the most important view in the upper-left corner of the dashboard.",
+          "sourceText": "be sure to place your most important view so that it occupies or spans the upper-left corner of your dashboard.",
+          "confidence": "high",
+          "value": {
+            "regionsFixed": true
+          }
+        },
+        {
+          "id": "hc-2-6d88cb1e",
+          "category": "format",
+          "rule": "Design the dashboard at the final display size when using a fixed-size dashboard.",
+          "sourceText": "if you keep this setting, be sure to construct your visualization at the size it will be viewed at.",
+          "confidence": "high"
+        },
+        {
+          "id": "hc-3-24b73b7b",
+          "category": "format",
+          "rule": "Use Automatic sizing with caution because resizing for smaller displays can cause scrunched views or scrollbars.",
+          "sourceText": "You can also set Size to Automatic , which makes Tableau automatically adapt the overall dimensions of a visualization based on screen size. This means that if you design a dashboard at 1300 x 700 pixels, Tableau will resize it for smaller displays—and sometimes this results in scrunched views or scrollbars.",
+          "confidence": "low"
+        },
+        {
+          "id": "hc-4-e6ac6ca7",
+          "category": "format",
+          "rule": "Use Range sizing to help avoid scrunched views or scrollbars on smaller displays.",
+          "sourceText": "The Range sizing feature is helpful for avoiding this.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-5-08c69652",
+          "category": "format",
+          "rule": "Design specific device layouts for different device types such as tablets and phones.",
+          "sourceText": "you can also design for specific device layouts, so that on tablets, for example, your dashboard contains one set of views and objects, and on phones it displays another.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-6-c892b43a",
+          "category": "layout",
+          "rule": "Limit the dashboard to two or three views.",
+          "sourceText": "In general, it's a good idea to limit the number of views you include in your dashboard to two or three.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-7-6191765e",
+          "category": "other",
+          "rule": "Show filters to let users specify which data is shown in the view.",
+          "sourceText": "Show filters",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-8-c82bfe26",
+          "category": "other",
+          "rule": "Edit filter titles to give viewers clear instructions for interacting with the data.",
+          "sourceText": "You can also edit the title of a filter to give your viewers clear instructions for interacting with the data.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-9-50658e73",
+          "category": "other",
+          "rule": "Enable highlighting between views to support exploration.",
+          "sourceText": "Enable highlighting",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-10-60abd1a5",
+          "category": "other",
+          "rule": "Display a highlighter so users can highlight parts of a view based on what they enter or select.",
+          "sourceText": "You can also display a highlighter that allows your customers to highlight parts of a view based on what they enter or select.",
+          "confidence": "medium"
+        }
+      ]
+    },
+    "designDocumentText": "Best Practices for E ff ective Dashboards  Applies to: Tableau Desktop  A well-designed dashboard can align your organization's efforts, help uncover key insights, and speed up decision-making. Use this topic for tips on best practices for creating effective dashboards in Tableau.  What's your goal?  Know your purpose and audience  The best visualizations have a clear purpose and work for their intended audience. What will you be trying to say with this dashboard? Are you presenting a conclusion or a key question?  In addition to knowing what you're trying to say, it's important to know who you're saying it to. Does your audience know this subject matter extremely well or will it be new to them? What kind of cues will they need? Thinking about these questions before you head into the design phase can help you create a successful dashboard.  8/15/26, 1:46 PM   Best Practices for Effective Dashboards - Tableau  https://help.tableau.com/current/pro/desktop/en-us/dashboards_best_practices.htm   1/10\n\nLeverage the most-viewed spot  Most viewers scan web content starting at the top left of a web page. Once you know your dashboard's main purpose, be sure to place your most important view so that it occupies or spans the upper-left corner of your dashboard. In the dashboard below, the author decided that the map view holds the key message.  8/15/26, 1:46 PM   Best Practices for Effective Dashboards - Tableau  https://help.tableau.com/current/pro/desktop/en-us/dashboards_best_practices.htm   2/10\n\n8/15/26, 1:46 PM   Best Practices for Effective Dashboards - Tableau  https://help.tableau.com/current/pro/desktop/en-us/dashboards_best_practices.htm   3/10\n\nDesign for the real world  Author at your   fi nal display size  By default, Tableau dashboards are set to use a   fi xed size and if you keep this setting, be sure to construct your visualization at the size it will be viewed at. You can also set   Size   to   Automatic , which makes Tableau automatically adapt the overall dimensions of a visualization based on screen size. This means that if you design a dashboard at 1300 x 700 pixels, Tableau will resize it for smaller displays—and sometimes this results in scrunched views or scrollbars. The  Range   sizing feature is helpful for avoiding this.  8/15/26, 1:46 PM   Best Practices for Effective Dashboards - Tableau  https://help.tableau.com/current/pro/desktop/en-us/dashboards_best_practices.htm   4/10\n\nIf you're using   Tableau Desktop   to create dashboards, you can also design for speci fi c device layouts, so that on tablets, for example, your dashboard contains one set of views and objects, and on phones it displays another. See  Create Dashboard Layouts for Different Device Types  (dashboards_dsd_create.htm)   for steps.  Limit the number of views  In general, it's a good idea to limit the number of views you include in your dashboard to two or three. If you add too many views, visual clarity and the big picture can get lost in the details. If you   fi nd that the scope of your story needs to grow beyond two or three views, you can always create more dashboards.  8/15/26, 1:46 PM   Best Practices for Effective Dashboards - Tableau  https://help.tableau.com/current/pro/desktop/en-us/dashboards_best_practices.htm   5/10\n\nToo many views can also interfere with the performance of your dashboard after it's published.   See   Make Visualizations Faster   (perf_visualization.htm)  for more details on performance.  Click the image to replay it.  8/15/26, 1:46 PM   Best Practices for Effective Dashboards - Tableau  https://help.tableau.com/current/pro/desktop/en-us/dashboards_best_practices.htm   6/10\n\nAdd interactivity to encourage exploration  Show   fi lters  Filters help users specify which data is shown in the view.  To turn on   fi lters for a   fi eld:  In   Tableau Desktop —Right-click the   fi eld in the Data window and select  Show Filter .  In Tableau Server or Tableau Cloud—In the toolbar click   Show/Hide Cards  >   Filters .  You can customize each   fi lter for different types of data. For example, you can show   fi lters as multi-select check boxes, single select radio buttons, or drop- down lists, etc. You can include a search button, the option to show all   fi elds, null controls, and more. You can also edit the title of a   fi lter to give your viewers clear instructions for interacting with the data.  8/15/26, 1:46 PM   Best Practices for Effective Dashboards - Tableau  https://help.tableau.com/current/pro/desktop/en-us/dashboards_best_practices.htm   7/10\n\nEnable highlighting  You can use the   Highlight   button on the toolbar to set up highlighting between views. When highlighting is turned on, a selection in one view will highlight related data in the other views. You can turn on highlighting for all   fi elds or select speci fi c   fi elds. For more information about the different methods you can use to highlight data, see   Highlight Actions   .  You can also display a highlighter that allows your customers to highlight parts of a view based on what they enter or select.  To display a highlighter:  8/15/26, 1:46 PM   Best Practices for Effective Dashboards - Tableau  https://help.tableau.com/current/pro/desktop/en-us/dashboards_best_practices.htm   8/10\n\n1.   Go to the worksheet where the view is (or select   Go to Sheet   from the dashboard).  2.   Right-click the   fi eld you want to highlight—it must be a discrete   fi eld— and choose   Show Highlighter :  In the highlighter, your users will be able to select or enter terms to highlight data in the view:  8/15/26, 1:46 PM   Best Practices for Effective Dashboards - Tableau  https://help.tableau.com/current/pro/desktop/en-us/dashboards_best_practices.htm   9/10\n\n8/15/26, 1:46 PM   Best Practices for Effective Dashboards - Tableau  https://help.tableau.com/current/pro/desktop/en-us/dashboards_best_practices.htm   10/10"
+  }
+}

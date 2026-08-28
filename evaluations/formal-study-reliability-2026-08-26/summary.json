@@ -1,0 +1,720 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-28T00:38:24.741Z",
+  "requestedRunsPerDashboard": 5,
+  "reviewTemperature": 0.4,
+  "attemptedRuns": 10,
+  "successfulRuns": 10,
+  "failedRuns": 0,
+  "dashboards": {
+    "A": {
+      "successfulRuns": 5,
+      "critiqueCount": {
+        "n": 5,
+        "mean": 7.4,
+        "min": 6,
+        "max": 9
+      },
+      "executable": {
+        "count": 27,
+        "total": 37,
+        "ratio": 0.7297,
+        "byRun": [
+          {
+            "run": 1,
+            "count": 7,
+            "total": 9,
+            "ratio": 0.7778
+          },
+          {
+            "run": 2,
+            "count": 5,
+            "total": 7,
+            "ratio": 0.7143
+          },
+          {
+            "run": 3,
+            "count": 6,
+            "total": 8,
+            "ratio": 0.75
+          },
+          {
+            "run": 4,
+            "count": 5,
+            "total": 7,
+            "ratio": 0.7143
+          },
+          {
+            "run": 5,
+            "count": 4,
+            "total": 6,
+            "ratio": 0.6667
+          }
+        ]
+      },
+      "layoutComposition": {
+        "count": 3,
+        "total": 37,
+        "ratio": 0.0811,
+        "byRun": [
+          {
+            "run": 1,
+            "count": 2,
+            "total": 9,
+            "ratio": 0.2222
+          },
+          {
+            "run": 2,
+            "count": 0,
+            "total": 7,
+            "ratio": 0
+          },
+          {
+            "run": 3,
+            "count": 0,
+            "total": 8,
+            "ratio": 0
+          },
+          {
+            "run": 4,
+            "count": 0,
+            "total": 7,
+            "ratio": 0
+          },
+          {
+            "run": 5,
+            "count": 1,
+            "total": 6,
+            "ratio": 0.1667
+          }
+        ]
+      },
+      "proposalKindFrequency": {
+        "edit-spec": 19,
+        "manual": 10,
+        "dashboard-title": 5,
+        "add-kpis": 2,
+        "edit-layout": 1
+      },
+      "recommendationFrequency": {
+        "leaf:design process:formalize process": 5,
+        "leaf:text:communicate takeaways": 5,
+        "leaf:visual design:provide redundant cues": 5,
+        "leaf:chart:support perception": 4,
+        "leaf:color:keep color consistent": 3,
+        "leaf:data:support valid inference": 3,
+        "leaf:data:summarize key information": 2,
+        "leaf:interaction:ensure functional fit": 2,
+        "leaf:layout:prioritize component placement": 2,
+        "leaf:chart:choose suitable encoding": 1,
+        "leaf:chart:differentiate views": 1,
+        "leaf:layout:organize related views": 1,
+        "leaf:text:keep text readable and concise": 1,
+        "leaf:text:support interpretation and analysis": 1,
+        "leaf:visual design:keep appearance consistent": 1
+      },
+      "withinDashboard": {
+        "proposalKindSimilarity": {
+          "n": 10,
+          "mean": 0.785,
+          "min": 0.6,
+          "max": 1,
+          "pairs": [
+            {
+              "left": 1,
+              "right": 2,
+              "value": 0.6
+            },
+            {
+              "left": 1,
+              "right": 3,
+              "value": 0.6
+            },
+            {
+              "left": 1,
+              "right": 4,
+              "value": 0.6
+            },
+            {
+              "left": 1,
+              "right": 5,
+              "value": 0.8
+            },
+            {
+              "left": 2,
+              "right": 3,
+              "value": 1
+            },
+            {
+              "left": 2,
+              "right": 4,
+              "value": 1
+            },
+            {
+              "left": 2,
+              "right": 5,
+              "value": 0.75
+            },
+            {
+              "left": 3,
+              "right": 4,
+              "value": 1
+            },
+            {
+              "left": 3,
+              "right": 5,
+              "value": 0.75
+            },
+            {
+              "left": 4,
+              "right": 5,
+              "value": 0.75
+            }
+          ]
+        },
+        "recommendationOverlap": {
+          "n": 10,
+          "mean": 0.453,
+          "min": 0.2308,
+          "max": 0.875,
+          "pairs": [
+            {
+              "left": 1,
+              "right": 2,
+              "value": 0.2308
+            },
+            {
+              "left": 1,
+              "right": 3,
+              "value": 0.4167
+            },
+            {
+              "left": 1,
+              "right": 4,
+              "value": 0.4545
+            },
+            {
+              "left": 1,
+              "right": 5,
+              "value": 0.5
+            },
+            {
+              "left": 2,
+              "right": 3,
+              "value": 0.3636
+            },
+            {
+              "left": 2,
+              "right": 4,
+              "value": 0.4
+            },
+            {
+              "left": 2,
+              "right": 5,
+              "value": 0.4444
+            },
+            {
+              "left": 3,
+              "right": 4,
+              "value": 0.875
+            },
+            {
+              "left": 3,
+              "right": 5,
+              "value": 0.4
+            },
+            {
+              "left": 4,
+              "right": 5,
+              "value": 0.4444
+            }
+          ]
+        },
+        "editPathSimilarity": {
+          "n": 10,
+          "mean": 0.36,
+          "min": 0.25,
+          "max": 0.7,
+          "pairs": [
+            {
+              "left": 1,
+              "right": 2,
+              "value": 0.25
+            },
+            {
+              "left": 1,
+              "right": 3,
+              "value": 0.4
+            },
+            {
+              "left": 1,
+              "right": 4,
+              "value": 0.4286
+            },
+            {
+              "left": 1,
+              "right": 5,
+              "value": 0.3846
+            },
+            {
+              "left": 2,
+              "right": 3,
+              "value": 0.3077
+            },
+            {
+              "left": 2,
+              "right": 4,
+              "value": 0.3333
+            },
+            {
+              "left": 2,
+              "right": 5,
+              "value": 0.2727
+            },
+            {
+              "left": 3,
+              "right": 4,
+              "value": 0.7
+            },
+            {
+              "left": 3,
+              "right": 5,
+              "value": 0.25
+            },
+            {
+              "left": 4,
+              "right": 5,
+              "value": 0.2727
+            }
+          ]
+        },
+        "stabilityIndex": 0.5326,
+        "stabilityFormula": "mean(recommendation overlap, proposal-kind Jaccard, edit-path Jaccard)"
+      }
+    },
+    "B": {
+      "successfulRuns": 5,
+      "critiqueCount": {
+        "n": 5,
+        "mean": 7.2,
+        "min": 6,
+        "max": 10
+      },
+      "executable": {
+        "count": 24,
+        "total": 36,
+        "ratio": 0.6667,
+        "byRun": [
+          {
+            "run": 1,
+            "count": 7,
+            "total": 10,
+            "ratio": 0.7
+          },
+          {
+            "run": 2,
+            "count": 4,
+            "total": 7,
+            "ratio": 0.5714
+          },
+          {
+            "run": 3,
+            "count": 4,
+            "total": 6,
+            "ratio": 0.6667
+          },
+          {
+            "run": 4,
+            "count": 5,
+            "total": 7,
+            "ratio": 0.7143
+          },
+          {
+            "run": 5,
+            "count": 4,
+            "total": 6,
+            "ratio": 0.6667
+          }
+        ]
+      },
+      "layoutComposition": {
+        "count": 3,
+        "total": 36,
+        "ratio": 0.0833,
+        "byRun": [
+          {
+            "run": 1,
+            "count": 2,
+            "total": 10,
+            "ratio": 0.2
+          },
+          {
+            "run": 2,
+            "count": 1,
+            "total": 7,
+            "ratio": 0.1429
+          },
+          {
+            "run": 3,
+            "count": 0,
+            "total": 6,
+            "ratio": 0
+          },
+          {
+            "run": 4,
+            "count": 0,
+            "total": 7,
+            "ratio": 0
+          },
+          {
+            "run": 5,
+            "count": 0,
+            "total": 6,
+            "ratio": 0
+          }
+        ]
+      },
+      "proposalKindFrequency": {
+        "edit-spec": 18,
+        "manual": 12,
+        "add-kpis": 3,
+        "add-tooltip": 2,
+        "chart-subtitles": 1
+      },
+      "recommendationFrequency": {
+        "leaf:chart:support perception": 6,
+        "leaf:interaction:support coordinated views": 6,
+        "leaf:chart:choose suitable encoding": 5,
+        "leaf:interaction:support exploration and detail access": 5,
+        "leaf:data:summarize key information": 3,
+        "leaf:design process:formalize process": 3,
+        "leaf:color:encode and distinguish meaning": 2,
+        "leaf:layout:prioritize component placement": 2,
+        "leaf:visual design:provide redundant cues": 2,
+        "leaf:design process:iterate and evaluate": 1,
+        "leaf:text:support interpretation and analysis": 1
+      },
+      "withinDashboard": {
+        "proposalKindSimilarity": {
+          "n": 10,
+          "mean": 0.6167,
+          "min": 0.4,
+          "max": 1,
+          "pairs": [
+            {
+              "left": 1,
+              "right": 2,
+              "value": 0.6
+            },
+            {
+              "left": 1,
+              "right": 3,
+              "value": 0.6
+            },
+            {
+              "left": 1,
+              "right": 4,
+              "value": 0.4
+            },
+            {
+              "left": 1,
+              "right": 5,
+              "value": 0.4
+            },
+            {
+              "left": 2,
+              "right": 3,
+              "value": 0.5
+            },
+            {
+              "left": 2,
+              "right": 4,
+              "value": 0.6667
+            },
+            {
+              "left": 2,
+              "right": 5,
+              "value": 0.6667
+            },
+            {
+              "left": 3,
+              "right": 4,
+              "value": 0.6667
+            },
+            {
+              "left": 3,
+              "right": 5,
+              "value": 0.6667
+            },
+            {
+              "left": 4,
+              "right": 5,
+              "value": 1
+            }
+          ]
+        },
+        "recommendationOverlap": {
+          "n": 10,
+          "mean": 0.5624,
+          "min": 0.3636,
+          "max": 0.7778,
+          "pairs": [
+            {
+              "left": 1,
+              "right": 2,
+              "value": 0.7778
+            },
+            {
+              "left": 1,
+              "right": 3,
+              "value": 0.5
+            },
+            {
+              "left": 1,
+              "right": 4,
+              "value": 0.5556
+            },
+            {
+              "left": 1,
+              "right": 5,
+              "value": 0.3636
+            },
+            {
+              "left": 2,
+              "right": 3,
+              "value": 0.625
+            },
+            {
+              "left": 2,
+              "right": 4,
+              "value": 0.5
+            },
+            {
+              "left": 2,
+              "right": 5,
+              "value": 0.4444
+            },
+            {
+              "left": 3,
+              "right": 4,
+              "value": 0.5714
+            },
+            {
+              "left": 3,
+              "right": 5,
+              "value": 0.7143
+            },
+            {
+              "left": 4,
+              "right": 5,
+              "value": 0.5714
+            }
+          ]
+        },
+        "editPathSimilarity": {
+          "n": 10,
+          "mean": 0.5919,
+          "min": 0.3889,
+          "max": 0.9,
+          "pairs": [
+            {
+              "left": 1,
+              "right": 2,
+              "value": 0.7857
+            },
+            {
+              "left": 1,
+              "right": 3,
+              "value": 0.6
+            },
+            {
+              "left": 1,
+              "right": 4,
+              "value": 0.4286
+            },
+            {
+              "left": 1,
+              "right": 5,
+              "value": 0.5333
+            },
+            {
+              "left": 2,
+              "right": 3,
+              "value": 0.75
+            },
+            {
+              "left": 2,
+              "right": 4,
+              "value": 0.4211
+            },
+            {
+              "left": 2,
+              "right": 5,
+              "value": 0.6667
+            },
+            {
+              "left": 3,
+              "right": 4,
+              "value": 0.4444
+            },
+            {
+              "left": 3,
+              "right": 5,
+              "value": 0.9
+            },
+            {
+              "left": 4,
+              "right": 5,
+              "value": 0.3889
+            }
+          ]
+        },
+        "stabilityIndex": 0.5903,
+        "stabilityFormula": "mean(recommendation overlap, proposal-kind Jaccard, edit-path Jaccard)"
+      }
+    }
+  },
+  "crossDashboard": {
+    "proposalKindSimilarity": {
+      "n": 25,
+      "mean": 0.5125,
+      "min": 0.3333,
+      "max": 0.75,
+      "pairs": [
+        {
+          "left": "A-1",
+          "right": "B-1",
+          "value": 0.4286
+        },
+        {
+          "left": "A-1",
+          "right": "B-2",
+          "value": 0.6
+        },
+        {
+          "left": "A-1",
+          "right": "B-3",
+          "value": 0.3333
+        },
+        {
+          "left": "A-1",
+          "right": "B-4",
+          "value": 0.4
+        },
+        {
+          "left": "A-1",
+          "right": "B-5",
+          "value": 0.4
+        },
+        {
+          "left": "A-2",
+          "right": "B-1",
+          "value": 0.3333
+        },
+        {
+          "left": "A-2",
+          "right": "B-2",
+          "value": 0.5
+        },
+        {
+          "left": "A-2",
+          "right": "B-3",
+          "value": 0.5
+        },
+        {
+          "left": "A-2",
+          "right": "B-4",
+          "value": 0.6667
+        },
+        {
+          "left": "A-2",
+          "right": "B-5",
+          "value": 0.6667
+        },
+        {
+          "left": "A-3",
+          "right": "B-1",
+          "value": 0.3333
+        },
+        {
+          "left": "A-3",
+          "right": "B-2",
+          "value": 0.5
+        },
+        {
+          "left": "A-3",
+          "right": "B-3",
+          "value": 0.5
+        },
+        {
+          "left": "A-3",
+          "right": "B-4",
+          "value": 0.6667
+        },
+        {
+          "left": "A-3",
+          "right": "B-5",
+          "value": 0.6667
+        },
+        {
+          "left": "A-4",
+          "right": "B-1",
+          "value": 0.3333
+        },
+        {
+          "left": "A-4",
+          "right": "B-2",
+          "value": 0.5
+        },
+        {
+          "left": "A-4",
+          "right": "B-3",
+          "value": 0.5
+        },
+        {
+          "left": "A-4",
+          "right": "B-4",
+          "value": 0.6667
+        },
+        {
+          "left": "A-4",
+          "right": "B-5",
+          "value": 0.6667
+        },
+        {
+          "left": "A-5",
+          "right": "B-1",
+          "value": 0.5
+        },
+        {
+          "left": "A-5",
+          "right": "B-2",
+          "value": 0.75
+        },
+        {
+          "left": "A-5",
+          "right": "B-3",
+          "value": 0.4
+        },
+        {
+          "left": "A-5",
+          "right": "B-4",
+          "value": 0.5
+        },
+        {
+          "left": "A-5",
+          "right": "B-5",
+          "value": 0.5
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "recommendationOverlap": "Pairwise Jaccard over exact recommendation leaf IDs, with object/problem/dimension fallback for uncatalogued critiques.",
+    "editPathSimilarity": "Pairwise Jaccard over explicit proposal edit paths plus canonical paths for board, layout, KPI, palette, filter, and interaction proposals.",
+    "layoutCompositionFrequency": "Layout/composition critiques divided by all critiques.",
+    "executableRatio": "proposal.mode executable divided by all critiques.",
+    "withinDashboardStability": "Equal-weight mean of recommendation overlap, proposal-kind Jaccard, and edit-path Jaccard.",
+    "crossDashboardProposalKindSimilarity": "Jaccard over unique proposal.kind sets for all A×B run pairs."
+  }
+}

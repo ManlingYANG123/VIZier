@@ -1,0 +1,1597 @@
+{
+  "schemaVersion": 1,
+  "dashboardCode": "A",
+  "createdAt": "2026-08-28T00:25:41.732Z",
+  "requestedRunsPerDashboard": 5,
+  "apiBase": "http://127.0.0.1:8091",
+  "material": {
+    "dashboard": "public/study-materials/dashboards/A_garden-birds.json",
+    "pdf": "public/study-materials/pdfs/A_bbc-gel-infographics.pdf"
+  },
+  "hashes": {
+    "dashboardSha256": "84adde8de073b79f742a0486286994f85eddf450a0fe0a611c913d990a757bc4",
+    "pdfSha256": "c81547c559377861947d06a982a09f6e36164d613a79e5bd85912c7eb761034c",
+    "requestBaseSha256": "a8f2f27c8331b074fc86194d26d8a85a7adf5b6d9cd2fd7108d350ac9773937b"
+  },
+  "policy": {
+    "context": "Generated once with /scaffold, accepted unchanged, then frozen across critique repetitions.",
+    "constraints": "Extracted once from the bound PDF; all extracted rules active, matching the UI default.",
+    "repetitions": "Identical version-1 full-review requests with no iteration history or saved rationale."
+  },
+  "scaffoldRequest": {
+    "rawText": "",
+    "mode": "dashboard-draft",
+    "requireLLM": true,
+    "dashboard": {
+      "title": "Britain's Garden Birds",
+      "tileTitles": [
+        "Britain's Most-Spotted Garden Birds",
+        "Winners and Losers, 1979–2023",
+        "Did you know?"
+      ],
+      "visibleMetrics": [
+        "Britain's Most-Spotted Garden Birds",
+        "Winners and Losers, 1979–2023",
+        "Did you know?"
+      ]
+    },
+    "specMap": {
+      "birds-ranking": {
+        "width": 430,
+        "height": 520,
+        "background": null,
+        "config": {
+          "font": "'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif",
+          "view": {
+            "stroke": null
+          },
+          "axis": {
+            "labelColor": "#5b5147",
+            "titleColor": "#8a7f72",
+            "gridColor": "#efe7d8",
+            "domain": false,
+            "tickSize": 0,
+            "labelFontSize": 12,
+            "titleFontSize": 12
+          }
+        },
+        "data": {
+          "values": [
+            {
+              "bird": "House Sparrow",
+              "count": 4.3
+            },
+            {
+              "bird": "Blue Tit",
+              "count": 3
+            },
+            {
+              "bird": "Starling",
+              "count": 2.8
+            },
+            {
+              "bird": "Woodpigeon",
+              "count": 2.4
+            },
+            {
+              "bird": "Blackbird",
+              "count": 2.3
+            },
+            {
+              "bird": "Goldfinch",
+              "count": 1.6
+            },
+            {
+              "bird": "Great Tit",
+              "count": 1.5
+            },
+            {
+              "bird": "Robin",
+              "count": 1.4
+            },
+            {
+              "bird": "Magpie",
+              "count": 1.3
+            },
+            {
+              "bird": "Long-tailed Tit",
+              "count": 1.2
+            }
+          ]
+        },
+        "params": [
+          {
+            "name": "bird_sel",
+            "select": {
+              "type": "point",
+              "fields": [
+                "bird"
+              ],
+              "on": "click",
+              "clear": "dblclick"
+            }
+          }
+        ],
+        "mark": {
+          "type": "bar",
+          "cornerRadiusEnd": 7,
+          "cursor": "pointer",
+          "color": "#5b7a6b"
+        },
+        "encoding": {
+          "y": {
+            "field": "bird",
+            "type": "nominal",
+            "sort": {
+              "field": "count",
+              "order": "descending"
+            },
+            "axis": {
+              "title": null,
+              "labelFontSize": 13
+            }
+          },
+          "x": {
+            "field": "count",
+            "type": "quantitative",
+            "axis": {
+              "title": "Average birds per garden",
+              "grid": true
+            }
+          },
+          "opacity": {
+            "condition": {
+              "param": "bird_sel",
+              "value": 1
+            },
+            "value": 0.3
+          },
+          "tooltip": [
+            {
+              "field": "bird",
+              "type": "nominal",
+              "title": "Bird"
+            },
+            {
+              "field": "count",
+              "type": "quantitative",
+              "title": "Avg per garden"
+            }
+          ]
+        }
+      },
+      "population-trend": {
+        "width": 510,
+        "height": 228,
+        "background": null,
+        "config": {
+          "font": "Arial, Helvetica, sans-serif",
+          "view": {
+            "stroke": null
+          },
+          "axis": {
+            "labelColor": "#5b5147",
+            "titleColor": "#8a7f72",
+            "gridColor": "#efe7d8",
+            "domain": false,
+            "tickSize": 0,
+            "labelFontSize": 12,
+            "titleFontSize": 12
+          },
+          "legend": {
+            "labelColor": "#4a4137",
+            "labelFontSize": 12,
+            "titleColor": "#8a7f72"
+          }
+        },
+        "data": {
+          "values": [
+            {
+              "bird": "House Sparrow",
+              "year": 1979,
+              "index": 100
+            },
+            {
+              "bird": "House Sparrow",
+              "year": 1990,
+              "index": 75
+            },
+            {
+              "bird": "House Sparrow",
+              "year": 2000,
+              "index": 55
+            },
+            {
+              "bird": "House Sparrow",
+              "year": 2010,
+              "index": 48
+            },
+            {
+              "bird": "House Sparrow",
+              "year": 2020,
+              "index": 45
+            },
+            {
+              "bird": "House Sparrow",
+              "year": 2023,
+              "index": 47
+            },
+            {
+              "bird": "Starling",
+              "year": 1979,
+              "index": 100
+            },
+            {
+              "bird": "Starling",
+              "year": 1990,
+              "index": 80
+            },
+            {
+              "bird": "Starling",
+              "year": 2000,
+              "index": 62
+            },
+            {
+              "bird": "Starling",
+              "year": 2010,
+              "index": 52
+            },
+            {
+              "bird": "Starling",
+              "year": 2020,
+              "index": 44
+            },
+            {
+              "bird": "Starling",
+              "year": 2023,
+              "index": 42
+            },
+            {
+              "bird": "Blue Tit",
+              "year": 1979,
+              "index": 100
+            },
+            {
+              "bird": "Blue Tit",
+              "year": 1990,
+              "index": 110
+            },
+            {
+              "bird": "Blue Tit",
+              "year": 2000,
+              "index": 118
+            },
+            {
+              "bird": "Blue Tit",
+              "year": 2010,
+              "index": 122
+            },
+            {
+              "bird": "Blue Tit",
+              "year": 2020,
+              "index": 124
+            },
+            {
+              "bird": "Blue Tit",
+              "year": 2023,
+              "index": 123
+            }
+          ]
+        },
+        "params": [
+          {
+            "name": "species_sel",
+            "select": {
+              "type": "point",
+              "fields": [
+                "bird"
+              ]
+            },
+            "bind": "legend"
+          }
+        ],
+        "mark": {
+          "type": "line",
+          "point": {
+            "filled": true,
+            "size": 55
+          },
+          "strokeWidth": 2.6
+        },
+        "encoding": {
+          "x": {
+            "field": "year",
+            "type": "quantitative",
+            "axis": {
+              "title": null,
+              "format": "d",
+              "values": [
+                1979,
+                1990,
+                2000,
+                2010,
+                2020
+              ]
+            }
+          },
+          "y": {
+            "field": "index",
+            "type": "quantitative",
+            "scale": {
+              "zero": true
+            },
+            "axis": {
+              "title": "Index (1979 = 100)",
+              "grid": true
+            }
+          },
+          "color": {
+            "field": "bird",
+            "type": "nominal",
+            "scale": {
+              "domain": [
+                "House Sparrow",
+                "Starling",
+                "Blue Tit"
+              ],
+              "range": [
+                "#d1603d",
+                "#b5893a",
+                "#3a6b8a"
+              ]
+            },
+            "legend": {
+              "title": null,
+              "orient": "top-right"
+            }
+          },
+          "strokeDash": {
+            "field": "bird",
+            "type": "nominal",
+            "scale": {
+              "domain": [
+                "House Sparrow",
+                "Starling",
+                "Blue Tit"
+              ],
+              "range": [
+                [
+                  6,
+                  3
+                ],
+                [
+                  6,
+                  3
+                ],
+                [
+                  1,
+                  0
+                ]
+              ]
+            },
+            "legend": {
+              "title": null,
+              "orient": "top-right"
+            }
+          },
+          "opacity": {
+            "condition": {
+              "param": "species_sel",
+              "value": 1
+            },
+            "value": 0.2
+          },
+          "tooltip": [
+            {
+              "field": "bird",
+              "type": "nominal",
+              "title": "Bird"
+            },
+            {
+              "field": "year",
+              "type": "quantitative",
+              "format": "d",
+              "title": "Year"
+            },
+            {
+              "field": "index",
+              "type": "quantitative",
+              "title": "Index"
+            }
+          ]
+        }
+      },
+      "did-you-know": {
+        "width": 510,
+        "height": 228,
+        "background": null,
+        "config": {
+          "font": "'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif",
+          "view": {
+            "stroke": null
+          }
+        },
+        "data": {
+          "values": [
+            {
+              "x": 0
+            }
+          ]
+        },
+        "layer": [
+          {
+            "mark": {
+              "type": "text",
+              "fontSize": 74,
+              "font": "'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif",
+              "fontWeight": "bold",
+              "color": "#d1603d",
+              "align": "center",
+              "baseline": "middle",
+              "dy": -52
+            },
+            "encoding": {
+              "text": {
+                "value": "−50%"
+              }
+            }
+          },
+          {
+            "mark": {
+              "type": "text",
+              "fontSize": 16,
+              "font": "'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif",
+              "color": "#4a4137",
+              "align": "center",
+              "baseline": "middle",
+              "lineBreak": "\n",
+              "dy": 18
+            },
+            "encoding": {
+              "text": {
+                "value": "House Sparrows have roughly halved\nsince the 1970s — yet they are still\nBritain's number-one garden bird."
+              }
+            }
+          },
+          {
+            "mark": {
+              "type": "text",
+              "fontSize": 12,
+              "font": "'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif",
+              "color": "#8a7f72",
+              "align": "center",
+              "baseline": "middle",
+              "dy": 82
+            },
+            "encoding": {
+              "text": {
+                "value": "Source: RSPB Big Garden Birdwatch & BTO BirdTrends (illustrative)"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "board": {
+      "id": "garden-birds",
+      "title": "Britain's Garden Birds",
+      "subtitle": "Who is really visiting UK gardens — and which favourites are quietly disappearing",
+      "typography": {
+        "titleFontPx": 30,
+        "subtitleFontPx": 13,
+        "titleFontFamily": "Georgia",
+        "subtitleFontFamily": "system-ui",
+        "titleToSubtitleRatio": 2.31
+      },
+      "hasKpis": false,
+      "hasEmbeddedKpis": false,
+      "kpis": [],
+      "kpiLayout": "inline-summary",
+      "kpiAlignment": "start",
+      "kpiDensity": "balanced",
+      "kpiChrome": "plain",
+      "kpiReservedHeight": 0,
+      "kpiReservedWidth": 0,
+      "filters": [
+        {
+          "id": "bird-focus-filter",
+          "label": "Bird",
+          "kind": "category",
+          "field": "bird",
+          "targets": [
+            "birds-ranking",
+            "population-trend"
+          ],
+          "wired": true,
+          "options": [
+            "House Sparrow",
+            "Starling",
+            "Blue Tit"
+          ],
+          "value": null,
+          "variant": "checkboxes",
+          "placement": "left-rail",
+          "container": "panel",
+          "tone": "accent",
+          "accent": "#5b7a6b"
+        }
+      ],
+      "showChartSubtitles": false,
+      "canvasWidth": 1100,
+      "canvasHeight": 732,
+      "tiles": [
+        {
+          "id": "birds-ranking",
+          "title": "Britain's Most-Spotted Garden Birds",
+          "subtitle": "Average birds seen per garden · RSPB Big Garden Birdwatch (illustrative) · click a bird to spotlight it",
+          "hasSubtitle": false,
+          "bounds": {
+            "x": 228,
+            "y": 144,
+            "w": 378,
+            "h": 560
+          }
+        },
+        {
+          "id": "population-trend",
+          "title": "Winners and Losers, 1979–2023",
+          "subtitle": "Population index (1979 = 100) · dashed lines are in long-term decline · click a legend name to focus",
+          "hasSubtitle": false,
+          "bounds": {
+            "x": 630,
+            "y": 144,
+            "w": 442,
+            "h": 268
+          }
+        },
+        {
+          "id": "did-you-know",
+          "title": "Did you know?",
+          "subtitle": "Several familiar garden birds have declined sharply since the 1970s",
+          "hasSubtitle": false,
+          "bounds": {
+            "x": 630,
+            "y": 436,
+            "w": 442,
+            "h": 268
+          }
+        }
+      ]
+    }
+  },
+  "scaffoldResponse": {
+    "context": {
+      "goal": "Show which garden birds are most commonly seen in UK gardens and how key species’ populations changed since 1979 to highlight conservation priorities.",
+      "audience": "UK birdwatchers, conservation communicators, or wildlife-interested readers comparing familiar garden species and long-term decline patterns.",
+      "constraints": "",
+      "dashboardType": "infographic",
+      "scope": [
+        "chart",
+        "color",
+        "layout",
+        "data",
+        "text",
+        "visual design",
+        "cognition",
+        "context",
+        "interaction",
+        "task",
+        "design process",
+        "accessibility"
+      ]
+    },
+    "assumptions": [
+      "I inferred the domain is UK garden bird observation and conservation from the title, species names, and long-term population index chart.",
+      "I inferred the main comparison is between current garden sightings counts and historical population change for selected species.",
+      "I inferred the dashboard is narrative/communicative rather than exploratory because it has only three tiles, a subtitle with a takeaway tone, and a 'Did you know?' panel.",
+      "I inferred the counts in the ranking chart represent average birds spotted or sightings frequency, but the exact unit is not stated.",
+      "I inferred the line chart uses an indexed baseline of 100 in 1979 to show relative population change through 2023.",
+      "I inferred the dashboard is intended for public-facing education or awareness rather than operational monitoring because there are no KPIs, alerts, or live-status elements."
+    ],
+    "missingFields": [
+      "goal",
+      "audience",
+      "constraints"
+    ],
+    "source": "llm",
+    "fieldStatus": {
+      "goal": "inferred",
+      "audience": "inferred",
+      "constraints": "missing"
+    },
+    "contextSnapshotId": "ctx-7379cfacd7e2"
+  },
+  "intakeRequest": {
+    "source": {
+      "kind": "pdf-text",
+      "text": "How to design infographics  How we design infographics for BBC editorial content and how you can make your own.  Contributors  +3  Menu  Published on 28 Apr 2016  Contents  What is an infographic?  What makes a good infographic  Infographic visual style overview  Visual style variety  Visual style consistency  Responsive infographics  Accessibility  Licensing  Search BBC  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   1/15\n\nDownload assets (Ai File - 2.3MB)  Please read the   Licensing terms   before you download this content.  What is an infographic?  The term 'infographic' comes from 'information graphic' - a visual representation of information or data. They should educate and inform people in a quick, clear and engaging way.  At the BBC, our infographics usually fall under one of four categories:  Diagrams/technical illustrations  These are usually an illustration of a physical object or some kind of process.  The most important elements will be labelled to show people where the key information is.  Back to top  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   2/15\n\nFig 1   An example of a diagram from a BBC News story  Data visualisation  This type of infographic helps people   fi nd meaning in data. The simplest ones highlight a single value, compare one value against another or compare values over time. The most common forms are column, bar, line and pie charts.  Fig 2   An example of a line graph from a BBC News story  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   3/15\n\nAnnotations  As soon as you add a label to an image, it arguably becomes an infographic. Labels can be used to highlight key information within the image.  Fig 3   An example of an annotated image from BBC News  Maps  We use maps to show where things have happened and the relationship between events in an area. These are usually two-dimensional plan views of three-dimensional space with labels, keys and scales to help people understand a story.  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   4/15\n\nFig 4   An example of a BBC News map  What makes a good infographic  Good infographics should aim to follow some of these principles, a great infographic will follow all three…  Informative  Be informative, accurate and reveal the story in the information. We must add value to our infographics, presenting what text alone can't communicate. Generally we aim to bring clarity and understanding where there is complexity and confusion.  Engaging  Create a visually stimulating and engaging experience that will capture the viewers attention and be something they'll want to spend time reading. You should invite people to explore and contemplate and help them   fi nd personal relevance and context.  Back to top  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   5/15\n\nAccessible  Aim to reach all audiences by communicating with the clearest language and the simplest techniques. Remove the unnecessary visual clutter to create a clear and simple experience. And remember, some people physically see things di ff erently or not at all.  Fig 5   A Venn diagram showing the principles for a great infographic  Infographic visual style overview  Illustration  Our overall visual style is minimal and visually engaging but with a neutral tone. News, Sport and GEL have their own distinctive style that compliments their brand and editorial values.  Simplify the complex  Reduce the amount of unnecessary information, so the important things are clear.  Back to top  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   6/15\n\nUse colour with care  Use a neutral colour palette so important information stands out more in comparison.  Don't convey meaning with colour alone. Not everyone sees colours the same. Combine colour di ff erences with shape variety, patterns or icons. For example, the GEL infographics use green and red circles combined with tick and cross icons to show correct and incorrect designs. The   colour and meaning guideline   gives more information.  Consider tone  Consider the tone of the story and people's expectations. Too simple and the illustrations may look playful, too detailed and they might become too real or serious.  Fig 6   A diagram demonstrating the right level of detail for a BBC infographic  Remove unnecessary details to make a graphic easier to read. Avoid decoration and make things simple. But also don't overdo it and give things a cartoonish tone. If you're using digital illustration so  ware, use minimal points on Bézier curves.  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   7/15\n\nFig 7   A diagram demonstrating the use of bezier curves for simple shapes  Scale  The smaller the image is, the less detail you need.  Fig 8   An example of how illustration detail can reduce as an image element scales down  Visual style variety  Back to top  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   8/15\n\nHere's an overview of the elements across BBC News, Sport and GEL.  BBC News examples  Fig 9   Examples of the BBC News illustration style  BBC Sport examples  Fig 10   Examples of the BBC Sport illustration style  BBC GEL examples  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   9/15\n\nFig 11   Examples of the BBC GEL illustration style  Colour palette  Each BBC product has its own speci fi c colour palette for infographics. These colours are carefully chosen to compliment the brand colours of that product.  Within each product we use a set range of colours when illustrating certain things such as buildings or nature. We also use set colours to highlight key information to make an infographic easier to understand.  Fig 12   A selection of the colours used in BBC infographics  The full range of palettes can be found in the downloadable infographics asset   fi le. This can be found via the link at the top of this page.  Visual style consistency  Here's an overview of the elements of visual style which are consistent across all BBC products.  Typography  Back to top  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   10/15\n\nBBC Reith is used as our main typeface for all infographics. For type sizing the   GEL  typography guideline   should be followed where possible.  To optimise infographics across all devices, they are generally created in three di ff erent sizes: small, medium and large. The table below shows how the infographic text attributes can be applied using the GEL typography sizes.  Text colour should contrast well with the colour or colours behind it. The   colour contrast  guideline   gives more information.  Example usage   Type sizes  Title   Great primer  Subheader   Great primer  Label   Pica  Source   Brevier  Labels  We design labels to be as consistent as possible across the BBC, though we can change the colour and style of label where appropriate.  Fig 13   The label styles used in BBC infographics  Back to top  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   11/15\n\nResponsive infographics  We design infographics to give a good experience across a range of devices and browsers.  Infographics are created at up to three di ff erent sizes: small, medium and large. Depending on the size of someone's display, a di ff erent graphic will be shown. For example, if you're on a small screen, like a phone, you'll see the small graphic.  To give the best reading experience, infographics have a di ff erent layout depending on what size they are. Small (mobile) is presented as a vertical stack while medium (tablet) and large (desktop) have a more horizontal layout.  Fig 14   An example of how layout changes on mobile, tablet and desktop (example from BBC iWonder)  Infographics adapt in size to best   fi t the device/browser, but we have   fi xed widths at which we create them (we do not have   fi xed depths).  The widths below show the best averages that we use to scale our adaptive infographics across devices.  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   12/15\n\nSmall   Medium   Large  Graphic width (px)   400   750   976  Device ranges (px)   0 - 400   401 - 750   751 - 976+  Accessibility  Some key considerations when creating infographics are:  Colour contrast   - Text colour should contrast well with the colour or colours behind it.  Colour and meaning   - Meaning should not be implied by colour alone.  Text alternatives   - Text that is only part of an infographic (jpg, gif or png) is not accessible. Neither is an image without a text alternative.  You can   fi nd out more in our   how to design for accessibility guideline   or visit the   BBC  mobile accessibility guidelines .  Licensing  These assets are available for download on the following licence terms:  You can:  Download the assets and use them free of charge;  Use the assets without attribution; and  Modify or alter the assets and edit them as you like.  You can't:  Use the assets in a way that would bring the BBC into disrepute;  Back to top  Back to top  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   13/15\n\nMake available the assets so that they can be downloaded by others;  Sell the assets to other people or package the assets with others that are for sale;  Take payment from others to access the assets (including putting them behind a paywall);  Use the assets as part of a service that you are charging money for; or  Imply association with or endorsement from the BBC by using the assets.  Disclaimer: The assets are o ff ered as is and the BBC is not responsible for anything that happens if you use them.  Back to top  How-tos  How to design a voice experience  How to design accessible email newsletters  How to design accessible games  How to design for accessibility  How to design for children  How to design for interactive TV experiences  How to design for the web  How to design for touch  How to design forms  How to design infographics  How to design onboarding for games  How to make accessible animated images  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   14/15\n\nExplore the BBC  Copyright © 2026 BBC.   The BBC is not responsible for the content of external sites.   Read about our approach to external linking.  How to make custom emojis and GIFs accessible  How to use reactions in your content  How to write text descriptions (alt text) in BBC News articles  How to write useful error messages  See all  Home   News  Sport   Business  Technology   Health  Culture   Arts  Travel   Earth  Audio   Video  Live  Terms of Use   About the BBC  Privacy Policy   Cookies  Accessibility Help   Parental Guidance  Contact the BBC   Careers  BBC emails for you   Advertise with us  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   15/15",
+      "filename": "A_bbc-gel-infographics.pdf",
+      "pageCount": 15
+    },
+    "requireLLM": true
+  },
+  "intakeResponse": {
+    "constraintSet": {
+      "id": "ct-f6ecbc1dd9b5",
+      "sourceKind": "pdf-text",
+      "provenance": "A_bbc-gel-infographics.pdf · 15 page(s)",
+      "constraints": [
+        {
+          "id": "hc-1-482cf9c4",
+          "category": "other",
+          "rule": "Be informative, accurate, and reveal the story in the information.",
+          "sourceText": "Be informative, accurate and reveal the story in the information.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-2-d0f86354",
+          "category": "other",
+          "rule": "Add value beyond what text alone can communicate.",
+          "sourceText": "We must add value to our infographics, presenting what text alone can't communicate.",
+          "confidence": "high"
+        },
+        {
+          "id": "hc-3-0fdbbe66",
+          "category": "other",
+          "rule": "Use the clearest language and the simplest techniques.",
+          "sourceText": "Aim to reach all audiences by communicating with the clearest language and the simplest techniques.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-4-0c3babed",
+          "category": "layout",
+          "rule": "Remove unnecessary visual clutter to create a clear and simple experience.",
+          "sourceText": "Remove the unnecessary visual clutter to create a clear and simple experience.",
+          "confidence": "medium",
+          "value": {
+            "regionsFixed": false
+          }
+        },
+        {
+          "id": "hc-5-181aa35f",
+          "category": "other",
+          "rule": "Keep the visual style minimal, visually engaging, and neutral in tone.",
+          "sourceText": "Our overall visual style is minimal and visually engaging but with a neutral tone.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-6-8527a759",
+          "category": "layout",
+          "rule": "Reduce unnecessary information so the important things are clear.",
+          "sourceText": "Reduce the amount of unnecessary information, so the important things are clear.",
+          "confidence": "medium",
+          "value": {
+            "regionsFixed": false
+          }
+        },
+        {
+          "id": "hc-7-11b7c5a8",
+          "category": "palette",
+          "rule": "Use a neutral colour palette so important information stands out.",
+          "sourceText": "Use a neutral colour palette so important information stands out more in comparison.",
+          "confidence": "medium",
+          "value": {
+            "scheme": "neutral colour palette",
+            "locked": false
+          }
+        },
+        {
+          "id": "hc-8-60296f06",
+          "category": "palette",
+          "rule": "Do not convey meaning with colour alone; combine colour with shape, patterns, or icons.",
+          "sourceText": "Don't convey meaning with colour alone. Not everyone sees colours the same. Combine colour differences with shape variety, patterns or icons.",
+          "confidence": "high",
+          "value": {
+            "locked": false
+          }
+        },
+        {
+          "id": "hc-9-afff404c",
+          "category": "other",
+          "rule": "Consider the tone of the story and people's expectations.",
+          "sourceText": "Consider the tone of the story and people's expectations.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-10-557a216c",
+          "category": "other",
+          "rule": "Remove unnecessary details, avoid decoration, and keep graphics simple without becoming cartoonish.",
+          "sourceText": "Remove unnecessary details to make a graphic easier to read. Avoid decoration and make things simple. But also don't overdo it and give things a cartoonish tone.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-11-dd6f2ba1",
+          "category": "other",
+          "rule": "Use minimal points on Bézier curves when using digital illustration software.",
+          "sourceText": "If you're using digital illustration software, use minimal points on Bézier curves.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-12-755c3f46",
+          "category": "other",
+          "rule": "Reduce detail as images get smaller.",
+          "sourceText": "The smaller the image is, the less detail you need.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-13-61a5948e",
+          "category": "palette",
+          "rule": "Use each product's specific infographic colour palette.",
+          "sourceText": "Each BBC product has its own specific colour palette for infographics.",
+          "confidence": "medium",
+          "value": {
+            "locked": false
+          }
+        },
+        {
+          "id": "hc-14-e15348ab",
+          "category": "palette",
+          "rule": "Use a set range of colours within each product for illustrating certain things and highlighting key information.",
+          "sourceText": "Within each product we use a set range of colours when illustrating certain things such as buildings or nature. We also use set colours to highlight key information to make an infographic easier to understand.",
+          "confidence": "medium",
+          "value": {
+            "locked": false
+          }
+        },
+        {
+          "id": "hc-15-207e98a4",
+          "category": "typography",
+          "rule": "Use BBC Reith as the main typeface for all infographics.",
+          "sourceText": "BBC Reith is used as our main typeface for all infographics.",
+          "confidence": "high",
+          "value": {
+            "fontFamilies": [
+              "BBC Reith"
+            ]
+          }
+        },
+        {
+          "id": "hc-16-62bdab5d",
+          "category": "typography",
+          "rule": "Follow the GEL typography guideline for type sizing where possible.",
+          "sourceText": "For type sizing the GEL typography guideline should be followed where possible.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-17-2a8f494f",
+          "category": "palette",
+          "rule": "Ensure text colour contrasts well with the background.",
+          "sourceText": "Text colour should contrast well with the colour or colours behind it.",
+          "confidence": "high",
+          "value": {
+            "locked": false
+          }
+        },
+        {
+          "id": "hc-18-b1afbeb4",
+          "category": "other",
+          "rule": "Design labels to be as consistent as possible across the BBC.",
+          "sourceText": "We design labels to be as consistent as possible across the BBC, though we can change the colour and style of label where appropriate.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-19-f29e8a6d",
+          "category": "format",
+          "rule": "Create infographics in up to three sizes: small, medium, and large.",
+          "sourceText": "Infographics are created at up to three different sizes: small, medium and large.",
+          "confidence": "high"
+        },
+        {
+          "id": "hc-20-b6aa059b",
+          "category": "layout",
+          "rule": "Use a vertical stack layout for small/mobile infographics.",
+          "sourceText": "Small (mobile) is presented as a vertical stack",
+          "confidence": "high",
+          "value": {
+            "regionsFixed": true
+          }
+        },
+        {
+          "id": "hc-21-9c8bbc5a",
+          "category": "layout",
+          "rule": "Use a more horizontal layout for medium/tablet and large/desktop infographics.",
+          "sourceText": "medium (tablet) and large (desktop) have a more horizontal layout.",
+          "confidence": "high",
+          "value": {
+            "regionsFixed": true
+          }
+        },
+        {
+          "id": "hc-22-d25c42ed",
+          "category": "format",
+          "rule": "Use fixed creation widths of 400px, 750px, and 976px for small, medium, and large infographics.",
+          "sourceText": "The widths below show the best averages that we use to scale our adaptive infographics across devices. Small Medium Large Graphic width (px) 400 750 976",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-23-2cbef2bb",
+          "category": "other",
+          "rule": "Do not imply meaning by colour alone.",
+          "sourceText": "Meaning should not be implied by colour alone.",
+          "confidence": "high"
+        },
+        {
+          "id": "hc-24-e51f15ad",
+          "category": "other",
+          "rule": "Do not rely on text embedded only in infographic images; provide a text alternative.",
+          "sourceText": "Text that is only part of an infographic (jpg, gif or png) is not accessible. Neither is an image without a text alternative.",
+          "confidence": "high"
+        }
+      ]
+    },
+    "source": "llm"
+  },
+  "requestBase": {
+    "version": 1,
+    "context": {
+      "goal": "Show which garden birds are most commonly seen in UK gardens and how key species’ populations changed since 1979 to highlight conservation priorities. UK birdwatchers, conservation communicators, or wildlife-interested readers comparing familiar garden species and long-term decline patterns. VIZier read this as an infographic that tells one story with an explicit takeaway.",
+      "audience": "",
+      "constraints": "",
+      "scope": [
+        "chart",
+        "color",
+        "layout",
+        "data",
+        "text",
+        "visual design",
+        "cognition",
+        "context",
+        "interaction",
+        "task",
+        "design process"
+      ],
+      "customTypes": [],
+      "notes": [],
+      "dashboardType": "infographic",
+      "fieldStatus": {
+        "goal": "inferred",
+        "audience": "missing",
+        "constraints": "missing"
+      },
+      "snapshotId": "ctx-7379cfacd7e2"
+    },
+    "specMap": {
+      "birds-ranking": {
+        "width": 430,
+        "height": 520,
+        "background": null,
+        "config": {
+          "font": "'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif",
+          "view": {
+            "stroke": null
+          },
+          "axis": {
+            "labelColor": "#5b5147",
+            "titleColor": "#8a7f72",
+            "gridColor": "#efe7d8",
+            "domain": false,
+            "tickSize": 0,
+            "labelFontSize": 12,
+            "titleFontSize": 12
+          }
+        },
+        "data": {
+          "values": [
+            {
+              "bird": "House Sparrow",
+              "count": 4.3
+            },
+            {
+              "bird": "Blue Tit",
+              "count": 3
+            },
+            {
+              "bird": "Starling",
+              "count": 2.8
+            },
+            {
+              "bird": "Woodpigeon",
+              "count": 2.4
+            },
+            {
+              "bird": "Blackbird",
+              "count": 2.3
+            },
+            {
+              "bird": "Goldfinch",
+              "count": 1.6
+            },
+            {
+              "bird": "Great Tit",
+              "count": 1.5
+            },
+            {
+              "bird": "Robin",
+              "count": 1.4
+            },
+            {
+              "bird": "Magpie",
+              "count": 1.3
+            },
+            {
+              "bird": "Long-tailed Tit",
+              "count": 1.2
+            }
+          ]
+        },
+        "params": [
+          {
+            "name": "bird_sel",
+            "select": {
+              "type": "point",
+              "fields": [
+                "bird"
+              ],
+              "on": "click",
+              "clear": "dblclick"
+            }
+          }
+        ],
+        "mark": {
+          "type": "bar",
+          "cornerRadiusEnd": 7,
+          "cursor": "pointer",
+          "color": "#5b7a6b"
+        },
+        "encoding": {
+          "y": {
+            "field": "bird",
+            "type": "nominal",
+            "sort": {
+              "field": "count",
+              "order": "descending"
+            },
+            "axis": {
+              "title": null,
+              "labelFontSize": 13
+            }
+          },
+          "x": {
+            "field": "count",
+            "type": "quantitative",
+            "axis": {
+              "title": "Average birds per garden",
+              "grid": true
+            }
+          },
+          "opacity": {
+            "condition": {
+              "param": "bird_sel",
+              "value": 1
+            },
+            "value": 0.3
+          },
+          "tooltip": [
+            {
+              "field": "bird",
+              "type": "nominal",
+              "title": "Bird"
+            },
+            {
+              "field": "count",
+              "type": "quantitative",
+              "title": "Avg per garden"
+            }
+          ]
+        }
+      },
+      "population-trend": {
+        "width": 510,
+        "height": 228,
+        "background": null,
+        "config": {
+          "font": "Arial, Helvetica, sans-serif",
+          "view": {
+            "stroke": null
+          },
+          "axis": {
+            "labelColor": "#5b5147",
+            "titleColor": "#8a7f72",
+            "gridColor": "#efe7d8",
+            "domain": false,
+            "tickSize": 0,
+            "labelFontSize": 12,
+            "titleFontSize": 12
+          },
+          "legend": {
+            "labelColor": "#4a4137",
+            "labelFontSize": 12,
+            "titleColor": "#8a7f72"
+          }
+        },
+        "data": {
+          "values": [
+            {
+              "bird": "House Sparrow",
+              "year": 1979,
+              "index": 100
+            },
+            {
+              "bird": "House Sparrow",
+              "year": 1990,
+              "index": 75
+            },
+            {
+              "bird": "House Sparrow",
+              "year": 2000,
+              "index": 55
+            },
+            {
+              "bird": "House Sparrow",
+              "year": 2010,
+              "index": 48
+            },
+            {
+              "bird": "House Sparrow",
+              "year": 2020,
+              "index": 45
+            },
+            {
+              "bird": "House Sparrow",
+              "year": 2023,
+              "index": 47
+            },
+            {
+              "bird": "Starling",
+              "year": 1979,
+              "index": 100
+            },
+            {
+              "bird": "Starling",
+              "year": 1990,
+              "index": 80
+            },
+            {
+              "bird": "Starling",
+              "year": 2000,
+              "index": 62
+            },
+            {
+              "bird": "Starling",
+              "year": 2010,
+              "index": 52
+            },
+            {
+              "bird": "Starling",
+              "year": 2020,
+              "index": 44
+            },
+            {
+              "bird": "Starling",
+              "year": 2023,
+              "index": 42
+            },
+            {
+              "bird": "Blue Tit",
+              "year": 1979,
+              "index": 100
+            },
+            {
+              "bird": "Blue Tit",
+              "year": 1990,
+              "index": 110
+            },
+            {
+              "bird": "Blue Tit",
+              "year": 2000,
+              "index": 118
+            },
+            {
+              "bird": "Blue Tit",
+              "year": 2010,
+              "index": 122
+            },
+            {
+              "bird": "Blue Tit",
+              "year": 2020,
+              "index": 124
+            },
+            {
+              "bird": "Blue Tit",
+              "year": 2023,
+              "index": 123
+            }
+          ]
+        },
+        "params": [
+          {
+            "name": "species_sel",
+            "select": {
+              "type": "point",
+              "fields": [
+                "bird"
+              ]
+            },
+            "bind": "legend"
+          }
+        ],
+        "mark": {
+          "type": "line",
+          "point": {
+            "filled": true,
+            "size": 55
+          },
+          "strokeWidth": 2.6
+        },
+        "encoding": {
+          "x": {
+            "field": "year",
+            "type": "quantitative",
+            "axis": {
+              "title": null,
+              "format": "d",
+              "values": [
+                1979,
+                1990,
+                2000,
+                2010,
+                2020
+              ]
+            }
+          },
+          "y": {
+            "field": "index",
+            "type": "quantitative",
+            "scale": {
+              "zero": true
+            },
+            "axis": {
+              "title": "Index (1979 = 100)",
+              "grid": true
+            }
+          },
+          "color": {
+            "field": "bird",
+            "type": "nominal",
+            "scale": {
+              "domain": [
+                "House Sparrow",
+                "Starling",
+                "Blue Tit"
+              ],
+              "range": [
+                "#d1603d",
+                "#b5893a",
+                "#3a6b8a"
+              ]
+            },
+            "legend": {
+              "title": null,
+              "orient": "top-right"
+            }
+          },
+          "strokeDash": {
+            "field": "bird",
+            "type": "nominal",
+            "scale": {
+              "domain": [
+                "House Sparrow",
+                "Starling",
+                "Blue Tit"
+              ],
+              "range": [
+                [
+                  6,
+                  3
+                ],
+                [
+                  6,
+                  3
+                ],
+                [
+                  1,
+                  0
+                ]
+              ]
+            },
+            "legend": {
+              "title": null,
+              "orient": "top-right"
+            }
+          },
+          "opacity": {
+            "condition": {
+              "param": "species_sel",
+              "value": 1
+            },
+            "value": 0.2
+          },
+          "tooltip": [
+            {
+              "field": "bird",
+              "type": "nominal",
+              "title": "Bird"
+            },
+            {
+              "field": "year",
+              "type": "quantitative",
+              "format": "d",
+              "title": "Year"
+            },
+            {
+              "field": "index",
+              "type": "quantitative",
+              "title": "Index"
+            }
+          ]
+        }
+      },
+      "did-you-know": {
+        "width": 510,
+        "height": 228,
+        "background": null,
+        "config": {
+          "font": "'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif",
+          "view": {
+            "stroke": null
+          }
+        },
+        "data": {
+          "values": [
+            {
+              "x": 0
+            }
+          ]
+        },
+        "layer": [
+          {
+            "mark": {
+              "type": "text",
+              "fontSize": 74,
+              "font": "'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif",
+              "fontWeight": "bold",
+              "color": "#d1603d",
+              "align": "center",
+              "baseline": "middle",
+              "dy": -52
+            },
+            "encoding": {
+              "text": {
+                "value": "−50%"
+              }
+            }
+          },
+          {
+            "mark": {
+              "type": "text",
+              "fontSize": 16,
+              "font": "'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif",
+              "color": "#4a4137",
+              "align": "center",
+              "baseline": "middle",
+              "lineBreak": "\n",
+              "dy": 18
+            },
+            "encoding": {
+              "text": {
+                "value": "House Sparrows have roughly halved\nsince the 1970s — yet they are still\nBritain's number-one garden bird."
+              }
+            }
+          },
+          {
+            "mark": {
+              "type": "text",
+              "fontSize": 12,
+              "font": "'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif",
+              "color": "#8a7f72",
+              "align": "center",
+              "baseline": "middle",
+              "dy": 82
+            },
+            "encoding": {
+              "text": {
+                "value": "Source: RSPB Big Garden Birdwatch & BTO BirdTrends (illustrative)"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "board": {
+      "id": "garden-birds",
+      "title": "Britain's Garden Birds",
+      "subtitle": "Who is really visiting UK gardens — and which favourites are quietly disappearing",
+      "typography": {
+        "titleFontPx": 30,
+        "subtitleFontPx": 13,
+        "titleFontFamily": "Georgia",
+        "subtitleFontFamily": "system-ui",
+        "titleToSubtitleRatio": 2.31
+      },
+      "hasKpis": false,
+      "hasEmbeddedKpis": false,
+      "kpis": [],
+      "kpiLayout": "inline-summary",
+      "kpiAlignment": "start",
+      "kpiDensity": "balanced",
+      "kpiChrome": "plain",
+      "kpiReservedHeight": 0,
+      "kpiReservedWidth": 0,
+      "filters": [
+        {
+          "id": "bird-focus-filter",
+          "label": "Bird",
+          "kind": "category",
+          "field": "bird",
+          "targets": [
+            "birds-ranking",
+            "population-trend"
+          ],
+          "wired": true,
+          "options": [
+            "House Sparrow",
+            "Starling",
+            "Blue Tit"
+          ],
+          "value": null,
+          "variant": "checkboxes",
+          "placement": "left-rail",
+          "container": "panel",
+          "tone": "accent",
+          "accent": "#5b7a6b"
+        }
+      ],
+      "showChartSubtitles": false,
+      "canvasWidth": 1100,
+      "canvasHeight": 732,
+      "tiles": [
+        {
+          "id": "birds-ranking",
+          "title": "Britain's Most-Spotted Garden Birds",
+          "subtitle": "Average birds seen per garden · RSPB Big Garden Birdwatch (illustrative) · click a bird to spotlight it",
+          "hasSubtitle": false,
+          "bounds": {
+            "x": 228,
+            "y": 144,
+            "w": 378,
+            "h": 560
+          }
+        },
+        {
+          "id": "population-trend",
+          "title": "Winners and Losers, 1979–2023",
+          "subtitle": "Population index (1979 = 100) · dashed lines are in long-term decline · click a legend name to focus",
+          "hasSubtitle": false,
+          "bounds": {
+            "x": 630,
+            "y": 144,
+            "w": 442,
+            "h": 268
+          }
+        },
+        {
+          "id": "did-you-know",
+          "title": "Did you know?",
+          "subtitle": "Several familiar garden birds have declined sharply since the 1970s",
+          "hasSubtitle": false,
+          "bounds": {
+            "x": 630,
+            "y": 436,
+            "w": 442,
+            "h": 268
+          }
+        }
+      ]
+    },
+    "iterationContext": {
+      "round": 1,
+      "dashboardVersion": 1,
+      "applied": [],
+      "rejectedSignatures": [],
+      "changedTargets": []
+    },
+    "reviewScope": "full",
+    "requireLLM": true,
+    "reviewTemperature": 0.4,
+    "savedRationales": [],
+    "constraintSet": {
+      "id": "ct-f6ecbc1dd9b5",
+      "sourceKind": "pdf-text",
+      "provenance": "A_bbc-gel-infographics.pdf · 15 page(s)",
+      "constraints": [
+        {
+          "id": "hc-1-482cf9c4",
+          "category": "other",
+          "rule": "Be informative, accurate, and reveal the story in the information.",
+          "sourceText": "Be informative, accurate and reveal the story in the information.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-2-d0f86354",
+          "category": "other",
+          "rule": "Add value beyond what text alone can communicate.",
+          "sourceText": "We must add value to our infographics, presenting what text alone can't communicate.",
+          "confidence": "high"
+        },
+        {
+          "id": "hc-3-0fdbbe66",
+          "category": "other",
+          "rule": "Use the clearest language and the simplest techniques.",
+          "sourceText": "Aim to reach all audiences by communicating with the clearest language and the simplest techniques.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-4-0c3babed",
+          "category": "layout",
+          "rule": "Remove unnecessary visual clutter to create a clear and simple experience.",
+          "sourceText": "Remove the unnecessary visual clutter to create a clear and simple experience.",
+          "confidence": "medium",
+          "value": {
+            "regionsFixed": false
+          }
+        },
+        {
+          "id": "hc-5-181aa35f",
+          "category": "other",
+          "rule": "Keep the visual style minimal, visually engaging, and neutral in tone.",
+          "sourceText": "Our overall visual style is minimal and visually engaging but with a neutral tone.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-6-8527a759",
+          "category": "layout",
+          "rule": "Reduce unnecessary information so the important things are clear.",
+          "sourceText": "Reduce the amount of unnecessary information, so the important things are clear.",
+          "confidence": "medium",
+          "value": {
+            "regionsFixed": false
+          }
+        },
+        {
+          "id": "hc-7-11b7c5a8",
+          "category": "palette",
+          "rule": "Use a neutral colour palette so important information stands out.",
+          "sourceText": "Use a neutral colour palette so important information stands out more in comparison.",
+          "confidence": "medium",
+          "value": {
+            "scheme": "neutral colour palette",
+            "locked": false
+          }
+        },
+        {
+          "id": "hc-8-60296f06",
+          "category": "palette",
+          "rule": "Do not convey meaning with colour alone; combine colour with shape, patterns, or icons.",
+          "sourceText": "Don't convey meaning with colour alone. Not everyone sees colours the same. Combine colour differences with shape variety, patterns or icons.",
+          "confidence": "high",
+          "value": {
+            "locked": false
+          }
+        },
+        {
+          "id": "hc-9-afff404c",
+          "category": "other",
+          "rule": "Consider the tone of the story and people's expectations.",
+          "sourceText": "Consider the tone of the story and people's expectations.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-10-557a216c",
+          "category": "other",
+          "rule": "Remove unnecessary details, avoid decoration, and keep graphics simple without becoming cartoonish.",
+          "sourceText": "Remove unnecessary details to make a graphic easier to read. Avoid decoration and make things simple. But also don't overdo it and give things a cartoonish tone.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-11-dd6f2ba1",
+          "category": "other",
+          "rule": "Use minimal points on Bézier curves when using digital illustration software.",
+          "sourceText": "If you're using digital illustration software, use minimal points on Bézier curves.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-12-755c3f46",
+          "category": "other",
+          "rule": "Reduce detail as images get smaller.",
+          "sourceText": "The smaller the image is, the less detail you need.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-13-61a5948e",
+          "category": "palette",
+          "rule": "Use each product's specific infographic colour palette.",
+          "sourceText": "Each BBC product has its own specific colour palette for infographics.",
+          "confidence": "medium",
+          "value": {
+            "locked": false
+          }
+        },
+        {
+          "id": "hc-14-e15348ab",
+          "category": "palette",
+          "rule": "Use a set range of colours within each product for illustrating certain things and highlighting key information.",
+          "sourceText": "Within each product we use a set range of colours when illustrating certain things such as buildings or nature. We also use set colours to highlight key information to make an infographic easier to understand.",
+          "confidence": "medium",
+          "value": {
+            "locked": false
+          }
+        },
+        {
+          "id": "hc-15-207e98a4",
+          "category": "typography",
+          "rule": "Use BBC Reith as the main typeface for all infographics.",
+          "sourceText": "BBC Reith is used as our main typeface for all infographics.",
+          "confidence": "high",
+          "value": {
+            "fontFamilies": [
+              "BBC Reith"
+            ]
+          }
+        },
+        {
+          "id": "hc-16-62bdab5d",
+          "category": "typography",
+          "rule": "Follow the GEL typography guideline for type sizing where possible.",
+          "sourceText": "For type sizing the GEL typography guideline should be followed where possible.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-17-2a8f494f",
+          "category": "palette",
+          "rule": "Ensure text colour contrasts well with the background.",
+          "sourceText": "Text colour should contrast well with the colour or colours behind it.",
+          "confidence": "high",
+          "value": {
+            "locked": false
+          }
+        },
+        {
+          "id": "hc-18-b1afbeb4",
+          "category": "other",
+          "rule": "Design labels to be as consistent as possible across the BBC.",
+          "sourceText": "We design labels to be as consistent as possible across the BBC, though we can change the colour and style of label where appropriate.",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-19-f29e8a6d",
+          "category": "format",
+          "rule": "Create infographics in up to three sizes: small, medium, and large.",
+          "sourceText": "Infographics are created at up to three different sizes: small, medium and large.",
+          "confidence": "high"
+        },
+        {
+          "id": "hc-20-b6aa059b",
+          "category": "layout",
+          "rule": "Use a vertical stack layout for small/mobile infographics.",
+          "sourceText": "Small (mobile) is presented as a vertical stack",
+          "confidence": "high",
+          "value": {
+            "regionsFixed": true
+          }
+        },
+        {
+          "id": "hc-21-9c8bbc5a",
+          "category": "layout",
+          "rule": "Use a more horizontal layout for medium/tablet and large/desktop infographics.",
+          "sourceText": "medium (tablet) and large (desktop) have a more horizontal layout.",
+          "confidence": "high",
+          "value": {
+            "regionsFixed": true
+          }
+        },
+        {
+          "id": "hc-22-d25c42ed",
+          "category": "format",
+          "rule": "Use fixed creation widths of 400px, 750px, and 976px for small, medium, and large infographics.",
+          "sourceText": "The widths below show the best averages that we use to scale our adaptive infographics across devices. Small Medium Large Graphic width (px) 400 750 976",
+          "confidence": "medium"
+        },
+        {
+          "id": "hc-23-2cbef2bb",
+          "category": "other",
+          "rule": "Do not imply meaning by colour alone.",
+          "sourceText": "Meaning should not be implied by colour alone.",
+          "confidence": "high"
+        },
+        {
+          "id": "hc-24-e51f15ad",
+          "category": "other",
+          "rule": "Do not rely on text embedded only in infographic images; provide a text alternative.",
+          "sourceText": "Text that is only part of an infographic (jpg, gif or png) is not accessible. Neither is an image without a text alternative.",
+          "confidence": "high"
+        }
+      ]
+    },
+    "designDocumentText": "How to design infographics  How we design infographics for BBC editorial content and how you can make your own.  Contributors  +3  Menu  Published on 28 Apr 2016  Contents  What is an infographic?  What makes a good infographic  Infographic visual style overview  Visual style variety  Visual style consistency  Responsive infographics  Accessibility  Licensing  Search BBC  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   1/15\n\nDownload assets (Ai File - 2.3MB)  Please read the   Licensing terms   before you download this content.  What is an infographic?  The term 'infographic' comes from 'information graphic' - a visual representation of information or data. They should educate and inform people in a quick, clear and engaging way.  At the BBC, our infographics usually fall under one of four categories:  Diagrams/technical illustrations  These are usually an illustration of a physical object or some kind of process.  The most important elements will be labelled to show people where the key information is.  Back to top  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   2/15\n\nFig 1   An example of a diagram from a BBC News story  Data visualisation  This type of infographic helps people   fi nd meaning in data. The simplest ones highlight a single value, compare one value against another or compare values over time. The most common forms are column, bar, line and pie charts.  Fig 2   An example of a line graph from a BBC News story  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   3/15\n\nAnnotations  As soon as you add a label to an image, it arguably becomes an infographic. Labels can be used to highlight key information within the image.  Fig 3   An example of an annotated image from BBC News  Maps  We use maps to show where things have happened and the relationship between events in an area. These are usually two-dimensional plan views of three-dimensional space with labels, keys and scales to help people understand a story.  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   4/15\n\nFig 4   An example of a BBC News map  What makes a good infographic  Good infographics should aim to follow some of these principles, a great infographic will follow all three…  Informative  Be informative, accurate and reveal the story in the information. We must add value to our infographics, presenting what text alone can't communicate. Generally we aim to bring clarity and understanding where there is complexity and confusion.  Engaging  Create a visually stimulating and engaging experience that will capture the viewers attention and be something they'll want to spend time reading. You should invite people to explore and contemplate and help them   fi nd personal relevance and context.  Back to top  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   5/15\n\nAccessible  Aim to reach all audiences by communicating with the clearest language and the simplest techniques. Remove the unnecessary visual clutter to create a clear and simple experience. And remember, some people physically see things di ff erently or not at all.  Fig 5   A Venn diagram showing the principles for a great infographic  Infographic visual style overview  Illustration  Our overall visual style is minimal and visually engaging but with a neutral tone. News, Sport and GEL have their own distinctive style that compliments their brand and editorial values.  Simplify the complex  Reduce the amount of unnecessary information, so the important things are clear.  Back to top  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   6/15\n\nUse colour with care  Use a neutral colour palette so important information stands out more in comparison.  Don't convey meaning with colour alone. Not everyone sees colours the same. Combine colour di ff erences with shape variety, patterns or icons. For example, the GEL infographics use green and red circles combined with tick and cross icons to show correct and incorrect designs. The   colour and meaning guideline   gives more information.  Consider tone  Consider the tone of the story and people's expectations. Too simple and the illustrations may look playful, too detailed and they might become too real or serious.  Fig 6   A diagram demonstrating the right level of detail for a BBC infographic  Remove unnecessary details to make a graphic easier to read. Avoid decoration and make things simple. But also don't overdo it and give things a cartoonish tone. If you're using digital illustration so  ware, use minimal points on Bézier curves.  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   7/15\n\nFig 7   A diagram demonstrating the use of bezier curves for simple shapes  Scale  The smaller the image is, the less detail you need.  Fig 8   An example of how illustration detail can reduce as an image element scales down  Visual style variety  Back to top  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   8/15\n\nHere's an overview of the elements across BBC News, Sport and GEL.  BBC News examples  Fig 9   Examples of the BBC News illustration style  BBC Sport examples  Fig 10   Examples of the BBC Sport illustration style  BBC GEL examples  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   9/15\n\nFig 11   Examples of the BBC GEL illustration style  Colour palette  Each BBC product has its own speci fi c colour palette for infographics. These colours are carefully chosen to compliment the brand colours of that product.  Within each product we use a set range of colours when illustrating certain things such as buildings or nature. We also use set colours to highlight key information to make an infographic easier to understand.  Fig 12   A selection of the colours used in BBC infographics  The full range of palettes can be found in the downloadable infographics asset   fi le. This can be found via the link at the top of this page.  Visual style consistency  Here's an overview of the elements of visual style which are consistent across all BBC products.  Typography  Back to top  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   10/15\n\nBBC Reith is used as our main typeface for all infographics. For type sizing the   GEL  typography guideline   should be followed where possible.  To optimise infographics across all devices, they are generally created in three di ff erent sizes: small, medium and large. The table below shows how the infographic text attributes can be applied using the GEL typography sizes.  Text colour should contrast well with the colour or colours behind it. The   colour contrast  guideline   gives more information.  Example usage   Type sizes  Title   Great primer  Subheader   Great primer  Label   Pica  Source   Brevier  Labels  We design labels to be as consistent as possible across the BBC, though we can change the colour and style of label where appropriate.  Fig 13   The label styles used in BBC infographics  Back to top  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   11/15\n\nResponsive infographics  We design infographics to give a good experience across a range of devices and browsers.  Infographics are created at up to three di ff erent sizes: small, medium and large. Depending on the size of someone's display, a di ff erent graphic will be shown. For example, if you're on a small screen, like a phone, you'll see the small graphic.  To give the best reading experience, infographics have a di ff erent layout depending on what size they are. Small (mobile) is presented as a vertical stack while medium (tablet) and large (desktop) have a more horizontal layout.  Fig 14   An example of how layout changes on mobile, tablet and desktop (example from BBC iWonder)  Infographics adapt in size to best   fi t the device/browser, but we have   fi xed widths at which we create them (we do not have   fi xed depths).  The widths below show the best averages that we use to scale our adaptive infographics across devices.  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   12/15\n\nSmall   Medium   Large  Graphic width (px)   400   750   976  Device ranges (px)   0 - 400   401 - 750   751 - 976+  Accessibility  Some key considerations when creating infographics are:  Colour contrast   - Text colour should contrast well with the colour or colours behind it.  Colour and meaning   - Meaning should not be implied by colour alone.  Text alternatives   - Text that is only part of an infographic (jpg, gif or png) is not accessible. Neither is an image without a text alternative.  You can   fi nd out more in our   how to design for accessibility guideline   or visit the   BBC  mobile accessibility guidelines .  Licensing  These assets are available for download on the following licence terms:  You can:  Download the assets and use them free of charge;  Use the assets without attribution; and  Modify or alter the assets and edit them as you like.  You can't:  Use the assets in a way that would bring the BBC into disrepute;  Back to top  Back to top  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   13/15\n\nMake available the assets so that they can be downloaded by others;  Sell the assets to other people or package the assets with others that are for sale;  Take payment from others to access the assets (including putting them behind a paywall);  Use the assets as part of a service that you are charging money for; or  Imply association with or endorsement from the BBC by using the assets.  Disclaimer: The assets are o ff ered as is and the BBC is not responsible for anything that happens if you use them.  Back to top  How-tos  How to design a voice experience  How to design accessible email newsletters  How to design accessible games  How to design for accessibility  How to design for children  How to design for interactive TV experiences  How to design for the web  How to design for touch  How to design forms  How to design infographics  How to design onboarding for games  How to make accessible animated images  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   14/15\n\nExplore the BBC  Copyright © 2026 BBC.   The BBC is not responsible for the content of external sites.   Read about our approach to external linking.  How to make custom emojis and GIFs accessible  How to use reactions in your content  How to write text descriptions (alt text) in BBC News articles  How to write useful error messages  See all  Home   News  Sport   Business  Technology   Health  Culture   Arts  Travel   Earth  Audio   Video  Live  Terms of Use   About the BBC  Privacy Policy   Cookies  Accessibility Help   Parental Guidance  Contact the BBC   Careers  BBC emails for you   Advertise with us  8/15/26, 1:20 PM   BBC GEL | How to design infographics  https://www.bbc.co.uk/gel/features/how-to-design-infographics   15/15"
+  }
+}

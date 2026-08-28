@@ -1,0 +1,11 @@
+dashboard,run,success,durationMs,critiques,executable,executableRatio,layoutComposition,layoutCompositionRatio,model,runId,error
+A,1,true,230414,9,7,0.7778,2,0.2222,configured-model,run-1787876748963-hiju1w,
+A,2,true,61712,7,5,0.7143,0,0,configured-model,run-1787877040543-yvxeyg,
+A,3,true,58758,8,6,0.75,0,0,configured-model,run-1787877155659-g8jgnp,
+A,4,true,54023,7,5,0.7143,0,0,configured-model,run-1787877277286-ra89oq,
+A,5,true,58883,6,4,0.6667,1,0.1667,configured-model,run-1787877389030-6j4c5u,
+B,1,true,61148,10,7,0.7,2,0.2,deterministic-evidence-fallback,run-1787876979386-v1ya5e,
+B,2,true,53391,7,4,0.5714,1,0.1429,deterministic-evidence-fallback,run-1787877102261-ikpllr,
+B,3,true,62851,6,4,0.6667,0,0,deterministic-evidence-fallback,run-1787877214425-dm4ibg,
+B,4,true,57705,7,5,0.7143,0,0,configured-model,run-1787877331315-9zy4nv,
+B,5,true,56757,6,4,0.6667,0,0,deterministic-evidence-fallback,run-1787877447921-om7t2r,
