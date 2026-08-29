@@ -4653,7 +4653,8 @@ function renderRefinementAlternatives(critique, alternatives, rationale, meta = 
       choices.querySelectorAll('input[name="refinementAlternative"]').forEach((choice) => {
         choice.disabled = true;
       });
-      hint.textContent = "Updating the detail page and Proposed canvas preview…";
+      submit.disabled = true;
+      hint.textContent = "Previewing this option on the canvas behind this window…";
       error.hidden = true;
       const previewed = await previewRefinementAlternative(
         critique,
@@ -4661,39 +4662,21 @@ function renderRefinementAlternatives(critique, alternatives, rationale, meta = 
         selectedIndex,
       );
       if (!state.refinementAlternatives || state.refinementAlternatives.critiqueId !== critique.id) return;
+      choices.querySelectorAll('input[name="refinementAlternative"]').forEach((choice) => {
+        choice.disabled = false;
+      });
       if (!previewed) {
         hint.textContent = "That option could not be previewed. Choose another solution.";
-        choices.querySelectorAll('input[name="refinementAlternative"]').forEach((choice) => {
-          choice.disabled = false;
-        });
         return;
       }
-      const pending = state.refinementAlternatives;
-      const committed = await commitRefinementAlternative(
-        critique,
-        alternatives[selectedIndex],
-        rationale,
-        {
-          requestId: pending.requestId,
-          latencyMs: pending.latencyMs,
-          alternativeCount: alternatives.length,
-          selectedIndex,
-          previewResult: pending.previewResults?.[selectedIndex],
-        },
-      );
-      if (!committed) {
-        hint.textContent = "That option could not update Proposed. Choose another solution.";
-        choices.querySelectorAll('input[name="refinementAlternative"]').forEach((choice) => {
-          choice.disabled = false;
-        });
-        return;
-      }
-      closeContextModal({ cancelPending: false });
-      document.getElementById("focusAccept")?.focus();
+      hint.textContent = "Previewing on the canvas behind this window. Pick another option, or use this one.";
+      submit.disabled = false;
     });
   });
   regenerate.hidden = false;
-  submit.hidden = true;
+  submit.hidden = false;
+  submit.disabled = true;
+  submit.textContent = "Use This Option";
   choices.querySelector("input")?.focus();
   positionRationalePopover(rationaleAnchorElement);
 }
@@ -10680,14 +10663,41 @@ document.getElementById("contextInjectForm").addEventListener("submit", async (e
   const critique = critiqueById(state.contextTargetId);
   const text = document.getElementById("contextInput").value.trim();
   if ((!critique && !existingRationale) || !text) return;
-  const pendingAlternatives = state.refinementAlternatives;
+  const pending = state.refinementAlternatives;
   if (
     rationaleIntent === "refine-solution"
     && critique
-    && pendingAlternatives?.critiqueId === critique.id
+    && pending?.critiqueId === critique.id
   ) {
-    // Choosing the radio option owns this transition. Ignore form submission
-    // while its preview/Proposed update is in flight so Enter cannot double-run it.
+    // The choices list owns this submission: commit whichever option is
+    // currently previewed, or ignore Enter/click if nothing is previewed yet.
+    const selectedIndex = pending.selectedIndex;
+    if (selectedIndex == null) return;
+    const submit = document.getElementById("saveRationaleButton");
+    const hint = document.getElementById("rationaleHint");
+    submit.disabled = true;
+    submit.textContent = "Using This Option…";
+    const committed = await commitRefinementAlternative(
+      critique,
+      pending.alternatives[selectedIndex],
+      pending.rationale,
+      {
+        requestId: pending.requestId,
+        latencyMs: pending.latencyMs,
+        alternativeCount: pending.alternatives.length,
+        selectedIndex,
+        previewResult: pending.previewResults?.[selectedIndex],
+      },
+    );
+    if (!committed) {
+      submit.disabled = false;
+      submit.textContent = "Use This Option";
+      hint.textContent = "That option could not update Proposed. Choose another solution.";
+      return;
+    }
+    closeContextModal({ cancelPending: false });
+    renderFixedContextPanel();
+    document.getElementById("focusAccept")?.focus();
     return;
   }
   const critiqueReference = critique || {
