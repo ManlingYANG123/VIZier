@@ -467,6 +467,11 @@ const state = {
   // until the author explicitly chooses one; generation alone never mutates
   // the visible critique or dashboard.
   refinementAlternatives: null,
+  // The most recently generated refinement batch, kept after the modal closes
+  // so "Review again" can reopen it without a new engine call. Single slot:
+  // generating a new batch (for this or any other critique) overwrites it, and
+  // it's only ever surfaced while its critiqueId matches the one in focus.
+  lastRefinementBatch: null,
   interactionJournal: [],
   nextInteractionEventId: 1,
   preferenceAgent: {
@@ -4628,6 +4633,16 @@ function renderRefinementAlternatives(critique, alternatives, rationale, meta = 
     latencyMs: meta.latencyMs ?? null,
     previewToken: 0,
   };
+  // Survives modal close so "Review again" can reopen this exact list without
+  // a new engine call. A fresh batch (this or any other critique) overwrites it.
+  state.lastRefinementBatch = {
+    critiqueId: critique.id,
+    rationale,
+    alternatives: clone(alternatives),
+    previewResults: clone(meta.previewResults || []),
+    requestId: meta.requestId || null,
+    latencyMs: meta.latencyMs ?? null,
+  };
   prompt.textContent = "Choose another solution";
   hint.textContent = `${alternatives.length} executable options follow your direction. The issue and evidence stay unchanged.`;
   hint.hidden = false;
@@ -8172,6 +8187,10 @@ async function renderInspector() {
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7M11.5 4.5l-7 7"/></svg>
           <span>${critiqueIsExecutable(critique) ? "Reject Issue" : "Reject"}</span>
         </button>
+        ${critiqueIsExecutable(critique) && state.lastRefinementBatch?.critiqueId === critique.id ? `
+        <button class="focus-action-link" id="focusReviewAgain" type="button">
+          Review ${state.lastRefinementBatch.alternatives.length} generated alternative${state.lastRefinementBatch.alternatives.length === 1 ? "" : "s"} again
+        </button>` : ""}
         ${critiqueIsExecutable(critique) ? "" : `
         <button class="focus-action secondary" id="focusAddContext" type="button">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5h10v7H7l-3 2v-2H3z"/><path d="M8 5.5v3M6.5 7h3"/></svg>
@@ -8363,6 +8382,23 @@ async function renderInspector() {
   });
   document.getElementById("focusRefineSolution")?.addEventListener("click", (event) =>
     openRationaleModal(critique, null, event.currentTarget, { intent: "refine-solution" }));
+  document.getElementById("focusReviewAgain")?.addEventListener("click", (event) => {
+    const cached = state.lastRefinementBatch;
+    if (!cached || cached.critiqueId !== critique.id) return;
+    // Mirrors openRationaleModal's shared setup, but skips its text-input
+    // rendering (and the textarea-focus rAF, which would otherwise steal
+    // focus from the choices list right after renderRefinementAlternatives
+    // focuses it) since we're going straight to the choices view.
+    state.contextTargetId = critique.id;
+    state.rationaleEditId = null;
+    state.rationaleIntent = "refine-solution";
+    rationaleAnchorElement = event.currentTarget;
+    const modal = document.getElementById("contextModal");
+    modal.dataset.intent = "refine-solution";
+    modal.setAttribute("aria-label", `Refine the solution for ${critique.title}`);
+    modal.hidden = false;
+    renderRefinementAlternatives(critique, cached.alternatives, cached.rationale, cached);
+  });
   document.getElementById("focusAddContext")?.addEventListener("click", (event) =>
     openRationaleModal(critique, critiqueRationales.at(-1) || null, event.currentTarget));
   document.getElementById("focusEditRationale")?.addEventListener("click", (event) =>
