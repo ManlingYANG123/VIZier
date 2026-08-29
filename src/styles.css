@@ -2167,140 +2167,6 @@ button { font: inherit; }
 .context-modal textarea { width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--ink); font: 13px -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif; resize: vertical; }
 .context-modal textarea:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px #5b4cf024; }
 
-/* Direct-answer panel -------------------------------------------------------
- * A focused or selected-region ask always gets a visible plain-language answer
- * here, even when the engine produced no grounded critique card. The
- * focused-request accent keeps a narrow question from being met with silence. */
-.ask-answer {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 0 16px 14px;
-  padding: 10px 12px;
-  border: 1px solid #e0e0e2;
-  border-left: 3px solid #2c2c2e;
-  border-radius: 8px;
-  background: linear-gradient(to right, #f7f7f8, #ffffff);
-  animation: askAnswerSlideIn 0.35s ease-out;
-}
-.ask-answer[hidden] { display: none; }
-
-@keyframes askAnswerSlideIn {
-  from { opacity: 0; transform: translateY(-10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.ask-answer-head {
-  display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 8px;
-}
-
-.ask-answer-icon {
-  display: grid;
-  width: 22px;
-  height: 22px;
-  place-items: center;
-  color: #2c2c2e;
-}
-
-.ask-answer-icon svg {
-  width: 17px;
-  height: 17px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.45;
-}
-
-.ask-answer-copy {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.ask-answer-copy strong {
-  color: #2c2c2e;
-  font-size: 11.5px;
-  font-weight: 700;
-  line-height: 1.25;
-  letter-spacing: 0.01em;
-}
-
-.ask-answer-request {
-  display: -webkit-box;
-  overflow: hidden;
-  color: #6e6e73;
-  font-size: 10.5px;
-  font-style: italic;
-  line-height: 1.35;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.ask-answer-dismiss {
-  display: grid;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  place-items: center;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
-  color: #86868b;
-  font-size: 15px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.ask-answer-dismiss:hover {
-  background: #f0f0f2;
-  color: #2c2c2e;
-}
-
-.ask-answer-body {
-  margin: 0;
-  color: #3a3a3c;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.ask-answer-link {
-  align-self: flex-start;
-  padding: 4px 9px;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  background: #ffffff;
-  color: #2c2c2e;
-  font-size: 11px;
-  font-weight: 650;
-  cursor: pointer;
-}
-
-.ask-answer-link:hover {
-  border-color: #2c2c2e;
-  background: #f7f7f8;
-}
-
-.ask-answer-note {
-  margin: 0;
-  color: #86868b;
-  font-size: 10.5px;
-  line-height: 1.4;
-}
-
-/* Failure variant: the ask could not be answered this time. */
-.ask-answer-error {
-  border-color: #f2c7c2;
-  border-left-color: #d0392b;
-  background: linear-gradient(to right, #fdf3f2, #ffffff);
-}
-
-.ask-answer-error .ask-answer-icon { color: #d0392b; }
-.ask-answer-error .ask-answer-link { color: #d0392b; border-color: #f2c7c2; }
-.ask-answer-error .ask-answer-dismiss:hover { background: #f8e0dd; }
-
 /* ------------------------------------------------------------------ *
  * POSITIVE CARD — inline "done well" praise inside a topic group
  *
@@ -4637,10 +4503,34 @@ body.revision-dock-resizing .revision-dock.version-history {
 }
 
 .refinement-choice input {
+  appearance: none;
+  display: grid;
   width: 15px;
   height: 15px;
   margin: 2px 0 0;
-  accent-color: #2f6bd8;
+  place-items: center;
+  border: 1.5px solid #8d8d93;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+}
+
+.refinement-choice input::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #2f6bd8;
+  content: "";
+  transform: scale(0);
+  transition: transform 120ms ease-out;
+}
+
+.refinement-choice input:checked {
+  border-color: #2f6bd8;
+}
+
+.refinement-choice input:checked::before {
+  transform: scale(1);
 }
 
 .refinement-choice input:focus-visible {
@@ -5258,18 +5148,29 @@ body.revision-dock-resizing .revision-dock.version-history {
 }
 .focus-action-link {
   grid-column: 1 / -1;
-  border: none;
-  background: none;
-  padding: 2px 2px 0;
-  font-size: 12px;
-  font-weight: 650;
+  min-height: 28px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
   color: var(--brand);
-  text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, var(--brand) 40%, transparent);
-  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 650;
+  line-height: 1.35;
   text-align: center;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--brand) 42%, transparent);
+  text-underline-offset: 3px;
+  cursor: pointer;
 }
-.focus-action-link:hover { text-decoration-color: var(--brand); }
+.focus-action-link:hover {
+  color: color-mix(in srgb, var(--brand) 82%, #1d1d1f);
+  text-decoration-color: currentColor;
+}
+.focus-action-link:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
 .focus-action.refine {
   border-color: #c7c7cc;
   background: #f5f5f7;
@@ -7096,6 +6997,17 @@ body.panel-resizing * {
   font-weight: 650;
   line-height: 1.35;
   letter-spacing: -.006em;
+}
+
+.critique-answer-preview {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #5f5f65;
+  font-size: 11.5px;
+  font-weight: 450;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .critique-list-view .group-items .card-affordance.open {

@@ -122,7 +122,7 @@ test("solution alternatives remain on demand through Refine Solution", async () 
   const source = await appSource();
 
   assert.match(source, /id="focusRefineSolution"/);
-  assert.match(source, /critiqueSolutionRefinementRequest\(critique, rationale, \{/);
+  assert.match(source, /critiqueSolutionRefinementRequest\(critique, direction, \{/);
   assert.match(source, /id="refinementChoices"/);
   assert.match(source, /usePracticeOverallCache: false/);
 });

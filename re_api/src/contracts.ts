@@ -24,6 +24,7 @@ export type ProposalKind =
   | "add-tooltip"
   | "show-filter-state"
   | "wire-filter-control"
+  | "edit-filter-control"
   // color / data branches
   | "add-kpis"
   | "recompose-kpis"
@@ -47,11 +48,12 @@ export type ProposalKind =
   | (string & {});
 
 /**
- * A recommendation branch. In v2 this is the top-level grouping of the leaf
- * recommendation codebook (recommendation_v3_examples.csv); a finding/critique carries
- * the branch of its prescribed recommendation. Branch is a display/grouping
- * label only — DIAGNOSING (object×problem) does not gate which branch a
- * prescription may come from.
+ * An author-facing critique category. It normally follows the top-level branch
+ * of the prescribed recommendation leaf (recommendation_v3_examples.csv). When
+ * a concrete executable operation supplies stronger semantics, the engine
+ * canonicalizes it — for example, moving a filter control is `layout`, while
+ * wiring that filter is `interaction`. The category is a display/scope label;
+ * DIAGNOSING (object×problem) does not gate which prescription may be chosen.
  *
  * The first 11 values are exactly the branches enumerated in
  * RECOMMENDATION_BRANCHES (generate/recommendations.ts); those two lists must
@@ -351,6 +353,12 @@ export interface Proposal {
   kpiChrome?: "plain" | "ruled" | "filled";
   /** For wire-filter-control: exact id of a visible board filter to repair. */
   filterId?: string;
+  /** For edit-filter-control: move one existing filter using the board's
+   * supported placement system. Floating placement additionally carries a
+   * validated canvas-space position; chart-header carries an anchor tile. */
+  filterPlacement?: DashboardFilterControl["placement"];
+  filterPosition?: { x: number; y: number; w?: number };
+  anchorTileId?: string;
   /** Optional model-authored palette for `v2-palette`. Values are sanitized
    * before apply; this lets the empirical color recommendation adapt to the
    * dashboard/design-document direction instead of imposing one house palette. */

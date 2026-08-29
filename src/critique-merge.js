@@ -52,8 +52,9 @@ export function critiqueIdentityKey(critique) {
  * Merge a fresh ask while preserving decisions and stable active-card ids.
  *
  * Rules:
- *   - incoming matches a DECIDED critique -> skip (respect the prior decision),
- *     record resurfacedByAskId on the prior for the history view;
+ *   - incoming matches a DECIDED critique -> preserve the prior decision and
+ *     record resurfacedByAskId; a direct focused/region answer is additionally
+ *     kept as a new card for the current ask;
  *   - incoming matches an ACTIVE critique -> keep its stable id but replace the
  *     complete critique/proposal with the current validated payload;
  *   - incoming is new -> add it as pending;
@@ -104,8 +105,16 @@ export function mergeAskResults(existing, incoming, ask) {
       continue;
     }
     if (isDecidedCritique(prior)) {
-      // Respect the decision; only record that this ask re-surfaced it.
+      // Respect the earlier decision, but a direct focused/region answer must
+      // still have a visible card for the new ask. Keep the decided history item
+      // untouched and add the current answer as a new pending card instead of
+      // silently routing it only to a transient answer panel.
       prior.resurfacedByAskId = askId;
+      if (candidate.requestRelevance === "direct" && reviewScope !== "full") {
+        candidate.status = candidate.status || "pending";
+        merged.push(candidate);
+        currentActive.add(candidate);
+      }
       continue;
     }
     if (dashboardVersion !== null) {
@@ -219,13 +228,13 @@ function proposalTextValues(proposal) {
   return values;
 }
 
-export function refinementDirectionRequiresShorterText(rationale) {
-  return SHORTER_TEXT_PATTERN.test(String(rationale || "").trim());
+export function refinementDirectionRequiresShorterText(direction) {
+  return SHORTER_TEXT_PATTERN.test(String(direction || "").trim());
 }
 
 /** Validate user-authored refinement constraints before replacing the visible fix. */
-export function solutionRefinementAlignment(previous, replacement, rationale) {
-  if (!refinementDirectionRequiresShorterText(rationale)) {
+export function solutionRefinementAlignment(previous, replacement, direction) {
+  if (!refinementDirectionRequiresShorterText(direction)) {
     return { aligned: true, reason: "" };
   }
   const previousProposalText = proposalTextValues(previous?.proposal).join(" ");
@@ -290,7 +299,7 @@ export function critiqueRefreshRequest(critique) {
 }
 
 /** Ask for a different solution without reopening the accepted diagnosis. */
-export function critiqueSolutionRefinementRequest(critique, rationale, {
+export function critiqueSolutionRefinementRequest(critique, direction, {
   optionIndex = 1,
   optionCount = 3,
   strategy = "Use a materially different executable approach from the current solution.",
@@ -309,7 +318,7 @@ export function critiqueSolutionRefinementRequest(critique, rationale, {
     target: critique?.target || null,
   });
   const previousProposal = JSON.stringify(critique?.proposal || null);
-  const shorterTextConstraint = refinementDirectionRequiresShorterText(rationale)
+  const shorterTextConstraint = refinementDirectionRequiresShorterText(direction)
     ? [
         "HARD ACCEPTANCE CONSTRAINT: Make the recommendation wording and every proposed replacement text at least 20% shorter than the previous attempt.",
         "Use direct, compact language. A different but similarly long sentence does not satisfy the request.",
@@ -341,13 +350,13 @@ export function critiqueSolutionRefinementRequest(critique, rationale, {
     critique?.suggestion ? `Previous solution: ${critique.suggestion}` : "",
     `Previous executable proposal: ${previousProposal}`,
     "Each new proposal must produce a non-identical dashboard/spec state when executed against the contracted target.",
-    `Author's refinement direction: ${String(rationale || "").trim()}`,
+    `Author's refinement direction: ${String(direction || "").trim()}`,
     critique?.dimension ? `Dimension: ${critique.dimension}` : "",
   ].filter(Boolean).join("\n");
 }
 
 /** Preserve diagnosis identity while replacing only the mutable solution attempt. */
-export function buildRefinedCritique(previous, replacement, rationale, dashboardVersion) {
+export function buildRefinedCritique(previous, replacement, dashboardVersion) {
   const nextSuggestion = replacement?.suggestion || previous?.suggestion || "";
   return {
     ...structuredClone(previous),
@@ -364,10 +373,6 @@ export function buildRefinedCritique(previous, replacement, rationale, dashboard
     lifecycle: "active",
     lastEvaluatedVersion: dashboardVersion,
     revision: (Number(previous?.revision) || 1) + 1,
-    revisions: [
-      ...(structuredClone(previous?.revisions) || []),
-      { rationale: String(rationale || "").trim(), suggestion: nextSuggestion },
-    ],
   };
 }
 

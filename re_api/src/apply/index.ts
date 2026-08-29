@@ -502,6 +502,40 @@ export function applyBoardProposal(board: BoardMeta, critique: Critique, specMap
       );
       return true;
     }
+    case "edit-filter-control": {
+      const filterId = critique.proposal.filterId;
+      const placement = critique.proposal.filterPlacement;
+      const index = board.filters?.findIndex((control) => control.id === filterId) ?? -1;
+      if (index < 0 || !board.filters || !placement || ![
+        "top-row", "title-inline", "left-rail", "right-rail", "chart-header", "floating",
+      ].includes(placement)) return false;
+      const control = board.filters[index];
+      const next = { ...control, placement };
+      if (placement === "floating") {
+        const position = critique.proposal.filterPosition;
+        if (!position) return false;
+        const x = Number(position.x);
+        const y = Number(position.y);
+        const w = position.w === undefined ? 240 : Number(position.w);
+        const canvasWidth = Number(board.canvasWidth) || 1100;
+        const canvasHeight = Number(board.canvasHeight) || 720;
+        if (![x, y, w].every(Number.isFinite) || x < 0 || y < 0 || w < 120 ||
+            x + w > canvasWidth || y + 52 > canvasHeight) return false;
+        next.position = { x, y, w };
+        delete next.anchorTile;
+      } else if (placement === "chart-header") {
+        const anchor = critique.proposal.anchorTileId;
+        if (!anchor || !board.tiles?.some((tile) => tile.id === anchor)) return false;
+        next.anchorTile = anchor;
+        delete next.position;
+      } else {
+        delete next.position;
+        delete next.anchorTile;
+      }
+      if (JSON.stringify(next) === JSON.stringify(control)) return false;
+      board.filters = board.filters.map((item, itemIndex) => itemIndex === index ? next : item);
+      return true;
+    }
     case "add-kpis":
     case "recompose-kpis": {
       const adding = critique.proposal.kind === "add-kpis";

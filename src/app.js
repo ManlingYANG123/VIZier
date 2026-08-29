@@ -89,6 +89,7 @@ import {
   buildInteractionScenario,
   dashboardDocumentFromSnapshot,
   normalizeDashboardDocument,
+  staticInteractionPreviewForRender,
 } from "./vega-dashboard-adapter.js";
 import {
   PANEL_LAYOUT_STORAGE_KEY,
@@ -435,10 +436,6 @@ const state = {
   focusedReviewRunning: false,
   solutionRefinementRunning: false,
   reviewInFlight: false,
-  // The most recent direct answer to a focused/region ask. Surfaced in its own
-  // panel so a narrow question always gets a visible response, even when the
-  // engine produced no standard (grounded) critique card.
-  askAnswer: null,
   contextTargetId: null,
   filters: { status: "all", source: "all", category: "all" },
   search: "",
@@ -463,14 +460,14 @@ const state = {
   rationaleEditId: null,
   rationaleIntent: "save",
   refinementRequestToken: 0,
+  refinementAbortController: null,
   // On-demand alternatives for one accepted diagnosis. These stay transient
   // until the author explicitly chooses one; generation alone never mutates
   // the visible critique or dashboard.
   refinementAlternatives: null,
-  // The most recently generated refinement batch, kept after the modal closes
-  // so "Review again" can reopen it without a new engine call. Single slot:
-  // generating a new batch (for this or any other critique) overwrites it, and
-  // it's only ever surfaced while its critiqueId matches the one in focus.
+  // Recoverable alternatives for the currently focused critique. This cache
+  // intentionally excludes the author's refinement direction and expires when
+  // the dashboard version changes; it is UI recovery, not saved rationale.
   lastRefinementBatch: null,
   interactionJournal: [],
   nextInteractionEventId: 1,
@@ -822,7 +819,6 @@ document.querySelector("#app").innerHTML = `
              the single-critique Apply flow the list view is hidden, so the
              module falls back to the panel top (see traceHost() in api-client). -->
         <div class="engine-trace-host" id="reApiTraceHost"></div>
-        <section class="ask-answer" id="askAnswer" aria-live="polite" hidden></section>
         <section class="critique-distribution" id="critiqueDistribution" aria-label="Critique Category Distribution" style="margin-top:8px" hidden></section>
         <div class="critique-list" id="critiqueList">
           <div class="empty-state">No critiques yet.</div>
@@ -898,7 +894,7 @@ document.querySelector("#app").innerHTML = `
           <button type="button" id="closeContextModal" aria-label="Close rationale popover">×</button>
         </div>
         <textarea id="contextInput" rows="2" maxlength="600" required placeholder="e.g. Keep labels readable from across the room."></textarea>
-        <p class="rationale-hint" id="rationaleHint" hidden></p>
+        <p class="rationale-hint" id="rationaleHint" role="status" aria-live="polite" hidden></p>
         <p class="rationale-error" id="rationaleError" role="alert" hidden></p>
         <div class="refinement-choices" id="refinementChoices" role="radiogroup" aria-label="Alternative solutions" hidden></div>
         <div class="modal-actions">
@@ -1728,9 +1724,11 @@ function specForTile(tile) {
   // representative coordinated selection so the behavior is visible on the
   // static canvas — otherwise Proposed looks identical to Original because a
   // cross-filter param / tooltip encoding only manifests on click/hover.
-  const interactionPreview = state.canvasPreview?.phase === "after"
-    ? state.canvasPreview.interactionPreview
-    : null;
+  const interactionPreview = staticInteractionPreviewForRender(
+    state.canvasPreview?.interactionPreview,
+    state.canvasPreview?.phase,
+    state.demoPlaying,
+  );
   if (interactionPreview?.kind === "cross-filter") {
     const selection = { field: interactionPreview.field, value: interactionPreview.value };
     if (tile.id === interactionPreview.sourceTile) return applySourceSelectionState(dashboardFilteredSpec, selection);
@@ -1852,7 +1850,10 @@ async function onCrossFilterClick(event, item) {
 
 function renderDashboardFilterBar(filters = [], board = {}) {
   const controls = Array.isArray(filters) ? filters : [];
-  const previewing = Boolean(activeCanvasPreviewResult());
+  // Passive previews are read-only. A live interaction replay is different:
+  // it must operate the Proposed control so VIZier can observe whether the
+  // target views actually respond.
+  const previewing = Boolean(activeCanvasPreviewResult()) && !state.demoPlaying;
   const disabled = previewing ? " disabled title=\"Finish the recommendation preview before changing dashboard filters\"" : "";
   els.dashboardFilterBar.hidden = controls.length === 0;
   if (!controls.length) {
@@ -1937,7 +1938,7 @@ function renderDashboardFilterBar(filters = [], board = {}) {
   }).join("");
   els.dashboardFilterBar.querySelectorAll("[data-dashboard-filter-select]").forEach((control) => {
     control.addEventListener("change", async () => {
-      const filter = state.dashboardFilters.find((item) => item.id === control.dataset.dashboardFilterSelect);
+      const filter = interactiveDashboardFilter(control.dataset.dashboardFilterSelect);
       if (!filter) return;
       filter.value = control.value === "" ? null : control.value;
       await renderTiles();
@@ -1945,7 +1946,7 @@ function renderDashboardFilterBar(filters = [], board = {}) {
   });
   els.dashboardFilterBar.querySelectorAll("[data-dashboard-filter-range]").forEach((control) => {
     const update = async () => {
-      const filter = state.dashboardFilters.find((item) => item.id === control.dataset.dashboardFilterRange);
+      const filter = interactiveDashboardFilter(control.dataset.dashboardFilterRange);
       if (!filter) return;
       filter.value = Number(control.value);
       const output = els.dashboardFilterBar.querySelector(`[data-filter-output="${CSS.escape(filter.id)}"]`);
@@ -1956,16 +1957,17 @@ function renderDashboardFilterBar(filters = [], board = {}) {
   });
   els.dashboardFilterBar.querySelectorAll("[data-dashboard-filter-option]").forEach((control) => {
     control.addEventListener("click", async () => {
-      const filter = state.dashboardFilters.find((item) => item.id === control.dataset.dashboardFilterOption);
+      const filter = interactiveDashboardFilter(control.dataset.dashboardFilterOption);
       if (!filter) return;
       filter.value = control.dataset.filterValue || null;
-      renderDashboardFilterBar(state.dashboardFilters, canvasBoardState());
+      const boardState = canvasBoardState();
+      renderDashboardFilterBar(boardState.filters, boardState);
       await renderTiles();
     });
   });
   els.dashboardFilterBar.querySelectorAll("[data-dashboard-filter-check]").forEach((control) => {
     control.addEventListener("change", async () => {
-      const filter = state.dashboardFilters.find((item) => item.id === control.dataset.dashboardFilterCheck);
+      const filter = interactiveDashboardFilter(control.dataset.dashboardFilterCheck);
       if (!filter) return;
       const checked = [...els.dashboardFilterBar.querySelectorAll(
         `[data-dashboard-filter-check="${CSS.escape(filter.id)}"]:checked`,
@@ -1974,6 +1976,17 @@ function renderDashboardFilterBar(filters = [], board = {}) {
       await renderTiles();
     });
   });
+}
+
+function interactiveDashboardFilter(filterId) {
+  const previewFilters = state.demoPlaying
+    ? activeCanvasPreviewResult()?.board?.filters
+    : null;
+  return (Array.isArray(previewFilters)
+    ? previewFilters.find((item) => item.id === filterId)
+    : null)
+    || state.dashboardFilters.find((item) => item.id === filterId)
+    || null;
 }
 
 function renderDashboardChrome({ renderContext = true } = {}) {
@@ -3556,6 +3569,7 @@ function critiqueRequestStudyData({
 function classifyDashboardOperation(changedTargets = [], critiques = []) {
   const kinds = new Set((critiques || []).map((critique) => critique?.proposal?.kind).filter(Boolean));
   const targets = (changedTargets || []).map((target) => String(target).toLowerCase());
+  if (kinds.has("edit-filter-control")) return "layout";
   if ([...kinds].some((kind) => /cross-filter|filter|interaction/.test(kind))
     || targets.some((target) => /filter|interaction/.test(target))) {
     return "interaction";
@@ -4359,6 +4373,11 @@ function attachContextPanelEventListeners() {
       state.focusedReviewRunning = false;
       setFocusedReviewGenerating(false);
       focusedButton.classList.remove("running");
+      // runAIAssist finishes while focusedReviewRunning is still true, so its
+      // final readiness sync intentionally keeps the other review entry points
+      // locked. Re-sync after clearing this outer flag so Select an Area and
+      // Overall Review immediately become available again.
+      syncReviewReadiness();
     }
     if (succeeded) {
       if (focusedInput) focusedInput.value = "";
@@ -4453,6 +4472,13 @@ function scopeRank(critiques) {
 // memory for later critique generation.
 let rationaleAnchorElement = null;
 
+function contextModalReturnTarget() {
+  if (rationaleAnchorElement?.isConnected) return rationaleAnchorElement;
+  return document.getElementById(
+    state.rationaleIntent === "refine-solution" ? "focusRefineSolution" : "focusAddContext",
+  );
+}
+
 function positionRationalePopover(anchor = rationaleAnchorElement) {
   const modal = document.getElementById("contextModal");
   if (!modal || modal.hidden) return;
@@ -4534,10 +4560,13 @@ function closeContextModal({ cancelPending = true } = {}) {
   const restoreCritiquePreview = state.rationaleIntent === "refine-solution"
     && state.canvasPreview?.alternativePreview;
   if (cancelPending && state.rationaleIntent === "refine-solution" && input.disabled) {
-    // The engine request may still finish, but its token becomes stale so the
-    // late response cannot replace the critique after the author closes here.
+    // Cancel both sides of the request: abort the streaming fetch to stop wasted
+    // work, and invalidate the token so a response already in flight cannot
+    // replace the critique after the author closes here.
     state.refinementRequestToken += 1;
+    state.refinementAbortController?.abort();
   }
+  state.refinementAbortController = null;
   modal.hidden = true;
   modal.style.removeProperty("left");
   modal.style.removeProperty("top");
@@ -4570,12 +4599,36 @@ function refinementProposalLabel(alternative) {
     .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
+function refinementAlternativeSnapshot(alternative) {
+  return {
+    suggestion: String(alternative?.suggestion || ""),
+    proposal: clone(alternative?.proposal || null),
+    recommendation: alternative?.recommendation || null,
+    surface: alternative?.surface || null,
+    fixability: alternative?.fixability || null,
+  };
+}
+
+function recoverableRefinementBatch(critique) {
+  const batch = state.lastRefinementBatch;
+  if (
+    !critique
+    || !batch
+    || batch.critiqueId !== critique.id
+    || batch.dashboardVersion !== state.version
+    || batch.critiqueRevision !== (Number(critique.revision) || 1)
+    || !Array.isArray(batch.alternatives)
+    || !batch.alternatives.length
+  ) return null;
+  return batch;
+}
+
 async function previewRefinementAlternative(critique, alternative, index) {
   const pending = state.refinementAlternatives;
   if (!pending || pending.critiqueId !== critique.id) return false;
   const previewToken = (pending.previewToken || 0) + 1;
   pending.previewToken = previewToken;
-  const candidate = buildRefinedCritique(critique, alternative, pending.rationale, state.version);
+  const candidate = buildRefinedCritique(critique, alternative, state.version);
   const candidateCritiques = state.critiques.map((item) => item.id === critique.id ? candidate : item);
   try {
     const result = pending.previewResults?.[index] || await streamApplyForCurrentMode({
@@ -4615,7 +4668,7 @@ async function previewRefinementAlternative(critique, alternative, index) {
   }
 }
 
-function renderRefinementAlternatives(critique, alternatives, rationale, meta = {}) {
+function renderRefinementAlternatives(critique, alternatives, direction, meta = {}) {
   const choices = document.getElementById("refinementChoices");
   const input = document.getElementById("contextInput");
   const prompt = document.getElementById("rationalePrompt");
@@ -4623,33 +4676,37 @@ function renderRefinementAlternatives(critique, alternatives, rationale, meta = 
   const error = document.getElementById("rationaleError");
   const submit = document.getElementById("saveRationaleButton");
   const regenerate = document.getElementById("regenerateRefinementChoices");
+  const safeAlternatives = alternatives.map(refinementAlternativeSnapshot);
   state.refinementAlternatives = {
     critiqueId: critique.id,
-    rationale,
-    alternatives: clone(alternatives),
+    direction,
+    alternatives: clone(safeAlternatives),
     previewResults: clone(meta.previewResults || []),
     selectedIndex: null,
     requestId: meta.requestId || null,
     latencyMs: meta.latencyMs ?? null,
     previewToken: 0,
+    previewing: false,
   };
-  // Survives modal close so "Review again" can reopen this exact list without
-  // a new engine call. A fresh batch (this or any other critique) overwrites it.
+  // Keep only the generated remedies and their already-validated previews. The
+  // user-authored direction remains in the live modal state above and is
+  // discarded by closeContextModal; it never enters this recoverable cache.
   state.lastRefinementBatch = {
     critiqueId: critique.id,
-    rationale,
-    alternatives: clone(alternatives),
+    dashboardVersion: state.version,
+    critiqueRevision: Number(critique.revision) || 1,
+    alternatives: clone(safeAlternatives),
     previewResults: clone(meta.previewResults || []),
     requestId: meta.requestId || null,
     latencyMs: meta.latencyMs ?? null,
   };
   prompt.textContent = "Choose another solution";
-  hint.textContent = `${alternatives.length} executable options follow your direction. The issue and evidence stay unchanged.`;
+  hint.textContent = `${alternatives.length} executable options follow your direction. Select any option to preview it; nothing changes until you confirm.`;
   hint.hidden = false;
   error.hidden = true;
   input.hidden = true;
   input.disabled = false;
-  choices.innerHTML = alternatives.map((alternative, index) => `
+  choices.innerHTML = safeAlternatives.map((alternative, index) => `
     <label class="refinement-choice">
       <input type="radio" name="refinementAlternative" value="${index}" />
       <span class="refinement-choice-body">
@@ -4665,35 +4722,66 @@ function renderRefinementAlternatives(critique, alternatives, rationale, meta = 
     radio.addEventListener("change", async () => {
       const selectedIndex = Number(radio.value);
       state.refinementAlternatives.selectedIndex = selectedIndex;
+      state.refinementAlternatives.previewing = true;
+      submit.disabled = true;
       choices.querySelectorAll('input[name="refinementAlternative"]').forEach((choice) => {
         choice.disabled = true;
       });
-      submit.disabled = true;
-      hint.textContent = "Previewing this option on the canvas behind this window…";
+      hint.textContent = `Previewing Option ${selectedIndex + 1} on the Proposed canvas…`;
       error.hidden = true;
       const previewed = await previewRefinementAlternative(
         critique,
-        alternatives[selectedIndex],
+        safeAlternatives[selectedIndex],
         selectedIndex,
       );
       if (!state.refinementAlternatives || state.refinementAlternatives.critiqueId !== critique.id) return;
-      choices.querySelectorAll('input[name="refinementAlternative"]').forEach((choice) => {
-        choice.disabled = false;
-      });
+      state.refinementAlternatives.previewing = false;
       if (!previewed) {
         hint.textContent = "That option could not be previewed. Choose another solution.";
+        radio.checked = false;
+        radio.disabled = true;
+        radio.closest(".refinement-choice")?.classList.add("is-unavailable");
+        state.refinementAlternatives.selectedIndex = null;
+        choices.querySelectorAll('input[name="refinementAlternative"]').forEach((choice) => {
+          if (!choice.closest(".refinement-choice")?.classList.contains("is-unavailable")) {
+            choice.disabled = false;
+          }
+        });
         return;
       }
-      hint.textContent = "Previewing on the canvas behind this window. Pick another option, or use this one.";
+      choices.querySelectorAll('input[name="refinementAlternative"]').forEach((choice) => {
+        if (!choice.closest(".refinement-choice")?.classList.contains("is-unavailable")) {
+          choice.disabled = false;
+        }
+      });
       submit.disabled = false;
+      hint.textContent = `Option ${selectedIndex + 1} is previewed on the canvas. Compare another option, or use this solution.`;
     });
   });
   regenerate.hidden = false;
-  submit.hidden = false;
+  submit.textContent = "Use Selected Solution";
   submit.disabled = true;
-  submit.textContent = "Use This Option";
+  submit.hidden = false;
   choices.querySelector("input")?.focus();
   positionRationalePopover(rationaleAnchorElement);
+}
+
+function reopenRefinementAlternatives(critique, batch, anchor) {
+  if (!critique || !batch) return;
+  state.contextTargetId = critique.id;
+  state.rationaleEditId = null;
+  state.rationaleIntent = "refine-solution";
+  state.refinementAlternatives = null;
+  rationaleAnchorElement = anchor;
+  const modal = document.getElementById("contextModal");
+  const form = document.getElementById("contextInjectForm");
+  const input = document.getElementById("contextInput");
+  form.reset();
+  input.value = "";
+  modal.dataset.intent = "refine-solution";
+  modal.setAttribute("aria-label", `Refine the solution for ${critique.title}`);
+  modal.hidden = false;
+  renderRefinementAlternatives(critique, batch.alternatives, "", batch);
 }
 
 function renderRevisions(critique) {
@@ -5167,58 +5255,6 @@ function renderCritiqueHistory() {
   });
 }
 
-// The direct answer to a focused/region ask. Rendered in its own panel so a
-// narrow question always gets a visible response — including when the engine
-// returned an answer but no standard critique card (e.g. "this looks fine", or
-// the only grounded critique fell outside the selection).
-function renderAskAnswer() {
-  const host = document.getElementById("askAnswer");
-  if (!host) return;
-  const answer = state.askAnswer;
-  if (!answer || !answer.text) {
-    host.hidden = true;
-    host.replaceChildren();
-    return;
-  }
-  const scopeLabel = answer.reviewScope === "selected-region"
-    ? "Review Area"
-    : "Focused Question";
-  const linkedCritique = answer.critiqueId ? critiqueById(answer.critiqueId) : null;
-  host.hidden = false;
-  host.classList.toggle("ask-answer-error", Boolean(answer.isError));
-  host.innerHTML = `
-    <div class="ask-answer-head">
-      <span class="ask-answer-icon" aria-hidden="true">
-        <svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="6.5"/><circle cx="9" cy="9" r="2"/><path d="M9 1.5v2M16.5 9h-2"/></svg>
-      </span>
-      <div class="ask-answer-copy">
-        <strong>${answer.isError ? "Could not answer" : "Answer"} · ${escapeHTML(scopeLabel)}</strong>
-        ${answer.request ? `<span class="ask-answer-request">${escapeHTML(answer.request)}</span>` : ""}
-      </div>
-      <button type="button" class="ask-answer-dismiss" id="askAnswerDismiss" aria-label="Dismiss answer">×</button>
-    </div>
-    <p class="ask-answer-body">${escapeHTML(answer.text)}</p>
-    ${linkedCritique
-      ? `<button type="button" class="ask-answer-link" id="askAnswerLink" data-critique-id="${escapeHTML(linkedCritique.id)}">See the related recommendation →</button>`
-      : answer.noCritiques
-        ? `<p class="ask-answer-note">No standard recommendation was generated for this request — the answer above is the direct response.</p>`
-        : ""}`;
-  document.getElementById("askAnswerDismiss")?.addEventListener("click", () => {
-    state.askAnswer = null;
-    renderAskAnswer();
-  });
-  document.getElementById("askAnswerLink")?.addEventListener("click", async () => {
-    const critique = critiqueById(answer.critiqueId);
-    if (!critique) return;
-    state.selectedCritiqueId = critique.id;
-    state.selectedTileId = critique.tileId || null;
-    await renderTiles();
-    renderCritiques();
-    renderMarkers();
-    await renderInspector();
-  });
-}
-
 // A positive "critique card": praise-only, and non-interactive by design (an
 // <article>, never a .critique-card <button>, so it carries no action, opens no
 // focus view, and is never batch-eligible). It keeps the critique-card footprint
@@ -5340,6 +5376,9 @@ function critiqueCardMarkup(critique, directAnswer = false) {
       ${checkboxMarkup}
       <span class="diagnostic-body">
         <span class="critique-title">${escapeHTML(critique.title)}</span>
+        ${directAnswer && critique.answer
+          ? `<span class="critique-answer-preview">${escapeHTML(critique.answer)}</span>`
+          : ""}
         ${summaryChips ? `<span class="critique-summary">${summaryChips}</span>` : ""}
         <span class="visually-hidden">${["critical", "high", "medium", "low"].includes(critique.priority)
           ? escapeHTML(critiquePriorityLabel(critique)) + ". " : ""}${escapeHTML(critiqueTargetLabel(critique))}. ${escapeHTML(critique.status)}. ${state.batchMode ? "Toggle selection." : "Open critique details."}</span>
@@ -5381,7 +5420,6 @@ function renderCritiques() {
       [...state.batchReviewedIds].filter((id) => state.batchSelection.has(id)),
     );
   }
-  renderAskAnswer();
   renderCritiqueDistribution();
   let visible = filteredCritiques();
   const visibleStrengths = filteredStrengths();
@@ -6526,6 +6564,8 @@ async function applyRecommendationSelection(selectedIds, conflictChoices = {}, {
   state.crossFilterEnabled = state.tiles.some((tile) => tile.spec?.usermeta?.crossFilter?.role === "source");
   state.activeFilterState = state.tiles.some((tile) => tile.spec?.usermeta?.activeFilterState);
   state.version = nextVersion;
+  state.refinementAlternatives = null;
+  state.lastRefinementBatch = null;
   state.previewCache.clear();
   state.canvasPreview = null;
   const decisionEvents = committedCritiques.map((critique) => appendInteractionEvent({
@@ -6885,6 +6925,8 @@ function miniBoard({ kpis = false, subtitles = false, highlight = null, box = nu
 // compared as observed Before/After evidence on the real canvas.
 // ---------------------------------------------------------------------------
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const runtimeMotionDelay = (ms) =>
+  globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? 0 : ms;
 let demoCursorEl = null;
 let demoPrev = null;
 let demoPhase = "before";
@@ -6990,6 +7032,9 @@ function runtimeTooltipText() {
 }
 
 function runtimeActionText(scenario) {
+  if (scenario.kind === "filter-control") {
+    return `Choose ${scenario.label || scenario.field} = ${scenario.value}`;
+  }
   const title = tileById(scenario.sourceTile)?.label || scenario.sourceTile;
   if (scenario.kind === "cross-filter") {
     return `Click ${scenario.field} = ${scenario.value} in ${title}`;
@@ -7012,7 +7057,53 @@ function runtimeEvent(element, scenario) {
   ));
 }
 
+function runtimeFilterControl(scenario) {
+  const escapedId = CSS.escape(String(scenario.filterId || ""));
+  const escapedValue = CSS.escape(String(scenario.value ?? ""));
+  return els.dashboardFilterBar.querySelector(
+    `[data-dashboard-filter-select="${escapedId}"],` +
+    `[data-dashboard-filter-option="${escapedId}"][data-filter-value="${escapedValue}"],` +
+    `[data-dashboard-filter-check="${escapedId}"][value="${escapedValue}"],` +
+    `[data-dashboard-filter-range="${escapedId}"]`,
+  );
+}
+
+function dispatchRuntimeFilterControl(element, scenario) {
+  if (!element) return;
+  if (element.matches("[data-dashboard-filter-select]")) {
+    element.value = String(scenario.value);
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+    return;
+  }
+  if (element.matches("[data-dashboard-filter-range]")) {
+    element.value = String(scenario.value);
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    return;
+  }
+  if (element.matches("[data-dashboard-filter-check]")) {
+    element.checked = true;
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+    return;
+  }
+  runtimeEvent(element, { action: "click" });
+}
+
 async function dispatchRuntimeScenario(scenario) {
+  if (scenario.kind === "filter-control") {
+    const element = runtimeFilterControl(scenario);
+    if (!element || element.disabled) return { executed: false, point: null, datum: null };
+    const point = runtimePoint(element);
+    runtimeMoveCursor(point);
+    await sleep(runtimeMotionDelay(760));
+    runtimePulse(point);
+    await sleep(runtimeMotionDelay(110));
+    dispatchRuntimeFilterControl(element, scenario);
+    return {
+      executed: true,
+      point,
+      datum: { [scenario.field]: scenario.value },
+    };
+  }
   const view = state.views[scenario.sourceTile];
   const elements = runtimeMarkElements(scenario.sourceTile);
   if (!view || !elements.length) return { executed: false, point: null, datum: null };
@@ -7027,6 +7118,15 @@ async function dispatchRuntimeScenario(scenario) {
     for (const element of elements) {
       observedItem = null;
       currentElement = element;
+      const point = runtimePoint(element);
+      runtimeMoveCursor(point);
+      // Let the authored cursor visibly arrive before dispatching the real Vega
+      // pointer event. The ripple starts just before the event, matching the
+      // click/hover the author sees rather than decorating an already-finished
+      // state change.
+      await sleep(runtimeMotionDelay(760));
+      runtimePulse(point);
+      await sleep(runtimeMotionDelay(110));
       runtimeEvent(element, scenario);
       await sleep(0);
       const datum = observedItem?.datum;
@@ -7037,7 +7137,7 @@ async function dispatchRuntimeScenario(scenario) {
         scenario.fields?.length &&
         !scenario.fields.some((field) => datum[field] !== undefined)
       ) continue;
-      return { executed: true, point: runtimePoint(element), datum: clone(datum) };
+      return { executed: true, point, datum: clone(datum) };
     }
   } finally {
     view.removeEventListener(eventType, listener);
@@ -7056,9 +7156,7 @@ async function runRuntimeObservation(scenario, phase) {
     const targets = scenario.targetTiles.length ? scenario.targetTiles : [scenario.sourceTile];
     const before = Object.fromEntries(targets.map((id) => [id, runtimeFingerprint(id)]));
     const action = await dispatchRuntimeScenario(scenario);
-    runtimeMoveCursor(action.point);
-    runtimePulse(action.point);
-    await sleep(scenario.kind === "cross-filter" ? 700 : 220);
+    await sleep(["cross-filter", "filter-control"].includes(scenario.kind) ? 700 : 220);
     const tooltip = runtimeTooltipText();
     const after = Object.fromEntries(targets.map((id) => [id, runtimeFingerprint(id)]));
     return {
@@ -7080,6 +7178,12 @@ async function setInteractionRuntimePhase(phase) {
   if (state.canvasPreview) state.canvasPreview.phase = phase;
   state.crossFilterEnabled = phase === "after" && runtimeScenario.kind === "cross-filter";
   state.crossFilterSelection = null;
+  if (runtimeScenario.kind === "filter-control") {
+    state.dashboardFilters = clone(demoPrev.dashboardFilters);
+    if (state.canvasPreview?.result?.board && demoPrev.previewFilters) {
+      state.canvasPreview.result.board.filters = clone(demoPrev.previewFilters);
+    }
+  }
   renderCanvasPreviewControl();
   renderDashboardChrome({ renderContext: false });
   await renderTiles();
@@ -7124,7 +7228,7 @@ async function observeInteractionPhase() {
     [phase]: observation,
   });
   if (!observation.executed) {
-    setDemoBanner("Not Executed", "No rendered data mark was available for this interaction.");
+    setDemoBanner("Not Executed", "No rendered interactive target was available for this interaction.");
   } else if (runtimeScenario.kind === "hover-tooltip") {
     setDemoBanner(
       phase === "after" ? "Proposed · Observed" : "Original · Observed",
@@ -7148,6 +7252,10 @@ async function exitInteractionRuntime() {
   if (demoPrev) {
     state.crossFilterEnabled = demoPrev.crossFilterEnabled;
     state.crossFilterSelection = demoPrev.crossFilterSelection;
+    if (demoPrev.dashboardFilters) state.dashboardFilters = clone(demoPrev.dashboardFilters);
+    if (state.canvasPreview?.result?.board && demoPrev.previewFilters) {
+      state.canvasPreview.result.board.filters = clone(demoPrev.previewFilters);
+    }
     if (state.canvasPreview && demoPrev.canvasPreviewPhase) {
       state.canvasPreview.phase = demoPrev.canvasPreviewPhase;
     }
@@ -7165,7 +7273,7 @@ async function exitInteractionRuntime() {
 
 async function playInteractionRuntime(critique) {
   if (state.demoPlaying) return;
-  const scenario = buildInteractionScenario(critique, buildEngineSpecMap());
+  const scenario = buildInteractionScenario(critique, buildEngineSpecMap(), buildEngineBoardMeta());
   if (!scenario) {
     // The button is only shown when a scenario resolves, so this is a defensive
     // guard rather than a user-facing dead end.
@@ -7179,7 +7287,7 @@ async function playInteractionRuntime(critique) {
   const preview = (await enginePreviewFor(critique)) || {
     specMap: buildEngineSpecMap(),
     board: buildEngineBoardMeta(),
-    changedTargets: [scenario.sourceTile, ...scenario.targetTiles],
+    changedTargets: [scenario.sourceTile, ...scenario.targetTiles].filter(Boolean),
   };
   runtimeScenario = scenario;
   runtimeCritiqueId = critique.id;
@@ -7187,12 +7295,14 @@ async function playInteractionRuntime(critique) {
     crossFilterEnabled: state.crossFilterEnabled,
     crossFilterSelection: clone(state.crossFilterSelection),
     canvasPreviewPhase: state.canvasPreview?.phase || null,
+    dashboardFilters: clone(state.dashboardFilters),
+    previewFilters: clone(preview?.board?.filters || []),
   };
   state.canvasPreview = {
     critiqueId: critique.id,
     critiqueTitle: critique.title,
     phase: "before",
-    result: preview,
+    result: clone(preview),
     hasExecutableProposal: true,
     accent: critiqueGroupPresentation(critique.dimension).color,
   };
@@ -7215,11 +7325,28 @@ async function playInteractionRuntime(critique) {
   demoCursorEl = document.getElementById("demoCursor");
   document.getElementById("demoStop").addEventListener("click", exitInteractionRuntime);
   await transitionInteractionRuntimePhase("before");
-  const firstPoint = runtimePoint(runtimeMarkElements(scenario.sourceTile)[0]);
+  const firstElement = scenario.kind === "filter-control"
+    ? runtimeFilterControl(scenario)
+    : runtimeMarkElements(scenario.sourceTile)[0];
+  const firstPoint = runtimePoint(firstElement);
   if (firstPoint) runtimeMoveCursor({ x: firstPoint.x - 60, y: firstPoint.y + 70 });
   await sleep(600);
-  // Observe the initial ("before") phase once; the author switches to
-  // "proposed" via the detail-card toggle to observe the after phase.
+  // Run the complete comparison once: Original demonstrates the current
+  // behavior, then Proposed replays the same real pointer action against the
+  // engine preview. The persistent toggle remains available afterward so either
+  // phase can be replayed manually.
+  await observeInteractionPhase();
+  if (!state.demoPlaying) return;
+  setDemoBanner("Next", "Replaying the same pointer action on Proposed.");
+  await sleep(runtimeMotionDelay(650));
+  if (!state.demoPlaying) return;
+  await transitionInteractionRuntimePhase("after");
+  const proposedElement = scenario.kind === "filter-control"
+    ? runtimeFilterControl(scenario)
+    : runtimeMarkElements(scenario.sourceTile)[0];
+  const proposedPoint = runtimePoint(proposedElement);
+  if (proposedPoint) runtimeMoveCursor({ x: proposedPoint.x - 60, y: proposedPoint.y + 70 });
+  await sleep(runtimeMotionDelay(420));
   await observeInteractionPhase();
 }
 
@@ -7307,6 +7434,7 @@ function previewChangeSummary(critique) {
     "add-tooltip": "Tooltip details on hover",
     "add-cross-filter": "Cross-view filtering behavior",
     "wire-filter-control": "Dashboard filter connection",
+    "edit-filter-control": "Dashboard filter placement",
     "v2-palette": "Chart color encoding",
     "preserve-brand-palette": "Chart color encoding",
     "edit-spec": critiqueTileCount(critique) > 1
@@ -7327,6 +7455,9 @@ function canvasComparisonHint(descriptor) {
   }
   if (descriptor.scenario?.kind === "cross-filter" && descriptor.scenario.targetTiles?.length) {
     return `<small>"Proposed" previews the coordinated selection (${escapeHTML(String(descriptor.scenario.field))} = ${escapeHTML(String(descriptor.scenario.value))}); run the interaction test below to click through it live.</small>`;
+  }
+  if (descriptor.scenario?.kind === "filter-control") {
+    return `<small>VIZier will operate the ${escapeHTML(String(descriptor.scenario.label || descriptor.scenario.field))} control in both states and verify which target views respond.</small>`;
   }
   return "";
 }
@@ -7378,6 +7509,7 @@ async function focusPreviewDescriptor(critique) {
     // schematic renderer whatever branch it was grouped under. Kind wins over the
     // surface hint so a layout fix never falls to a static region no-op.
     : kind === "edit-layout" ? "layout"
+    : kind === "edit-filter-control" ? "layout"
     : kind === "dashboard-title" ? "text"
     : critique.surface
     || (tile ? "encoding" : "region");
@@ -7485,21 +7617,25 @@ async function focusPreviewDescriptor(critique) {
       const was = beforeById.get(t.id);
       return was && (was.x !== t.bounds.x || was.y !== t.bounds.y || was.w !== t.bounds.w || was.h !== t.bounds.h);
     });
+    const filterLayoutChanged = Boolean(preview?.board) &&
+      JSON.stringify(beforeBoard.filters || []) !== JSON.stringify(afterBoard.filters || []);
     return {
       ...common,
       renderer: "layout",
       before: {
         tiles: beforeTiles,
+        filters: beforeBoard.filters || [],
         canvasWidth: beforeBoard.canvasWidth || state.canvasSize.width,
         canvasHeight: beforeBoard.canvasHeight || state.canvasSize.height,
       },
       after: {
         tiles: afterTiles,
+        filters: afterBoard.filters || [],
         canvasWidth: afterBoard.canvasWidth || state.canvasSize.width,
         canvasHeight: afterBoard.canvasHeight || state.canvasSize.height,
         highlight: "layout",
       },
-      showComparison: layoutChanged,
+      showComparison: layoutChanged || filterLayoutChanged,
     };
   }
   if (surface === "interaction") {
@@ -7513,7 +7649,7 @@ async function focusPreviewDescriptor(critique) {
     // panel can show a real before/after chart instead of static copy. The
     // scenario resolves source/field/targets from the critique ref (or, for the
     // show-filter-state follow-up, from the applied cross-filter usermeta).
-    const scenario = buildInteractionScenario(critique, buildEngineSpecMap());
+    const scenario = buildInteractionScenario(critique, buildEngineSpecMap(), buildEngineBoardMeta());
     let previewTile = null;
     let beforeSpec = null;
     let afterSpec = null;
@@ -7528,13 +7664,29 @@ async function focusPreviewDescriptor(critique) {
             ? applySourceSelectionState(previewTile.spec, selection)
             : applyTargetFilterState(previewTile.spec, selection);
         }
-      } else {
+      } else if (scenario.kind === "hover-tooltip") {
         previewTile = tileById(scenario.sourceTile) || null;
         if (previewTile) {
           beforeSpec = previewTile.spec;
           afterSpec = preview?.specMap?.[previewTile.id]
             || proposedSpecFor(critique, preview)
             || previewTile.spec;
+        }
+      } else if (scenario.kind === "filter-control") {
+        previewTile = tileById(scenario.targetTiles.find((id) => tileById(id))) || null;
+        if (previewTile) {
+          const currentControl = (beforeBoard.filters || []).find((item) => item.id === scenario.filterId);
+          const proposedControl = (afterBoard.filters || []).find((item) => item.id === scenario.filterId);
+          beforeSpec = applyDashboardFilterState(
+            previewTile.spec,
+            currentControl ? [{ ...currentControl, value: scenario.value }] : [],
+            previewTile.id,
+          );
+          afterSpec = applyDashboardFilterState(
+            preview?.specMap?.[previewTile.id] || previewTile.spec,
+            proposedControl ? [{ ...proposedControl, value: scenario.value }] : [],
+            previewTile.id,
+          );
         }
       }
     }
@@ -7991,6 +8143,7 @@ async function renderInspector() {
   const critiqueRationales = state.rationales.filter((item) => item.critiqueId === critique.id);
   const rejected = critique.status === "rejected";
   const guidanceAccepted = critique.status === "accepted";
+  const refinementBatch = actionable ? recoverableRefinementBatch(critique) : null;
 
   focusView.innerHTML = `
     <article class="focus-card" style="--accent:${critiqueGroupPresentation(critique.dimension).color}">
@@ -8074,7 +8227,7 @@ async function renderInspector() {
           <p>This change is available in ${escapeHTML(revisionDisplayLabel(descriptor.checkpoint))}.</p>
         </section>` : ""}
       ${actionable && descriptor.renderer === "interaction" && descriptor.executable && descriptor.scenario
-        ? `<button class="focus-demo-button" id="focusDemoButton" type="button">Run interaction test on the canvas</button>`
+        ? `<button class="focus-demo-button" id="focusDemoButton" type="button">Replay Original → Proposed interaction</button>`
         : ""}
       ${critiqueRationales.length ? `
         <section class="focus-rationale-summary">
@@ -8187,9 +8340,9 @@ async function renderInspector() {
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 4.5 7 7M11.5 4.5l-7 7"/></svg>
           <span>${critiqueIsExecutable(critique) ? "Reject Issue" : "Reject"}</span>
         </button>
-        ${critiqueIsExecutable(critique) && state.lastRefinementBatch?.critiqueId === critique.id ? `
-        <button class="focus-action-link" id="focusReviewAgain" type="button">
-          Review ${state.lastRefinementBatch.alternatives.length} generated alternative${state.lastRefinementBatch.alternatives.length === 1 ? "" : "s"} again
+        ${critiqueIsExecutable(critique) && refinementBatch ? `
+        <button class="focus-action-link" id="focusReviewAlternatives" type="button" aria-haspopup="dialog">
+          Review generated alternatives (${refinementBatch.alternatives.length})
         </button>` : ""}
         ${critiqueIsExecutable(critique) ? "" : `
         <button class="focus-action secondary" id="focusAddContext" type="button">
@@ -8382,22 +8535,10 @@ async function renderInspector() {
   });
   document.getElementById("focusRefineSolution")?.addEventListener("click", (event) =>
     openRationaleModal(critique, null, event.currentTarget, { intent: "refine-solution" }));
-  document.getElementById("focusReviewAgain")?.addEventListener("click", (event) => {
-    const cached = state.lastRefinementBatch;
-    if (!cached || cached.critiqueId !== critique.id) return;
-    // Mirrors openRationaleModal's shared setup, but skips its text-input
-    // rendering (and the textarea-focus rAF, which would otherwise steal
-    // focus from the choices list right after renderRefinementAlternatives
-    // focuses it) since we're going straight to the choices view.
-    state.contextTargetId = critique.id;
-    state.rationaleEditId = null;
-    state.rationaleIntent = "refine-solution";
-    rationaleAnchorElement = event.currentTarget;
-    const modal = document.getElementById("contextModal");
-    modal.dataset.intent = "refine-solution";
-    modal.setAttribute("aria-label", `Refine the solution for ${critique.title}`);
-    modal.hidden = false;
-    renderRefinementAlternatives(critique, cached.alternatives, cached.rationale, cached);
+  document.getElementById("focusReviewAlternatives")?.addEventListener("click", (event) => {
+    const batch = recoverableRefinementBatch(critique);
+    if (!batch) return;
+    reopenRefinementAlternatives(critique, batch, event.currentTarget);
   });
   document.getElementById("focusAddContext")?.addEventListener("click", (event) =>
     openRationaleModal(critique, critiqueRationales.at(-1) || null, event.currentTarget));
@@ -8668,15 +8809,18 @@ const REFINEMENT_ALTERNATIVE_STRATEGIES = [
 
 function refinementAlternativeKey(alternative) {
   return JSON.stringify({
-    suggestion: String(alternative?.suggestion || "").replace(/\s+/g, " ").trim().toLowerCase(),
     proposal: alternative?.proposal || null,
+    target: alternative?.target || null,
   });
 }
 
-async function generateRefinementAlternatives(critique, rationale, isCancelled) {
+async function generateRefinementAlternatives(critique, direction, isCancelled, {
+  signal,
+  onStage = () => {},
+} = {}) {
   setRefineSolutionGenerating(true);
   try {
-    const request = critiqueSolutionRefinementRequest(critique, rationale, {
+    const request = critiqueSolutionRefinementRequest(critique, direction, {
       optionCount: REFINEMENT_ALTERNATIVE_STRATEGIES.length,
       strategy: REFINEMENT_ALTERNATIVE_STRATEGIES
         .map((strategy, index) => `${index + 1}. ${strategy}`)
@@ -8691,8 +8835,10 @@ async function generateRefinementAlternatives(critique, rationale, isCancelled) 
       // Practice's fixed first-round preset cannot produce a new proposal.
       // Refinement is explicitly on demand, so it must use the live engine.
       usePracticeOverallCache: false,
+      signal,
     });
     if (isCancelled()) return "cancelled";
+    onStage("Checking each generated option against the current dashboard…");
     const alternatives = [];
     const seen = new Set();
     const failureMessages = [];
@@ -8703,7 +8849,7 @@ async function generateRefinementAlternatives(critique, rationale, isCancelled) 
         failureMessages.push("A generated option changed the accepted diagnosis or target.");
         continue;
       }
-      const alignment = solutionRefinementAlignment(critique, replacement, rationale);
+      const alignment = solutionRefinementAlignment(critique, replacement, direction);
       if (!alignment.aligned) {
         failureMessages.push(alignment.reason);
         continue;
@@ -8718,7 +8864,7 @@ async function generateRefinementAlternatives(critique, rationale, isCancelled) 
     // every candidate through the real Apply/rollback pipeline first and cache
     // the successful preview so switching options remains immediate.
     const preflighted = await Promise.all(alternatives.map(async (replacement) => {
-      const refined = buildRefinedCritique(critique, replacement, rationale, state.version);
+      const refined = buildRefinedCritique(critique, replacement, state.version);
       const candidateCritiques = state.critiques.map((item) => item.id === critique.id ? refined : item);
       try {
         const previewResult = await streamApplyForCurrentMode({
@@ -8760,14 +8906,23 @@ async function generateRefinementAlternatives(critique, rationale, isCancelled) 
   }
 }
 
-async function commitRefinementAlternative(critique, replacement, rationale, meta = {}) {
+async function commitRefinementAlternative(critique, replacement, meta = {}) {
   const index = state.critiques.findIndex((item) => item.id === critique?.id);
   if (index < 0 || !replacement) return false;
   const current = state.critiques[index];
-  const refreshed = buildRefinedCritique(current, replacement, rationale, state.version);
+  const refreshed = buildRefinedCritique(current, replacement, state.version);
   const next = [...state.critiques];
   next[index] = refreshed;
   state.critiques = scopeRank(enrichRecommendations(next, state.version));
+  if (
+    state.lastRefinementBatch?.critiqueId === current.id
+    && state.lastRefinementBatch.dashboardVersion === state.version
+  ) {
+    state.lastRefinementBatch = {
+      ...state.lastRefinementBatch,
+      critiqueRevision: Number(refreshed.revision) || 1,
+    };
+  }
   invalidateCritiquePreviewCache(current.id);
   if (meta.previewResult) {
     state.previewCache.set(
@@ -8788,7 +8943,6 @@ async function commitRefinementAlternative(critique, replacement, rationale, met
     critiqueId: current.id,
     outcome: "selected",
     requestMode: "solution_refinement",
-    refinementRationale: rationale,
     alternativeCount: meta.alternativeCount || null,
     selectedAlternative: Number.isInteger(meta.selectedIndex) ? meta.selectedIndex + 1 : null,
     applied: false,
@@ -9069,11 +9223,13 @@ function queueAffectedCritiqueRefreshes({ render = true } = {}) {
 }
 
 async function regenerateOneCritique(critique, {
-  refinementRationale = "",
+  refinementDirection = "",
   isCancelled = () => false,
+  signal,
+  onRefinementStage,
 } = {}) {
   if (!critique) return "error";
-  const isSolutionRefinement = Boolean(refinementRationale.trim());
+  const isSolutionRefinement = Boolean(refinementDirection.trim());
   const targetId = critique.id;
   const index = state.critiques.findIndex((item) => item.id === targetId);
   if (index < 0) return "error";
@@ -9095,8 +9251,9 @@ async function regenerateOneCritique(critique, {
     if (isSolutionRefinement) {
       const outcome = await generateRefinementAlternatives(
         critique,
-        refinementRationale,
+        refinementDirection,
         isCancelled,
+        { signal, onStage: onRefinementStage },
       );
       if (outcome === "cancelled" || isCancelled()) {
         recordStudyAction("critique_request_cancelled", "Cancelled solution refinement", {
@@ -9114,7 +9271,6 @@ async function regenerateOneCritique(critique, {
           critiqueId: targetId,
           outcome: "choices_generated",
           requestMode: "solution_refinement",
-          refinementRationale,
           alternativeCount: outcome.alternatives.length,
           dimension: critique.dimension,
           latencyMs: Date.now() - requestStartedAt,
@@ -9532,7 +9688,6 @@ async function runAIAssist(options = {}) {
     );
     const {
       critiques: baseCritiques,
-      answer,
       reviewMeta,
       usedPracticeOverallCache,
     } = await generateCritiquesFromEngine(focusedRequest, {
@@ -9555,35 +9710,20 @@ async function runAIAssist(options = {}) {
     state.previewCache.clear();
     state.interactionObservations.clear();
     state.lastReviewContextFingerprint = contextFingerprint(state.context);
-    const directAnswer = focusedRequest
-      ? state.critiques.find((critique) =>
-        critique.requestRelevance === "direct" && critique.askId === askId)
-      : null;
-    // A focused ask always gets a visible answer panel. Prefer the engine's
-    // response-level answer (present even when no card survived), then the
-    // direct-answer critique's own answer text.
+    // A focused answer belongs in the critique list, not in a second answer
+    // panel. Clear transient filters so the just-generated direct-answer card
+    // cannot be hidden by a category/search state from an earlier review.
     if (focusedRequest) {
-      const answerText = answer || directAnswer?.answer || null;
-      state.askAnswer = answerText
-        ? {
-            text: answerText,
-            request: focusedRequest,
-            reviewScope: "focused",
-            critiqueId: directAnswer?.id || null,
-            noCritiques: baseCritiques.length === 0,
-          }
-        : null;
-    } else {
-      state.askAnswer = null;
+      state.filters = { status: "all", source: "all", category: "all" };
+      state.search = "";
+      if (els.searchInput) els.searchInput.value = "";
     }
     const keepId = typeof options.keepCritiqueId === "string" ? options.keepCritiqueId : null;
     const kept = keepId ? critiqueById(keepId) : null;
-    const opened = (kept && ["pending", "updated"].includes(kept.status) ? kept : null)
-      || directAnswer
-      || (focusedRequest
-        ? state.critiques.find((critique) => critique.askId === askId && !isDecidedCritique(critique))
-        : null)
-      || null;
+    // Keep explicit stale-refresh navigation, but a new Focused Review lands on
+    // its visible card group. Auto-opening the detail view hid the main panel
+    // result and made a successful review look empty.
+    const opened = kept && ["pending", "updated"].includes(kept.status) ? kept : null;
     state.selectedCritiqueId = opened?.id || null;
     state.selectedTileId = opened?.tileId || null;
     if (opened?.id) recordCritiqueOpened(opened, "review-result");
@@ -9658,19 +9798,6 @@ async function runAIAssist(options = {}) {
     // and strengths, however, belong to the run that just failed, so clear them.
     state.criterionEvaluations = [];
     state.strengths = [];
-    // Give the failed ask a visible, in-panel response instead of only a red dot
-    // in the trace panel. For a focused ask this reads as a plain answer ("could
-    // not answer that"); for a full ask it surfaces below.
-    if (focusedRequest) {
-      state.askAnswer = {
-        text: `VIZier could not answer that this time — ${message}`,
-        request: focusedRequest,
-        reviewScope: "focused",
-        critiqueId: null,
-        noCritiques: state.critiques.length === 0,
-        isError: true,
-      };
-    }
     renderRubrics();
     renderMarkers();
     await renderInspector();
@@ -9678,16 +9805,12 @@ async function runAIAssist(options = {}) {
       renderCritiques();
     } else {
       renderCritiques();
-      // Only overwrite the empty list message when there is no answer panel to
-      // carry the failure (a full review has no answer panel).
-      if (!focusedRequest) {
-        els.critiqueList.replaceChildren();
-        const error = document.createElement("div");
-        error.className = "empty-state";
-        error.setAttribute("role", "alert");
-        error.textContent = `${modeLabel} failed: ${message}`;
-        els.critiqueList.append(error);
-      }
+      els.critiqueList.replaceChildren();
+      const error = document.createElement("div");
+      error.className = "empty-state";
+      error.setAttribute("role", "alert");
+      error.textContent = `${modeLabel} failed: ${message}`;
+      els.critiqueList.append(error);
     }
     return false;
   } finally {
@@ -9730,7 +9853,6 @@ async function resetDemo() {
   state.critiques = [];
   state.critiqueRefreshNotice = null;
   state.nextAskId = 1;
-  state.askAnswer = null;
   state.selectedCritiqueId = null;
   state.selectedTileId = null;
   state.version = 1;
@@ -9771,7 +9893,11 @@ async function resetDemo() {
   state.nextRationaleId = 1;
   state.rationaleEditId = null;
   state.rationaleIntent = "save";
+  state.refinementAlternatives = null;
+  state.lastRefinementBatch = null;
   state.refinementRequestToken += 1;
+  state.refinementAbortController?.abort();
+  state.refinementAbortController = null;
   resetInteractionMemory();
   state.previewCache.clear();
   state.canvasPreview = null;
@@ -10367,7 +10493,7 @@ document.getElementById("localReviewForm").addEventListener("submit", async (eve
         trigger: "local-review",
       }),
     );
-    const { critiques: localCritiques, answer, reviewMeta } = await generateLocalCritiques({
+    const { critiques: localCritiques, reviewMeta } = await generateLocalCritiques({
       bounds,
       request,
     });
@@ -10382,24 +10508,14 @@ document.getElementById("localReviewForm").addEventListener("submit", async (eve
     state.previewCache.clear();
     state.interactionObservations.clear();
     state.lastReviewContextFingerprint = contextFingerprint(state.context);
-    const directAnswer = state.critiques.find((critique) =>
-      critique.askId === askId && critique.requestRelevance === "direct")
-      || state.critiques.find((critique) => critique.askId === askId)
-      || null;
-    // Always surface a visible answer for the region ask — including when it
-    // produced only an answer and no grounded critique card.
-    const answerText = answer || directAnswer?.answer || null;
-    state.askAnswer = answerText
-      ? {
-          text: answerText,
-          request,
-          reviewScope: "selected-region",
-          critiqueId: directAnswer?.id || null,
-          noCritiques: localCritiques.length === 0,
-        }
-      : null;
-    state.selectedCritiqueId = directAnswer?.id || null;
-    state.selectedTileId = directAnswer?.tileId || null;
+    // Region and focused reviews share the same durable card surface. Reset
+    // stale filters and leave the list visible so the new card is immediately
+    // discoverable; opening its detail remains an explicit click.
+    state.filters = { status: "all", source: "all", category: "all" };
+    state.search = "";
+    if (els.searchInput) els.searchInput.value = "";
+    state.selectedCritiqueId = null;
+    state.selectedTileId = null;
     appendInteractionEvent({
       kind: "local_critique_requested",
       summary: localCritiques.length
@@ -10631,11 +10747,9 @@ document.addEventListener("keydown", (event) => {
   }
   const contextModal = document.getElementById("contextModal");
   if (contextModal && !contextModal.hidden) {
-    const returnTarget = contextModal.dataset.intent === "refine-solution"
-      ? "focusRefineSolution"
-      : "focusAddContext";
+    const returnTarget = contextModalReturnTarget();
     closeContextModal();
-    document.getElementById(returnTarget)?.focus();
+    returnTarget?.focus();
     return;
   }
   if (!els.localReviewPopover.hidden && !state.localReviewSubmitting) {
@@ -10655,12 +10769,9 @@ document.addEventListener("keydown", (event) => {
 
 // Critique-level design rationale modal.
 document.getElementById("closeContextModal").addEventListener("click", () => {
-  const modal = document.getElementById("contextModal");
-  const returnTarget = modal.dataset.intent === "refine-solution"
-    ? "focusRefineSolution"
-    : "focusAddContext";
+  const returnTarget = contextModalReturnTarget();
   closeContextModal();
-  document.getElementById(returnTarget)?.focus();
+  returnTarget?.focus();
 });
 document.addEventListener("pointerdown", (event) => {
   const modal = document.getElementById("contextModal");
@@ -10699,41 +10810,102 @@ document.getElementById("contextInjectForm").addEventListener("submit", async (e
   const critique = critiqueById(state.contextTargetId);
   const text = document.getElementById("contextInput").value.trim();
   if ((!critique && !existingRationale) || !text) return;
-  const pending = state.refinementAlternatives;
+  const pendingAlternatives = state.refinementAlternatives;
   if (
     rationaleIntent === "refine-solution"
     && critique
-    && pending?.critiqueId === critique.id
+    && pendingAlternatives?.critiqueId === critique.id
   ) {
-    // The choices list owns this submission: commit whichever option is
-    // currently previewed, or ignore Enter/click if nothing is previewed yet.
-    const selectedIndex = pending.selectedIndex;
-    if (selectedIndex == null) return;
+    // Option selection owns only the reversible Proposed preview. Committing is
+    // a separate explicit action so authors can compare every option without
+    // the first click replacing the solution and closing this chooser.
+    const selectedIndex = pendingAlternatives.selectedIndex;
+    if (
+      pendingAlternatives.previewing
+      || !Number.isInteger(selectedIndex)
+      || !pendingAlternatives.alternatives[selectedIndex]
+    ) return;
+    const choices = document.getElementById("refinementChoices");
     const submit = document.getElementById("saveRationaleButton");
     const hint = document.getElementById("rationaleHint");
+    const error = document.getElementById("rationaleError");
+    choices.querySelectorAll('input[name="refinementAlternative"]').forEach((choice) => {
+      choice.disabled = true;
+    });
     submit.disabled = true;
-    submit.textContent = "Using This Option…";
+    submit.textContent = "Using Solution…";
+    hint.textContent = `Using Option ${selectedIndex + 1} as the new Proposed solution…`;
+    error.hidden = true;
     const committed = await commitRefinementAlternative(
       critique,
-      pending.alternatives[selectedIndex],
-      pending.rationale,
+      pendingAlternatives.alternatives[selectedIndex],
       {
-        requestId: pending.requestId,
-        latencyMs: pending.latencyMs,
-        alternativeCount: pending.alternatives.length,
+        requestId: pendingAlternatives.requestId,
+        latencyMs: pendingAlternatives.latencyMs,
+        alternativeCount: pendingAlternatives.alternatives.length,
         selectedIndex,
-        previewResult: pending.previewResults?.[selectedIndex],
+        previewResult: pendingAlternatives.previewResults?.[selectedIndex],
       },
     );
-    if (!committed) {
-      submit.disabled = false;
-      submit.textContent = "Use This Option";
-      hint.textContent = "That option could not update Proposed. Choose another solution.";
+    if (committed) {
+      closeContextModal({ cancelPending: false });
+      document.getElementById("focusAccept")?.focus();
       return;
     }
-    closeContextModal({ cancelPending: false });
-    renderFixedContextPanel();
-    document.getElementById("focusAccept")?.focus();
+    submit.textContent = "Use Selected Solution";
+    submit.disabled = false;
+    hint.textContent = "That option could not update Proposed. Choose another solution.";
+    choices.querySelectorAll('input[name="refinementAlternative"]').forEach((choice) => {
+      if (!choice.closest(".refinement-choice")?.classList.contains("is-unavailable")) {
+        choice.disabled = false;
+      }
+    });
+    return;
+  }
+  if (rationaleIntent === "refine-solution" && critique && critiqueIsExecutable(critique)) {
+    // A refinement direction is an ephemeral generation instruction. It must
+    // never enter Saved Rationale, critique revisions, preference memory, or
+    // persisted study payloads.
+    const input = document.getElementById("contextInput");
+    const submit = document.getElementById("saveRationaleButton");
+    const hint = document.getElementById("rationaleHint");
+    const error = document.getElementById("rationaleError");
+    const requestToken = ++state.refinementRequestToken;
+    state.refinementAbortController?.abort();
+    const abortController = new AbortController();
+    state.refinementAbortController = abortController;
+    input.disabled = true;
+    submit.disabled = true;
+    submit.textContent = "Generating Alternatives…";
+    hint.textContent = "Generating up to 3 alternatives. This usually takes 10–20 seconds; close this window to cancel.";
+    error.hidden = true;
+    const outcome = await regenerateOneCritique(critique, {
+      refinementDirection: text,
+      isCancelled: () => requestToken !== state.refinementRequestToken,
+      signal: abortController.signal,
+      onRefinementStage: (message) => {
+        if (requestToken === state.refinementRequestToken) hint.textContent = message;
+      },
+    });
+    if (state.refinementAbortController === abortController) {
+      state.refinementAbortController = null;
+    }
+    if (requestToken !== state.refinementRequestToken || outcome === "cancelled") return;
+    if (typeof outcome === "object" && outcome?.status === "choices") {
+      renderRefinementAlternatives(critique, outcome.alternatives, text, outcome);
+      return;
+    }
+    // Keep the direction only in the open input after a failed request so the
+    // author can edit and retry without retyping it.
+    input.disabled = false;
+    submit.disabled = false;
+    submit.textContent = "Try Again";
+    hint.textContent = "The identified issue stays fixed. Edit your direction, then generate a new set of options.";
+    error.textContent = typeof outcome === "object" && outcome?.message
+      ? outcome.message
+      : "VIZier could not generate a different executable solution. Adjust your direction and try again.";
+    error.hidden = false;
+    input.focus();
     return;
   }
   const critiqueReference = critique || {
@@ -10777,42 +10949,6 @@ document.getElementById("contextInjectForm").addEventListener("submit", async (e
       currentCritiqueId: rationale.critiqueId,
     },
   }, { synthesize: false });
-  if (rationaleIntent === "refine-solution" && critique && critiqueIsExecutable(critique)) {
-    const input = document.getElementById("contextInput");
-    const submit = document.getElementById("saveRationaleButton");
-    const hint = document.getElementById("rationaleHint");
-    const error = document.getElementById("rationaleError");
-    const requestToken = ++state.refinementRequestToken;
-    input.disabled = true;
-    submit.disabled = true;
-    submit.textContent = "Generating Alternatives…";
-    hint.textContent = "Generating alternatives from your direction. You can close this window to cancel this attempt.";
-    error.hidden = true;
-    renderFixedContextPanel();
-    const outcome = await regenerateOneCritique(critique, {
-      refinementRationale: text,
-      isCancelled: () => requestToken !== state.refinementRequestToken,
-    });
-    if (requestToken !== state.refinementRequestToken || outcome === "cancelled") return;
-    if (typeof outcome === "object" && outcome?.status === "choices") {
-      state.rationaleEditId = rationale.id;
-      renderRefinementAlternatives(critique, outcome.alternatives, text, outcome);
-      return;
-    }
-    // Keep the author's direction in place after a failed generation so they
-    // can edit and retry without retyping it or creating duplicate rationales.
-    state.rationaleEditId = rationale.id;
-    input.disabled = false;
-    submit.disabled = false;
-    submit.textContent = "Try Again";
-    hint.textContent = "The identified issue stays fixed. Edit your direction, then generate a new set of options.";
-    error.textContent = typeof outcome === "object" && outcome?.message
-      ? outcome.message
-      : "VIZier could not generate a different executable solution. Adjust your direction and try again.";
-    error.hidden = false;
-    input.focus();
-    return;
-  }
   closeContextModal();
   renderFixedContextPanel();
   if (!critique) return;
@@ -11116,7 +11252,6 @@ function clearPracticeTutorialCritiques() {
   state.criterionEvaluations = [];
   state.strengths = [];
   state.critiques = [];
-  state.askAnswer = null;
   state.selectedCritiqueId = null;
   state.selectedTileId = null;
   state.previewCache.clear();
@@ -11361,7 +11496,6 @@ async function resetPracticeWorkspace() {
   state.version = 1;
   state.critiques = [];
   state.strengths = [];
-  state.askAnswer = null;
   state.selectedCritiqueId = null;
   state.selectedTileId = null;
   state.lastReviewContextFingerprint = null;
@@ -11488,7 +11622,6 @@ export function captureStudyRunnerWorkspaceState() {
         activeDesignDocId,
         critiques: state.critiques,
         strengths: state.strengths,
-        askAnswer: state.askAnswer,
         criterionEvaluations: state.criterionEvaluations,
         rationales: state.rationales,
         nextRationaleId: state.nextRationaleId,
@@ -11546,7 +11679,7 @@ export async function restoreStudyRunnerWorkspaceState(snapshot) {
   [
     "view", "drawers", "filters", "expandedCritiqueGroups", "context",
     "contextWorkflow", "studyContextGenerated", "constraintSet",
-    "constraintSelection", "designDoc", "critiques", "strengths", "askAnswer",
+    "constraintSelection", "designDoc", "critiques", "strengths",
     "criterionEvaluations", "rationales", "interactionJournal",
     "lastReviewContextFingerprint", "checkpointComparison", "workingDraft",
     "crossFilterSelection",
@@ -12633,7 +12766,6 @@ async function loadJsonDashboard(data, fileName = "dashboard.json", { skipContex
   state.critiqueRefreshNotice = null;
   state.strengths = [];
   state.nextAskId = 1;
-  state.askAnswer = null;
   state.lastReviewContextFingerprint = null;
   state.selectedCritiqueId = null;
   state.selectedTileId = null;
@@ -12655,7 +12787,11 @@ async function loadJsonDashboard(data, fileName = "dashboard.json", { skipContex
   state.nextRationaleId = 1;
   state.rationaleEditId = null;
   state.rationaleIntent = "save";
+  state.refinementAlternatives = null;
+  state.lastRefinementBatch = null;
   state.refinementRequestToken += 1;
+  state.refinementAbortController?.abort();
+  state.refinementAbortController = null;
   // A loaded dashboard can ship with cross-filter already wired (a tile stamped
   // usermeta.crossFilter.role === "source"). Enable the runtime on load so the
   // baked-in "click a source mark → filter the related tiles" behavior is live

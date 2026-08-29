@@ -4,6 +4,7 @@ import {
   discoverDashboardCritiques,
   iterationProposalSignature,
   proseFiguresAreGrounded,
+  semanticDimensionForProposal,
   scopeLocalReviewInput,
 } from "../src/generate/discover.ts";
 import type { SpecMap } from "../src/contracts.ts";
@@ -78,6 +79,14 @@ const critique = {
   proposal: { kind: "manual", mode: "guidance_only" },
   target: { granularity: "chart encoding", ref: { tile: "department-tasks" } },
 };
+
+test("executable semantics keep placement out of Interactivity and behavior inside it", () => {
+  assert.equal(semanticDimensionForProposal("interaction", "edit-filter-control"), "layout");
+  assert.equal(semanticDimensionForProposal("interaction", "edit-layout"), "layout");
+  assert.equal(semanticDimensionForProposal("layout", "add-cross-filter"), "interaction");
+  assert.equal(semanticDimensionForProposal("chart", "add-tooltip"), "interaction");
+  assert.equal(semanticDimensionForProposal("cognition", "edit-spec"), "cognition");
+});
 
 test("open-ended review uses the model's dynamic finding set", async () => {
   const result = await discoverDashboardCritiques(
@@ -216,7 +225,7 @@ test("one object×problem can retain multiple dashboard-specific manual leaves o
   );
 });
 
-test("full review retains at most fourteen distinct critique leaves", async () => {
+test("full review retains at most eleven distinct critique leaves", async () => {
   const leaves = Array.from({ length: 25 }, (_, index) => ({
     ...critique,
     kind: `legibility-leaf-${index + 1}`,
@@ -229,7 +238,7 @@ test("full review retains at most fourteen distinct critique leaves", async () =
     dashboardBoard(),
     new StubClient(diagnosisPayload(leaves)),
   );
-  assert.equal(result.critiques.length, 14);
+  assert.equal(result.critiques.length, 11);
 });
 
 test("a sparse production first pass triggers bounded adaptive coverage without lowering validation", async () => {
@@ -257,7 +266,75 @@ test("a sparse production first pass triggers bounded adaptive coverage without 
     );
     assert.equal(result.critiques.length, 2);
     assert.match(client.userTexts[1], /SECOND-PASS COVERAGE EXPANSION/);
-    assert.match(client.userTexts[1], /Return at most 5 additional critiques/);
+    assert.match(client.userTexts[1], /Return at most 6 additional critiques/);
+  } finally {
+    if (previousAdaptive === undefined) delete process.env.RE_API_ADAPTIVE_COVERAGE;
+    else process.env.RE_API_ADAPTIVE_COVERAGE = previousAdaptive;
+    if (previousSecondPass === undefined) delete process.env.RE_API_SECOND_PASS;
+    else process.env.RE_API_SECOND_PASS = previousSecondPass;
+  }
+});
+
+test("coverage recovery can add a grounded Good Job instead of returning only fix cards", async () => {
+  const previousAdaptive = process.env.RE_API_ADAPTIVE_COVERAGE;
+  const previousSecondPass = process.env.RE_API_SECOND_PASS;
+  process.env.RE_API_ADAPTIVE_COVERAGE = "1";
+  process.env.RE_API_SECOND_PASS = "0";
+  const recoveryStrength = {
+    object: "readability",
+    dimension: "chart",
+    tileId: "department-tasks",
+    title: "The department comparison already has a clear baseline.",
+    detail: "The department-tasks bars share one quantitative tasks axis.",
+    judgmentBasis: ["dashboard evidence", "general design principle"],
+    evidenceRefs: critique.evidenceRefs,
+  };
+  const client = new SequenceClient([
+    diagnosisPayload([critique]),
+    diagnosisPayload([], [recoveryStrength]),
+    diagnosisPayload([]),
+  ]);
+  try {
+    const result = await discoverDashboardCritiques(
+      dashboardSpecMap(),
+      {},
+      dashboardBoard(),
+      client,
+    );
+    assert.equal(result.strengths.length, 1);
+    assert.equal(result.strengths[0].title, recoveryStrength.title);
+    assert.match(client.userTexts[1], /Also return up to TWO non-overlapping strengths/);
+    assert.match(client.userTexts[1], /Do NOT prefer a visual or executable edit/);
+  } finally {
+    if (previousAdaptive === undefined) delete process.env.RE_API_ADAPTIVE_COVERAGE;
+    else process.env.RE_API_ADAPTIVE_COVERAGE = previousAdaptive;
+    if (previousSecondPass === undefined) delete process.env.RE_API_SECOND_PASS;
+    else process.env.RE_API_SECOND_PASS = previousSecondPass;
+  }
+});
+
+test("a visual diagnosis prescribed through the data branch does not fake broader-lens coverage", async () => {
+  const previousAdaptive = process.env.RE_API_ADAPTIVE_COVERAGE;
+  const previousSecondPass = process.env.RE_API_SECOND_PASS;
+  process.env.RE_API_ADAPTIVE_COVERAGE = "1";
+  process.env.RE_API_SECOND_PASS = "0";
+  const visuallyDiagnosedDataRemedies = Array.from({ length: 11 }, (_, index) => ({
+    ...critique,
+    object: "chart",
+    recommendation: "data:support valid inference",
+    kind: `visual-data-remedy-${index + 1}`,
+    title: `Encoding remedy ${index + 1}`,
+    issue: `A chart-encoding issue prescribed through the data branch ${index + 1}.`,
+  }));
+  const client = new SequenceClient([
+    diagnosisPayload(visuallyDiagnosedDataRemedies),
+    diagnosisPayload([]),
+  ]);
+  try {
+    await discoverDashboardCritiques(dashboardSpecMap(), {}, dashboardBoard(), client);
+    assert.match(client.userTexts[1], /substantive-lens counts/);
+    assert.match(client.userTexts[1], /"chart":11/);
+    assert.match(client.userTexts[1], /Currently absent broader lenses: data, cognition, context, interaction, task, design process/);
   } finally {
     if (previousAdaptive === undefined) delete process.env.RE_API_ADAPTIVE_COVERAGE;
     else process.env.RE_API_ADAPTIVE_COVERAGE = previousAdaptive;
@@ -296,6 +373,9 @@ test("eight grounded first-pass candidates still receive quality-gate headroom",
       client,
     );
     assert.equal(result.critiques.length, 9);
+    // Three count slots are missing. The diagnosed readability object already
+    // contributes a cognition lens even though its prescribed remedy is chart,
+    // so the recovery request stays bounded to those three slots.
     assert.match(client.userTexts[1], /Return at most 3 additional critiques/);
   } finally {
     if (previousAdaptive === undefined) delete process.env.RE_API_ADAPTIVE_COVERAGE;
@@ -407,10 +487,11 @@ test("preliminary feedback repairs non-critical metadata instead of dropping the
   );
   assert.equal(result.critiques.length, 1);
   assert.equal(result.critiques[0].supportStatus, "tentative");
-  // dimension still comes from the prescribed leaf's branch.
-  assert.equal(result.critiques[0].dimension, "chart");
+  // A live hover behavior is Interactivity even when the model attached a
+  // chart leaf; the executable operation is stronger routing evidence.
+  assert.equal(result.critiques[0].dimension, "interaction");
   assert.equal(result.critiques[0].priority, "medium");
-  assert.equal(result.critiques[0].surface, "encoding");
+  assert.equal(result.critiques[0].surface, "interaction");
   // Missing copy falls back to the dashboard-specific issue, never canned leaf text.
   assert.equal(result.critiques[0].title, critique.issue);
   // A tentative DIAGNOSIS (weak/unsupported grounding) no longer forces the FIX
@@ -736,6 +817,85 @@ test("a control-placement critique cannot masquerade as a tile-layout fix", asyn
   assert.ok(controlPlacement);
   assert.equal(controlPlacement!.proposal.kind, "manual");
   assert.equal(controlPlacement!.proposal.mode, "guidance_only");
+});
+
+test("a direct selected-filter move becomes an executable filter placement change", async () => {
+  const boardWithControl = {
+    ...dashboardBoard(),
+    canvasWidth: 1100,
+    canvasHeight: 720,
+    tiles: dashboardBoard().tiles!.map((tile) => ({ ...tile, bounds: tileBounds[tile.id] })),
+    filters: [{
+      id: "bird-filter",
+      label: "Bird",
+      kind: "category" as const,
+      field: "department",
+      targets: ["department-tasks"],
+      wired: true,
+      placement: "left-rail" as const,
+    }],
+  };
+  const modelCritique = {
+    ...critique,
+    object: "component",
+    problem: undefined,
+    // Deliberately use the tempting but wrong catalog branch: the concrete
+    // operation must keep a placement-only change out of Interactivity.
+    recommendation: "interaction:support efficient use",
+    surface: "structural",
+    tileId: null,
+    title: "Move the selected Bird filter",
+    issue: "The selected Bird filter occupies the left rail.",
+    rationale: "The author explicitly requested that this selected control move.",
+    evidence: "The selected semantic target is the Bird filter.",
+    suggestion: "Move the Bird filter to a clearer location.",
+    answer: "Yes — move the selected Bird filter.",
+    evidenceRefs: [{
+      source: "dashboard",
+      path: "board.filters",
+      detail: "Bird is an existing board filter in the left rail.",
+    }],
+    // Simulate the legacy model response that used tile layout for a control.
+    // The directed-request fallback must convert this to the real filter op.
+    proposal: {
+      kind: "edit-layout",
+      mode: "executable",
+      composition: "hero-left",
+      layoutTiles: boardWithControl.tiles.map((tile) => tile.id),
+    },
+    // Non-chart controls commonly serialize tile:null; this is absence, not a
+    // fabricated tile id, and must not discard the otherwise-valid proposal.
+    target: { granularity: "dashboard control", ref: { tile: null, filterId: "bird-filter" } },
+  };
+  const result = await discoverDashboardCritiques(
+    dashboardSpecMap(),
+    {},
+    boardWithControl,
+    new StubClient(diagnosisPayload([modelCritique])),
+    undefined,
+    {
+      bounds: { x: 24, y: 148, w: 184, h: 96 },
+      request: "move the filter",
+      semanticTargets: [{
+        kind: "filter-control",
+        path: "board.filters.bird-filter",
+        filterId: "bird-filter",
+        text: "Bird",
+        bounds: { x: 24, y: 148, w: 184, h: 96 },
+        overlapRatio: 1,
+      }],
+    },
+  );
+  const moved = result.critiques.find((item) => item.title === "Move the selected Bird filter");
+  assert.ok(moved);
+  assert.equal(moved!.proposal.kind, "edit-filter-control");
+  assert.equal(moved!.proposal.mode, "executable");
+  assert.equal(moved!.proposal.filterId, "bird-filter");
+  assert.equal(moved!.proposal.filterPlacement, "top-row");
+  assert.equal(moved!.target.ref.filterId, "bird-filter");
+  assert.equal(moved!.dimension, "layout");
+  assert.equal(moved!.surface, "structural");
+  assert.equal(moved!.recommendation, undefined);
 });
 
 test("a tall dashboard may use a dramatic six-tile vertical hero composition", async () => {
@@ -1188,7 +1348,7 @@ test("an uncatalogued component fix stays executable after normal safety validat
     }])),
   );
   assert.equal(result.critiques.length, 1);
-  assert.equal(result.critiques[0].dimension, "chart");
+  assert.equal(result.critiques[0].dimension, "interaction");
   assert.equal(result.critiques[0].proposal.kind, "add-tooltip");
   assert.equal(result.critiques[0].proposal.mode, "executable");
 });
@@ -1201,13 +1361,18 @@ test("an uncatalogued fix routes through its empirical object lens in a narrowed
     new StubClient(diagnosisPayload([{
       ...critique,
       recommendation: undefined,
-      proposal: { kind: "add-tooltip", mode: "executable" },
+      proposal: {
+        kind: "edit-spec",
+        mode: "executable",
+        edits: [{ op: "set", path: ["encoding", "x", "axis", "labelAngle"], value: -30 }],
+      },
       target: { granularity: "chart", ref: { tile: "department-tasks" } },
     }])),
   );
   assert.equal(result.critiques.length, 1);
   assert.equal(result.critiques[0].dimension, "cognition");
   assert.equal(result.critiques[0].recommendation, undefined);
+  assert.equal(result.critiques[0].proposal.kind, "edit-spec");
   assert.equal(result.critiques[0].proposal.mode, "executable");
 });
 
@@ -1268,6 +1433,91 @@ test("a component-level fix is executable through the general edit-spec proposal
   // The engine keeps the sanitized edits on the proposal so /apply re-applies
   // exactly what was validated.
   assert.deepEqual(kept.proposal.edits, [{ op: "set", path: ["encoding", "x", "sort"], value: "-y" }]);
+});
+
+test("a grounded critique whose executable payload fails Vega runtime parsing is kept as Guidance, never Fixable", async () => {
+  const previousPreflight = process.env.RE_API_PROPOSAL_PREFLIGHT;
+  process.env.RE_API_PROPOSAL_PREFLIGHT = "1";
+  const specMap = {
+    "birds-ranking": {
+      data: { values: [{ bird: "House Sparrow", count: 4.3 }, { bird: "Blue Tit", count: 3 }] },
+      params: [{
+        name: "bird_sel",
+        select: { type: "point", fields: ["bird"], on: "click", clear: "dblclick" },
+      }],
+      mark: { type: "bar" },
+      encoding: {
+        y: { field: "bird", type: "nominal" },
+        x: { field: "count", type: "quantitative" },
+        opacity: { condition: { param: "bird_sel", value: 1 }, value: 0.3 },
+      },
+    },
+  } as unknown as SpecMap;
+  const board = {
+    title: "Garden birds",
+    subtitle: "",
+    canvasWidth: 900,
+    canvasHeight: 600,
+    hasKpis: false,
+    kpis: [],
+    tiles: [{ id: "birds-ranking", title: "Bird ranking", hasSubtitle: false, bounds: { x: 20, y: 100, w: 500, h: 400 } }],
+  } as any;
+  const layeredLabels = {
+    ...critique,
+    tileId: "birds-ranking",
+    title: "Put the garden-bird counts on the bars",
+    issue: "The ranking does not show exact counts directly on the bars.",
+    evidence: "The birds-ranking x encoding contains count, but no text layer is present.",
+    evidenceRefs: [{
+      source: "dashboard",
+      path: "tile.birds-ranking.encoding.x",
+      detail: "The birds-ranking chart encodes count on x without a text layer.",
+      tileId: "birds-ranking",
+      field: "count",
+      channel: "x",
+    }],
+    proposal: {
+      kind: "edit-spec",
+      mode: "executable",
+      edits: [{
+        op: "set",
+        path: ["layer"],
+        value: [{
+          mark: { type: "bar" },
+          encoding: {
+            y: { field: "bird", type: "nominal" },
+            x: { field: "count", type: "quantitative" },
+            opacity: { condition: { param: "bird_sel", value: 1 }, value: 0.3 },
+          },
+        }, {
+          mark: { type: "text", dx: 6 },
+          encoding: {
+            y: { field: "bird", type: "nominal" },
+            x: { field: "count", type: "quantitative" },
+            text: { field: "count", type: "quantitative" },
+            opacity: { condition: { param: "bird_sel", value: 1 }, value: 0.3 },
+          },
+        }],
+      }, { op: "remove", path: ["mark"] }, { op: "remove", path: ["encoding"] }],
+    },
+    target: { granularity: "chart", ref: { tile: "birds-ranking" } },
+  };
+  try {
+    const result = await discoverDashboardCritiques(
+      specMap,
+      {},
+      board,
+      new StubClient(diagnosisPayload([layeredLabels])),
+    );
+    const kept = result.critiques.find((item) => item.title === layeredLabels.title);
+    assert.ok(kept);
+    assert.equal(kept!.proposal.mode, "guidance_only");
+    assert.equal(kept!.proposal.kind, "manual");
+    assert.equal((kept!.proposal.diag as any)?.reason, "proposal-runtime-validation");
+  } finally {
+    if (previousPreflight === undefined) delete process.env.RE_API_PROPOSAL_PREFLIGHT;
+    else process.env.RE_API_PROPOSAL_PREFLIGHT = previousPreflight;
+  }
 });
 
 test("full review filters an alignment-only preference on a short infographic callout", async () => {
@@ -1519,10 +1769,10 @@ test("advisory guidance-only critiques are capped at the reserve so they cannot 
   assert.ok(result.critiques.every((c) => c.dimension === "design process"));
 });
 
-test("a validated design-process critique is reserved a slot instead of being crowded out by executable fixes", async () => {
-  // Fourteen strong, validated executable critiques would fill every slot on their
-  // own (limit 14). Two tentative design-process critiques rank below them, so
-  // pure ranking would cut both; the reserve guarantees they still appear.
+test("a validated design-process critique is reserved a slot without letting workflow advice crowd out other lenses", async () => {
+  // Strong validated component critiques would fill every slot on their own.
+  // Two tentative process notes rank below them; breadth allocation guarantees
+  // that process is represented, but does not force both low-priority notes in.
   const chartLeaves = Array.from({ length: 20 }, (_, index) => ({
     ...critique,
     kind: `legibility-leaf-${index + 1}`,
@@ -1539,9 +1789,75 @@ test("a validated design-process critique is reserved a slot instead of being cr
     dashboardBoard(),
     new StubClient(diagnosisPayload([...chartLeaves, ...processLeaves])),
   );
-  assert.equal(result.critiques.length, 14);
+  assert.equal(result.critiques.length, 11);
   const processCount = result.critiques.filter((c) => c.dimension === "design process").length;
-  assert.equal(processCount, 2);
+  assert.equal(processCount, 1);
+});
+
+test("a full review retains grounded analytical, contextual, task, and process lenses instead of filling every slot with presentation fixes", async () => {
+  const chartLeaves = Array.from({ length: 20 }, (_, index) => ({
+    ...critique,
+    object: "chart",
+    kind: `presentation-fix-${index + 1}`,
+    title: `Presentation fix ${index + 1}`,
+    issue: `A grounded presentation issue ${index + 1}.`,
+    priority: "high",
+  }));
+  const broaderLeaves = [
+    {
+      ...critique,
+      object: "data",
+      recommendation: "data:support valid inference",
+      kind: "check-comparability",
+      title: "Clarify whether the department values are comparable",
+      issue: "The board does not state whether the department totals share the same reporting window.",
+      priority: "low",
+    },
+    {
+      ...critique,
+      object: "usage context",
+      recommendation: "context:state assumptions",
+      kind: "state-reporting-window",
+      title: "State the reporting-window assumption",
+      issue: "The displayed comparisons omit the reporting-window assumption.",
+      priority: "low",
+    },
+    {
+      ...critique,
+      object: "task",
+      problem: "missing | absent | unsupported",
+      recommendation: "task:task support analysis",
+      kind: "connect-to-staffing-task",
+      title: "Connect the comparison to the staffing task",
+      issue: "The dashboard does not explain how the comparison supports the staffing decision.",
+      surface: "structural",
+      priority: "low",
+    },
+    {
+      ...processCritique,
+      recommendation: "design process:iterate and evaluate",
+      kind: "reader-validation",
+      title: "Validate the reading order with target readers",
+      priority: "low",
+    },
+  ];
+  const result = await discoverDashboardCritiques(
+    dashboardSpecMap(),
+    {},
+    dashboardBoard(),
+    new StubClient(diagnosisPayload([...chartLeaves, ...broaderLeaves])),
+  );
+
+  assert.equal(result.critiques.length, 11);
+  // Assert on the diagnosed subject, not the recommendation branch: a task
+  // diagnosis may correctly prescribe a data-summary remedy such as add-kpis.
+  const objects = new Set(result.critiques.map((item) => item.object));
+  for (const object of ["data", "usage context", "task", "design process"]) {
+    assert.ok(objects.has(object), `missing retained ${object} lens; got ${[...objects].join(", ")}`);
+  }
+  assert.ok(
+    result.critiques.filter((item) => ["chart", "color", "layout", "text", "visual design", "component"].includes(item.object || "")).length <= 7,
+  );
 });
 
 test("a guidance-only component fix is repaired into an executable edit-spec via a follow-up call", async () => {
@@ -1868,6 +2184,56 @@ test("focused review requires a direct answer and tags results for request-first
   assert.match(client.firstUserText, /FINAL REQUEST ACCEPTANCE CONTRACT/);
 });
 
+test("solution refinement preserves distinct alternatives for one diagnosis and target", async () => {
+  const labels = [
+    "Department workload, ranked",
+    "Where the workload is concentrated",
+    "Compare task load across departments",
+  ];
+  const alternatives = labels.map((label, index) => ({
+    object: "text",
+    problem: "unclear | ambiguous",
+    recommendation: "text:communicate takeaways",
+    kind: `title-alternative-${index + 1}`,
+    priority: "medium",
+    surface: "text",
+    tileId: null,
+    title: `Alternative ${index + 1}`,
+    issue: "The current dashboard title does not state the workload comparison clearly.",
+    rationale: "The title should communicate the dashboard's supported comparison directly.",
+    evidence: "The dashboard title and department task chart establish the comparison being made.",
+    suggestion: `Use “${label}” as the dashboard title.`,
+    answer: "Yes — this is a distinct title solution for the accepted issue.",
+    judgmentBasis: ["dashboard evidence", "general design principle"],
+    requiredContext: [],
+    contextStatus: "not_applicable",
+    evidenceRefs: [{
+      source: "dashboard",
+      path: "board.title",
+      detail: "The current dashboard title is available for a grounded rewrite.",
+    }],
+    proposal: { kind: "dashboard-title", mode: "executable", label },
+    target: { granularity: "dashboard", ref: {} },
+  }));
+  const result = await discoverDashboardCritiques(
+    dashboardSpecMap(),
+    {},
+    dashboardBoard(),
+    new StubClient(diagnosisPayload(alternatives)),
+    undefined,
+    undefined,
+    {
+      request: "Generate three alternative title solutions for this accepted issue.",
+      purpose: "solution-refinement",
+    },
+  );
+
+  assert.equal(result.critiques.length, 3);
+  assert.deepEqual(result.critiques.map((item) => item.proposal.label), labels);
+  assert.ok(result.critiques.every((item) => item.proposal.mode === "executable"));
+  assert.equal(result.strengths.length, 0);
+});
+
 test("a focused review returns guidance even when the evaluated claim has no issue", async () => {
   const result = await discoverDashboardCritiques(
     dashboardSpecMap(),
@@ -2169,8 +2535,8 @@ test("consolidation is order-insensitive for the edit value payload", async () =
 
 test("collapsing duplicates frees limit slots for other non-advisory critiques", async () => {
   // Four per-tile duplicates of one fix + thirteen distinct other critiques =
-  // 17 candidates. Without consolidation the 14-critique cap would crowd some
-  // out; collapsing the four into one leaves room for all thirteen (1 + 13 = 14).
+  // 17 candidates. Consolidation frees three of the eleven visible slots, so
+  // ten distinct observations survive beside the shared fix.
   const duplicates = ["task-velocity", "department-tasks", "sprint-burndown", "project-status"].map((tileId) =>
     editSpecCritique({ tileId, edits: LABEL_ANGLE_EDIT, priority: "high" }),
   );
@@ -2186,13 +2552,13 @@ test("collapsing duplicates frees limit slots for other non-advisory critiques",
     dashboardBoard(),
     new StubClient(diagnosisPayload([...duplicates, ...others])),
   );
-  assert.equal(result.critiques.length, 14);
+  assert.equal(result.critiques.length, 11);
   const consolidated = result.critiques.find((c) => tilesOf(c));
   assert.ok(consolidated, "expected one consolidated critique");
   assert.equal(new Set(tilesOf(consolidated)).size, 4);
-  // Every one of the thirteen distinct critiques survived (none crowded out).
+  // The highest-ranked ten distinct critiques survive beside the consolidated fix.
   const keptKinds = new Set(result.findings.map((finding) => finding.kind));
-  for (let index = 1; index <= 13; index += 1) {
+  for (let index = 1; index <= 10; index += 1) {
     assert.ok(keptKinds.has(`distinct-observation-${index}`), `missing distinct-observation-${index}`);
   }
 });
@@ -2597,7 +2963,7 @@ test("a strength's author-facing copy is capped defensively", async () => {
   assert.equal(result.strengths[0].detail.length, 180);
 });
 
-test("an unrecognized or missing dimension defaults to 'other' without dropping the strength", async () => {
+test("unrecognized or missing strength dimensions default to 'other' and duplicate praise is collapsed", async () => {
   const bogus = { ...strength, dimension: "not-a-dimension" };
   const { dimension: _drop, ...noDimension } = strength;
   const result = await discoverDashboardCritiques(
@@ -2606,9 +2972,9 @@ test("an unrecognized or missing dimension defaults to 'other' without dropping 
     dashboardBoard(),
     new StubClient(diagnosisPayload([critique], [bogus, noDimension])),
   );
-  // Neither the bad value nor the absence gates admission — both survive, both
-  // fall through to the "other" grouping topic.
-  assert.equal(result.strengths.length, 2);
+  // Neither the bad value nor the absence gates admission. Both normalize to
+  // the same grounded positive card, so the duplicate is shown only once.
+  assert.equal(result.strengths.length, 1);
   assert.ok(result.strengths.every((s) => s.dimension === "other"));
 });
 

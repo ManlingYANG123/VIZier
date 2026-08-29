@@ -67,7 +67,7 @@ test("the review prompt frames DIAGNOSING, PRESENTING, and uniform grounding", (
   assert.match(DASHBOARD_REVIEW_SYSTEM, /not a checklist/i);
   assert.match(DASHBOARD_REVIEW_SYSTEM, /no default VIZier look/i);
   assert.match(DASHBOARD_REVIEW_SYSTEM, /any branch: the recommendation branch is a grouping label/i);
-  assert.match(DASHBOARD_REVIEW_SYSTEM, /Full review may return up to 14 critiques/);
+  assert.match(DASHBOARD_REVIEW_SYSTEM, /Full review may return up to 11 critiques/);
   assert.match(DASHBOARD_REVIEW_SYSTEM, /8–12 distinct formative observations/);
   assert.match(DASHBOARD_REVIEW_SYSTEM, /inferred is a usable working hypothesis/);
 });

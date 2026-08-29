@@ -24,7 +24,11 @@ import type {
   ScaffoldRequest,
   TraceEvent,
 } from "./contracts.ts";
-import { GatewayClient, type LLMClient } from "./llm/client.ts";
+import {
+  configuredGpt54ReasoningEffort,
+  GatewayClient,
+  type LLMClient,
+} from "./llm/client.ts";
 import { hasToken, model, provider } from "./llm/gateway.ts";
 import { Tracer, newRunId } from "./trace.ts";
 import { runApply, runCritique } from "./engine.ts";
@@ -40,19 +44,22 @@ import { saveStudySession, studyStorageMode } from "./study-store.ts";
 
 const PORT = Number(process.env.PORT || process.env.RE_API_PORT || 8091);
 const HOST = process.env.RE_API_HOST || (process.env.PORT ? "0.0.0.0" : "127.0.0.1");
+const INTAKE_CACHE_FILE = resolve(process.cwd(), "data", "intake-constraints-cache-v1.json");
 
 // The second discovery pass is an explicit evaluation/debug option. Production
 // defaults to one stronger, compact pass: doubling the complete dashboard
 // prompt added substantial latency and tended to pad the review with weaker
 // observations. Set RE_API_SECOND_PASS=1 only for coverage experiments.
 if (process.env.RE_API_SECOND_PASS === undefined) process.env.RE_API_SECOND_PASS = "0";
-// Preserve the high precision of one-pass review while recovering breadth only
-// when the first pass is genuinely sparse. The second call still runs through
-// the same judge, apply preflight, and conflict gates.
+// Preserve the high precision of the first review pass while recovering breadth
+// only when its validated result remains sparse. Recovery candidates still run
+// through grounding, apply preflight, and document-conflict gates.
 if (process.env.RE_API_ADAPTIVE_COVERAGE === undefined) process.env.RE_API_ADAPTIVE_COVERAGE = "1";
-// The semantic solution judge is part of the production quality path, but stays
-// opt-in for engine-library tests and deterministic measurement harnesses.
-if (process.env.RE_API_SOLUTION_JUDGE === undefined) process.env.RE_API_SOLUTION_JUDGE = "1";
+// The extra LLM-as-judge is available for ablations, but production relies on
+// grounding, deterministic merge/rank, real apply/compile preflight, and
+// document constraints. In matched GPT-5.4 tests the judge over-compressed
+// otherwise valid full reviews and added substantial latency.
+if (process.env.RE_API_SOLUTION_JUDGE === undefined) process.env.RE_API_SOLUTION_JUDGE = "0";
 if (process.env.RE_API_PROPOSAL_PREFLIGHT === undefined) process.env.RE_API_PROPOSAL_PREFLIGHT = "1";
 const FRONTEND_DIST = resolve(fileURLToPath(new URL("../../dist/", import.meta.url)));
 const MIME_TYPES: Record<string, string> = {
@@ -279,6 +286,8 @@ async function handleIntakeConstraints(req: IncomingMessage, res: ServerResponse
     );
     const { constraintSet, source } = await buildConstraintSet(body.source, client, {
       requireLLM: body.requireLLM,
+      cacheFile: INTAKE_CACHE_FILE,
+      cacheNamespace: `${provider()}/${model()}/reasoning=${configuredGpt54ReasoningEffort()}`,
     });
     console.log(`[re_api] → ${constraintSet.constraints.length} hard constraint(s) (${source})\n`);
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -387,7 +396,12 @@ const server = createServer((req, res) => {
   if (req.method === "GET" && pathname === "/health") {
     cors(req, res);
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true }));
+    res.end(JSON.stringify({
+      ok: true,
+      provider: provider(),
+      model: model(),
+      reasoningEffort: configuredGpt54ReasoningEffort(),
+    }));
     return;
   }
   cors(req, res);
@@ -440,6 +454,6 @@ server.listen(PORT, HOST, () => {
   console.log(`[re_api] critique engine on http://${HOST}:${PORT}`);
   console.log(`[re_api] study store: ${studyStorageMode()}`);
   console.log(
-    `[re_api] model adapter: ${provider()}/${model()} (${hasToken() ? "credentials available" : "no credentials"})`,
+    `[re_api] model adapter: ${provider()}/${model()} reasoning=${configuredGpt54ReasoningEffort()} (${hasToken() ? "credentials available" : "no credentials"})`,
   );
 });

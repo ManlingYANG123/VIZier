@@ -7,6 +7,7 @@ import {
   buildInteractionScenario,
   dashboardDocumentFromSnapshot,
   normalizeDashboardDocument,
+  staticInteractionPreviewForRender,
   walkUnitSpecs,
 } from "../src/vega-dashboard-adapter.js";
 // The backend "truth" the on-canvas simulation must match byte-for-byte. Node's
@@ -262,6 +263,42 @@ test("infers the interaction kind from proposal.kind when the model omits intera
     tileId: "trend",
   }, { trend: composed });
   assert.equal(tooltip.kind, "hover-tooltip");
+});
+
+test("live interaction replay removes the passive Proposed selection so the click can change it", () => {
+  const passiveSelection = {
+    kind: "cross-filter",
+    field: "Region",
+    value: "East",
+    sourceTile: "source",
+    targetTiles: ["target"],
+  };
+  assert.equal(staticInteractionPreviewForRender(passiveSelection, "before", false), null);
+  assert.equal(staticInteractionPreviewForRender(passiveSelection, "after", true), null);
+  assert.equal(staticInteractionPreviewForRender(passiveSelection, "after", false), passiveSelection);
+});
+
+test("builds a live dashboard-filter scenario for a wire-filter proposal", () => {
+  const scenario = buildInteractionScenario({
+    proposal: { kind: "wire-filter-control", filterId: "region-filter" },
+    target: { ref: { filterId: "region-filter" } },
+  }, { source: composed, target: composed }, {
+    filters: [{
+      id: "region-filter",
+      label: "Region",
+      kind: "category",
+      field: "Region",
+      targets: ["source", "target"],
+      options: ["East", "West"],
+      value: null,
+      wired: false,
+    }],
+  });
+  assert.equal(scenario.kind, "filter-control");
+  assert.equal(scenario.action, "change");
+  assert.equal(scenario.filterId, "region-filter");
+  assert.equal(scenario.value, "East");
+  assert.deepEqual(scenario.targetTiles, ["source", "target"]);
 });
 
 test("cross-filter target keeps the full-data quantitative domain during simulation", () => {

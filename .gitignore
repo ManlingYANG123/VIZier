@@ -6,3 +6,9 @@ dist/
 # Local study-data fallback (real study data is uploaded to S3; keep the dir).
 /data/*
 !/data/.gitkeep
+
+# Local reasoning-study responses are large, resumable, and may contain partial
+# files when a run is interrupted. Keep the reproducible scripts/report in git.
+evaluations/reasoning-effort-study-2026-08-28/raw/
+evaluations/reasoning-effort-study-2026-08-28/manifest.json
+evaluations/reasoning-effort-study-2026-08-28/study-summary.json

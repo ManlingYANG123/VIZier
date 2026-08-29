@@ -27,7 +27,7 @@ const PROCESS_ONLY_BRANCHES = new Set<Dimension>(["design process"]);
 /** Executable kinds that change the board chrome, not a tile spec — they never
  * enter applyProposals (which is spec-only), so validatedProposal alone gates
  * them. */
-const BOARD_KINDS = new Set(["add-kpis", "recompose-kpis", "dashboard-title", "chart-subtitles", "edit-layout", "wire-filter-control"]);
+const BOARD_KINDS = new Set(["add-kpis", "recompose-kpis", "dashboard-title", "chart-subtitles", "edit-layout", "wire-filter-control", "edit-filter-control"]);
 const MAX_REPAIRS = 12;
 
 interface RepairCandidate {
@@ -63,7 +63,8 @@ Choose the proposal kind that implements the suggestion:
 - edit-spec — the general route for any change to ONE tile's Vega-Lite spec (sort, axis title/format, label angle, chart title, color scheme, legend placement, scale domain, mark options, spec-internal layout). Set target.ref.tile to that tile id and give proposal.edits: an array of {"op":"set"|"remove","path":[...],"value":<present only for set>}. The path addresses into that tile's spec exactly. Only reference fields that ALREADY exist; never add data, datasets, inline values, params, usermeta, or root width/height/autosize (tile size comes from edit-layout).
 - add-tooltip — add tooltips to a tile. Set target.ref.tile.
 - add-cross-filter — wire a selection from a source tile to targets on a shared field. Set target.ref.source, target.ref.targets (array), target.ref.field.
-- edit-layout — move/resize dashboard tiles (a board-level layout change: tile position/size lives on the board, NOT in any spec). Give proposal.layout: an array of {"tile":<tile id>,"bounds":{"x":<num>,"y":<num>,"w":<num>,"h":<num>}} in canvas pixels. Only list the tiles whose box changes; keep boxes on-canvas, non-overlapping, and at least 80×80. Never reduce a tile's current width or height; reflow or enlarge instead so axes, legends, and text cannot be clipped. This operation cannot move filters or controls; omit a repair whose suggestion is to relocate one.
+- edit-layout — move/resize dashboard tiles (a board-level layout change: tile position/size lives on the board, NOT in any spec). Give proposal.layout: an array of {"tile":<tile id>,"bounds":{"x":<num>,"y":<num>,"w":<num>,"h":<num>}} in canvas pixels. Only list the tiles whose box changes; keep boxes on-canvas, non-overlapping, and at least 80×80. Never reduce a tile's current width or height; reflow or enlarge instead so axes, legends, and text cannot be clipped.
+- edit-filter-control — move an existing board filter. Give proposal.filterId plus filterPlacement ("top-row"|"title-inline"|"left-rail"|"right-rail"|"chart-header"|"floating"). chart-header also needs anchorTileId; floating also needs an on-canvas filterPosition {x,y,w}.
 - add-kpis — add a summary KPI row to the board. Optionally give proposal.kpis: an array of {"label":<short label>,"tile":<tile id whose data backs it>,"field":<field name>,"agg":"count"|"sum"|"avg"|"min"|"max"|"distinct","filter":<optional single exact condition>,"filters":<optional array of exact conditions combined with AND>,"highlight":<optional true>,"unit":<optional "%"|"d">}. Choose proposal.kpiStyle as "editorial", "product", "compact", or "technical" to fit the dashboard's existing typography and density rather than defaulting to one look. The engine computes each value from that tile's real data — never state a number yourself. Include every exact subset condition named by the label; for example species + year requires two filters. Omit proposal.kpis only if you cannot name real fields.
 - wire-filter-control — repair an existing visible board filter with proposal.filterId set to its exact id.
 - dashboard-title — set a descriptive dashboard title. Give proposal.label (required) and optionally proposal.subtitle.
@@ -88,6 +89,7 @@ function repairUser(candidates: RepairCandidate[], packet: EvidencePacket): stri
     "Encode each item's suggestion as one executable proposal. Items:",
     JSON.stringify(items, null, 2),
     `TILE IDS ON THE BOARD: ${JSON.stringify(Object.keys(packet.specMap))}`,
+    `BOARD FILTERS: ${JSON.stringify(packet.board.filters || [], null, 2)}`,
     `FULL TILE SPECS (cite paths against these):\n${JSON.stringify(packet.specMap, null, 2)}`,
     "Return only the JSON object described in the instructions.",
   ].join("\n\n");
@@ -131,12 +133,7 @@ export async function repairGuidanceToExecutable(
   const repairable: RepairCandidate[] = [];
   candidates.forEach((value, index) => {
     if (repairable.length >= MAX_REPAIRS) return;
-    const controlPlacement = asksToRepositionControl(
-      value.critique as unknown as Record<string, unknown>,
-      value.critique.evidenceRefs || [],
-      packet,
-    );
-    if (isRepairable(value) && !controlPlacement) {
+    if (isRepairable(value)) {
       repairable.push({ index, critique: value.critique, finding: value.finding, tileId: value.critique.tileId });
     }
   });
@@ -176,6 +173,13 @@ async function promote(
     packet,
   );
   if (proposal.mode !== "executable") return false;
+  if (
+    asksToRepositionControl(
+      candidate.critique as unknown as Record<string, unknown>,
+      candidate.critique.evidenceRefs || [],
+      packet,
+    ) && proposal.kind !== "edit-filter-control"
+  ) return false;
 
   const isBoard = BOARD_KINDS.has(proposal.kind);
   const granularity = isBoard && !candidate.tileId ? "dashboard" : (candidate.critique.target?.granularity || "chart");

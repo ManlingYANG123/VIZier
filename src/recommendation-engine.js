@@ -71,6 +71,11 @@ const RELATIONSHIPS_BY_KIND = {
     reads: ["dashboard.filters", "tile.spec"],
     writes: ["dashboard.filters"],
   },
+  "edit-filter-control": {
+    reads: ["dashboard.filters", "dashboard.layout"],
+    writes: ["dashboard.filters", "dashboard.layout"],
+    invalidates: ["spatial-markers"],
+  },
   // General spec-edit primitive: reads and writes the target tile's own spec.
   // Concrete target ids come from the critique ref, so the base relation only
   // records the coarse tile.spec channel (no cross-tile conflicts by default).

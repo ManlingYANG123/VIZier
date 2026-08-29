@@ -333,7 +333,7 @@ function tooltipUnit(spec, preferredPaths = []) {
  * Build an executable action from a critique plus the uploaded specs. All tile
  * ids, fields, values, and displayed evidence come from the artifact/critique.
  */
-export function buildInteractionScenario(critique, specMap) {
+export function buildInteractionScenario(critique, specMap, board = {}) {
   const ref = critique?.target?.ref || {};
   // The model frequently omits interactionKind even when the proposal is clearly
   // an interaction fix. Infer it from the proposal kind so a cross-filter (or its
@@ -347,6 +347,35 @@ export function buildInteractionScenario(critique, specMap) {
       : proposalKind === "add-tooltip"
         ? "hover-tooltip"
         : undefined);
+
+  if (proposalKind === "wire-filter-control" || kind === "filter-control") {
+    const filterId = String(critique?.proposal?.filterId || ref.filterId || "");
+    const control = Array.isArray(board?.filters)
+      ? board.filters.find((candidate) => String(candidate?.id || "") === filterId)
+      : null;
+    if (!control) return null;
+    const options = Array.isArray(control.options) ? control.options : [];
+    const currentValues = new Set(
+      (Array.isArray(control.value) ? control.value : [control.value])
+        .filter((value) => value !== null && value !== undefined)
+        .map(String),
+    );
+    const option = options.find((value) => !currentValues.has(String(value))) ?? options[0];
+    const rangeValue = Number.isFinite(Number(control.min)) && Number.isFinite(Number(control.max))
+      ? Number(control.min) + (Number(control.max) - Number(control.min)) / 2
+      : null;
+    const value = control.kind === "range" ? rangeValue : option;
+    if (value === undefined || value === null) return null;
+    return {
+      kind: "filter-control",
+      action: "change",
+      filterId: control.id,
+      label: control.label || control.field,
+      targetTiles: (Array.isArray(control.targets) ? control.targets : []).filter((id) => specMap[id]),
+      field: control.field,
+      value,
+    };
+  }
 
   if (kind === "cross-filter") {
     const sourceTile = String(ref.source || ref.tile || "");
@@ -406,6 +435,17 @@ export function buildInteractionScenario(critique, specMap) {
     };
   }
   return null;
+}
+
+/**
+ * A focused interaction card uses a representative selection for its passive
+ * Proposed preview, so a cross-filter is visible before the author runs it.
+ * During the live mouse replay that static selection must get out of the way:
+ * the click itself owns the selection, otherwise the target is already filtered
+ * before the click and the Proposed phase appears to do nothing.
+ */
+export function staticInteractionPreviewForRender(preview, phase, demoPlaying) {
+  return phase === "after" && !demoPlaying ? preview || null : null;
 }
 
 export function applySourceSelectionState(spec, selection) {

@@ -73,6 +73,25 @@ with `RE_API_MODEL`, provider base URLs with `OPENAI_BASE_URL` or
 `ANTHROPIC_BASE_URL`, the port with `RE_API_PORT`, and force offline with
 `RE_API_DISABLE_LLM=1`.
 
+OpenAI GPT-5.4 requests use `reasoning.effort: "low"`. Because GPT-5.4 only
+accepts `temperature` when reasoning effort is `none`, the OpenAI adapter omits
+the caller's temperature for GPT-5.4. Since `max_output_tokens` includes both
+reasoning and visible output, the adapter also raises older per-call limits to
+an 8,000-token minimum. Other supported providers and model overrides retain
+their existing temperature and output-limit behavior.
+
+For matched evaluations, override GPT-5.4 reasoning with
+`RE_API_REASONING_EFFORT=none|low|medium|high|xhigh`; production defaults to
+`low` based on the matched A/B study. Full reviews use bounded adaptive coverage
+recovery and retain at most 11 critiques; with grounded strengths this targets
+roughly 12–13 visible cards. The optional LLM solution judge defaults off after
+it over-compressed valid reviews in the matched study. Grounding, deterministic
+merge/rank, real apply/compile preflight, and design-document constraints remain
+enabled. Set `RE_API_SOLUTION_JUDGE=1` only for explicit ablations.
+
+Design-document constraint extraction allows up to 8,000 output tokens so
+non-none reasoning and the structured constraint result share sufficient space.
+
 ## Frontend wiring
 
 `../src/api-client.js` calls this engine by default. **AI Assist** requires

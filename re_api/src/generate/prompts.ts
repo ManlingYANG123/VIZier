@@ -143,8 +143,9 @@ PRESENTING — prescribe a fix, preferring the recommendation catalog:
 EXECUTABLE FIXES — THIS IS A HARD RULE. The whole Vega-Lite JSON is in the packet, so almost every fix is a concrete change you can make to it. MAKE IT, do not merely describe it.
 - Default stance: every fix that TOUCHES A DASHBOARD COMPONENT is EXECUTABLE — encode it, do not merely describe it. Guidance-only critiques ("design process" workflow/process advice and truly non-artifact reflections, see below) are a distinct, legitimate category, not a rare exception: when the dashboard's authoring, maintenance, evaluation, or workflow fit has a real, evidence-grounded weakness, surface it as guidance-only rather than staying silent. Aim for 1–3 such guidance-only critiques in a full review when the evidence genuinely supports them, and none when it does not. More than ~3 usually means you are turning encodable component fixes into prose — go back and encode those with edit-spec.
 - Any fix that changes something visible on a chart — its form/encoding, axes, sort order, scale/domain, tick format, color, in-spec text (chart title, axis title, legend title, labels), legend placement, or spec-internal spacing/size — IS executable. Encode it.
-- Use a specialized proposal kind when one fits: add-cross-filter, add-tooltip, wire-filter-control, add-kpis, recompose-kpis, v2-palette, preserve-brand-palette, dashboard-title, chart-subtitles, edit-layout.
+- Use a specialized proposal kind when one fits: add-cross-filter, add-tooltip, wire-filter-control, edit-filter-control, add-kpis, recompose-kpis, v2-palette, preserve-brand-palette, dashboard-title, chart-subtitles, edit-layout.
 - A visible board.filters control with wired:false is a concrete broken interaction, not a request to add another control. Repair it with {"kind":"wire-filter-control","mode":"executable","filterId":"<exact control id>"}.
+- Moving an existing board filter is executable. Use {"kind":"edit-filter-control","mode":"executable","filterId":"<exact control id>","filterPlacement":"top-row|title-inline|left-rail|right-rail|chart-header|floating"}. For chart-header also give anchorTileId; for floating also give filterPosition {x,y,w} within the canvas. Do not use edit-layout for a filter: edit-layout changes chart-tile bounds, while edit-filter-control changes board.filters placement. Categorize this as LAYOUT, not interaction: the change is spatial placement. Reserve the interaction branch for behavior or feedback caused by a user action (click, hover, filtering, drill-down, control wiring, state/response, or recovery), not for a component merely being a filter.
 - For v2-palette, author proposal.palette as 2–12 six-digit hex colors chosen for this dashboard's existing visual identity, semantic needs, and confirmed design-document constraints. Do not reuse a standard palette by habit. Omit palette only when the generic fallback is genuinely appropriate.
 - A board-LAYOUT fix is NOT a spec edit. Prefer a deterministic named proposal.composition ("hero-left"|"hero-top"|"asymmetric-grid"|"kpi-rail"|"small-multiples") plus proposal.layoutTiles when a major reflow resolves the hierarchy problem; set proposal.heroTileId to the exact task-relevant tile that should own the dominant slot. Never let spatial input order choose the hero by accident. The engine computes safe non-overlapping bounds. Use proposal.layout with explicit boxes only for a dashboard-specific arrangement the named compositions cannot express. Tiles may grow OR shrink when the new box remains at least 80×80; use the available hierarchy intentionally rather than preserving the old grid by habit.
 - add-kpis creates computed dashboard KPIs ONLY when no KPI band or embedded metric tiles exist. recompose-kpis redesigns an existing engine-owned KPI band instead of rejecting it. For add-kpis author proposal.kpis from real fields; recompose-kpis may preserve the existing definitions or replace them with equally computable definitions. Always choose a genuinely structural proposal.kpiLayout: "hero-support" (one dominant metric plus supporting figures), "card-grid" (separated comparison cells), "side-rail" (vertical analytical rail that reflows charts), or "inline-summary" (one compact continuous strip). Also choose kpiStyle ("editorial"|"product"|"compact"|"technical"), kpiAlignment ("start"|"center"|"end"), kpiDensity ("airy"|"balanced"|"dense"), and kpiChrome ("plain"|"ruled"|"filled") when useful. Do not repeat the current kpiLayout on a later iteration. The engine COMPUTES each number from real data; never invent values. Use format "percent" only when the real field is already stored on a 0–100 scale; use "percent-fraction" only for 0–1 ratios. Every KPI that names a 'field' MUST declare an explicit 'agg' ("sum"|"avg"|"min"|"max"|"count"|"distinct") — the engine no longer guesses, and drops a field KPI that omits it; make 'agg' match the label ("Average …"/"Avg …"/"Mean …" → "avg", "Total …" → "sum"). A KPI whose label narrows to subsets — a specific year, region, category, segment, or status — MUST carry every exact condition. Use singular 'filter' for one condition or AND-combined 'filters' for multiple conditions. Without all of them, the engine rejects the label as an unsupported data claim. Worked example — a species KPI for a specific year: {"label":"House Sparrow Index 2023","tile":"bird-trend","field":"index","agg":"max","filters":[{"field":"bird","value":"House Sparrow"},{"field":"year","value":2023}]}.
@@ -220,7 +221,7 @@ Return ONLY JSON in this shape (a single object, no surrounding text). Perform d
       "contextStatus": "available|missing|inferred|not_applicable",
       "evidenceRefs": ["same object shape as above"],
       "proposal": {
-        "kind": "add-cross-filter|add-tooltip|wire-filter-control|add-kpis|recompose-kpis|v2-palette|preserve-brand-palette|dashboard-title|chart-subtitles|edit-spec|edit-layout|manual",
+        "kind": "add-cross-filter|add-tooltip|wire-filter-control|edit-filter-control|add-kpis|recompose-kpis|v2-palette|preserve-brand-palette|dashboard-title|chart-subtitles|edit-spec|edit-layout|manual",
         "mode": "executable|guidance_only",
         "label": "required proposed title for dashboard-title",
         "palette": ["#123456", "#abcdef"],
@@ -235,7 +236,10 @@ Return ONLY JSON in this shape (a single object, no surrounding text). Perform d
         "kpiAlignment": "start|center|end",
         "kpiDensity": "airy|balanced|dense",
         "kpiChrome": "plain|ruled|filled",
-        "filterId": "exact dashboard filter id for wire-filter-control"
+        "filterId": "exact dashboard filter id for wire-filter-control or edit-filter-control",
+        "filterPlacement": "top-row|title-inline|left-rail|right-rail|chart-header|floating for edit-filter-control",
+        "filterPosition": { "x": 34, "y": 90, "w": 260 },
+        "anchorTileId": "exact tile id when filterPlacement is chart-header"
       },
       "target": {
         "granularity": "chart|dashboard|interaction",
@@ -269,15 +273,15 @@ OUTPUT POLICY:
 - A scope the author EXPLICITLY chooses must come back with content — never empty — because choosing it signals they want feedback there. This covers a focused or selected-region request AND every dimension named in REQUEST SCOPE.authorSelectedScopes (the review dimensions the author restricted a full review to). For each explicitly chosen scope, return at least one grounded critique; when you genuinely find no fault in that scope, return a grounded strength (Well Done) for it instead, so the author still gets substantive feedback rather than an empty result. Leave a chosen scope without any item only when the dashboard contains nothing evaluable in it at all. This never licenses manufacturing: the strength must pass the SAME grounding gate as any other, so a grounded Well Done is the honest floor here — never invent an issue or inflate praise to fill a scope.
 - When REQUEST SCOPE.authorSelectedScopes is present, it is a strict output filter: return critiques and strengths ONLY for those selected dimensions. You may reason across the whole dashboard to understand evidence, but do not emit items from unchecked dimensions.
 - A selected scope beginning with "custom:" is author-written rather than a catalog branch. Address that concern with an uncatalogued recommendation (dimension "other") instead of forcing it into an unrelated standard dimension.
-- Seek useful coverage across individual tiles, cross-view relationships, dashboard-level framing, the inferred analytical context, and the dashboard's authoring/workflow/process (the "design process" dimension — how the dashboard is built, maintained, evaluated, and fitted to its audience's workflow). Process/workflow is a first-class coverage dimension: aim for 1–3 grounded process observations, not zero and not a flood, and do not omit a well-grounded one merely because it cannot be auto-applied. Never manufacture issues to meet a quota.
+- Seek useful coverage across individual tiles, cross-view relationships, dashboard-level framing, analytical substance (data, cognition, task, and context), use behavior (interaction), and the dashboard's authoring/workflow/process (the "design process" dimension — how the dashboard is built, maintained, evaluated, and fitted to its audience's workflow). Do not equate "executable" with "important": a grounded Guidance item can be more valuable than another styling edit. Do not translate a data, task, context, cognition, or process concern into a visual change merely to make it executable. Process/workflow is a first-class coverage dimension: aim for 1–3 grounded process observations, not zero and not a flood, and do not omit a well-grounded one merely because it cannot be auto-applied. Never manufacture issues to meet a quota.
 - Coverage target, not a quota: a multi-view full dashboard will often support 8–12 distinct formative observations spanning tiles, cross-view relationships, dashboard framing, analytical context, and design-process/workflow. Seek breadth without relaxing quality: do not add cosmetic, generic, causally weak, or duplicate items merely to reach the range. Count a shared fix that applies to several tiles as ONE observation.
-- Full review may return up to 14 critiques. Focused or selected-region review may return up to 4.
+- Full review may return up to 11 critiques. Focused or selected-region review may return up to 4.
 - A critique must cite at least one supported grounding label, and — for any fix that touches a dashboard component — at least one valid evidenceRef. A guidance-only process/workflow or reflective uncatalogued critique may rest on "general design principle" alone with no artifact evidenceRef; an uncatalogued component fix still requires artifact evidence.
 - Executable proposal references must exactly match supplied tiles and fields.
 - Severity and relevance to an explicit focused or selected-region request are separate.
 - The "strengths" array is SEPARATE and SECONDARY. Complete issue diagnosis and critique coverage first. Then emit only standout strengths that tell the author what must be preserved during iteration; ordinary correctness, mere presence of a component, or a positive restatement of an issue is not a strength card. A strength never substitutes for an evidence-grounded issue on the same scope. Cite evidence exactly as a critique does. Keep at most one non-overlapping strength per object/evidence location, with a concise title and one concrete artifact-specific detail. Returning no strengths is normal; when a focused scope genuinely has no fault, a grounded strength remains the honest feedback floor.
 
-Supported executable operations are add-cross-filter, add-tooltip, wire-filter-control, add-kpis, recompose-kpis, v2-palette, preserve-brand-palette, dashboard-title, chart-subtitles, edit-layout (move/resize whole tiles on the board), and the general edit-spec (set/remove edits on one tile spec). A fix is guidance-only ({"kind":"manual","mode":"guidance_only"}) when it does not change a dashboard component — "design process" / workflow / meta advice, or an uncatalogued reflection — and such guidance is a legitimate part of a complete review. Conversely, every fix that DOES touch the JSON or board layout uses an executable kind whether or not it has an exact empirical recommendation leaf; edit-spec is the catch-all for spec changes and edit-layout for tile placement.
+Supported executable operations are add-cross-filter, add-tooltip, wire-filter-control, edit-filter-control (move an existing board filter), add-kpis, recompose-kpis, v2-palette, preserve-brand-palette, dashboard-title, chart-subtitles, edit-layout (move/resize whole tiles on the board), and the general edit-spec (set/remove edits on one tile spec). A fix is guidance-only ({"kind":"manual","mode":"guidance_only"}) when it does not change a dashboard component — "design process" / workflow / meta advice, or an uncatalogued reflection — and such guidance is a legitimate part of a complete review. Conversely, every fix that DOES touch the JSON or board layout uses an executable kind whether or not it has an exact empirical recommendation leaf; edit-spec is the catch-all for spec changes, edit-layout for tile placement, and edit-filter-control for filter placement.
 
 Prompt version: ${REVIEW_PROMPT_VERSION}`;
 
@@ -384,33 +388,42 @@ This block is design-history metadata, NOT grounding evidence. Do not cite it. N
   ].filter(Boolean).join("\n\n");
 }
 
-/** Second-pass coverage directive. A full review's first pass reliably finds the
- * most salient handful of issues, then can stop short of the 8–12 a rich
- * multi-view dashboard supports — the count is generation-bound, not gate-bound.
- * This directive is appended to the SAME evidence-bearing user message for a
- * second discovery call: it shows what pass one already covered and asks for
- * genuinely ADDITIONAL, distinct, grounded, executable issues, biased toward the
- * structural changes a first pass under-weights. The same grounding, evidence,
- * sanitize, and compile gates apply, so this widens honest coverage without
- * lowering the bar; an empty return is correct when nothing more is warranted. */
+/** Second-pass coverage directive. A full review's first pass can stop short of
+ * the 8–12 observations a rich board supports OR fill its slots with one family
+ * of fixes. This follow-up sees the exact covered dimensions and asks for the
+ * missing analytical/contextual/workflow lenses as well as any standout
+ * strengths the first pass missed. It is a breadth audit, not a structural-fix
+ * pass: the same grounding, evidence, sanitize, and runtime-render gates apply,
+ * and an empty return is correct when no additional item is warranted. */
 export function secondPassDirective(
-  covered: Array<{ object: string; tileId: string | null; dimension: string; title: string }>,
+  covered: Array<{ object: string; tileId: string | null; dimension: string; lens?: string; title: string }>,
   limit: number = 4,
+  coveredStrengths: Array<{ object: string; tileId: string | null; dimension: string; lens?: string; title: string }> = [],
 ): string {
+  const lensCounts = covered.reduce<Record<string, number>>((counts, item) => {
+    const lens = item.lens || item.dimension;
+    counts[lens] = (counts[lens] || 0) + 1;
+    return counts;
+  }, {});
+  const broaderDimensions = ["data", "cognition", "context", "interaction", "task", "design process"];
+  const absentBroaderDimensions = broaderDimensions.filter((dimension) => !lensCounts[dimension]);
   return [
     "SECOND-PASS COVERAGE EXPANSION — this is a follow-up discovery call on the SAME dashboard.",
     "A first reviewer already produced the critiques listed below (object · tile · dimension · title). Do NOT repeat any of them, and do NOT restate the same fix on the same target:",
     JSON.stringify(covered, null, 2),
+    `Current substantive-lens counts (derived from the diagnosed object, not merely the remedy label): ${JSON.stringify(lensCounts)}. Currently absent broader lenses: ${absentBroaderDimensions.join(", ") || "none"}.`,
+    "The following standout strengths are also already covered; do not repeat them:",
+    JSON.stringify(coveredStrengths, null, 2),
     [
-      "Return ADDITIONAL, genuinely distinct, evidence-grounded critiques this dashboard still warrants — the ones a first pass typically leaves on the table. Prioritize executable STRUCTURAL changes over additive chrome:",
-      "- chart-form / encoding transformations (mark type, aggregation, binning, sort, dual-encoding, layering) via edit-spec, including the two-step derive-then-encode route;",
-      "- cross-view coordination and consistency across tiles (shared scales, aligned axes, coordinated color, linked filtering);",
-      "- visual hierarchy and board layout (edit-layout / composition) when emphasis or reading order is wrong;",
-      "- axis / scale / label / number-format precision, legend placement, and color semantics;",
-      "- accessibility (contrast, color-encoding redundancy, text size) when the evidence shows it.",
-      "Favor the transform this SPECIFIC board's charts and fields make possible — name the actual tile, mark, field, or scale you are changing. A move that would read the same on any dashboard (blanket \"unify the typography\", a generic \"add source / metadata context\") is the LOWEST priority and is warranted only when you cite the exact inconsistency or missing element in this artifact; otherwise spend the slot on a board-specific structural change instead.",
-      "Hold the IDENTICAL evidence, grounding, and executable-proposal bar as the first pass — every fix cites real fields and passes the safety gates. Prefer transforming or consolidating an existing component over adding a duplicate subtitle/KPI/legend layer. If the artifact genuinely supports no further grounded issue, return an empty critiques array rather than padding with filler or restating covered items. Return only the JSON object in the same shape.",
-      `Return at most ${Math.max(1, Math.min(5, Math.round(limit)))} additional critiques. This is recall recovery, not permission to lower the quality threshold.`,
+      "Return ADDITIONAL, genuinely distinct, evidence-grounded critiques this dashboard still warrants. Begin with the absent or thin lenses above; test them, do not assume they contain a problem:",
+      "- analytical substance: data validity/comparability/granularity, cognitive burden, fit to the stated task, and missing decision or narrative context;",
+      "- use behavior: filter state, coordination, hover/detail access, and accessibility when the dashboard genre and evidence make them relevant;",
+      "- authoring/workflow: maintenance, evaluation, audience validation, or update risks as honest Guidance when they cannot be auto-applied;",
+      "- presentation: chart, color, text, hierarchy, or layout only when it is a distinct material issue not already covered above.",
+      "Do NOT prefer a visual or executable edit merely because it is easy to apply. Do NOT relabel a data/task/context/process concern as chart/text/layout. Conversely, do not invent a non-visual issue to fill a category. For any component change, name the actual tile, field, mark, scale, or relationship it changes.",
+      "Also return up to TWO non-overlapping strengths in strengths when the evidence shows an existing choice that the author should preserve. A strength is not filler and never replaces an issue; zero is correct when nothing stands out.",
+      "Hold the IDENTICAL evidence, grounding, and executable-proposal bar as the first pass. Prefer transforming or consolidating an existing component over adding duplicate chrome. If the artifact supports no further grounded critique, return an empty critiques array. Return only the JSON object in the same shape.",
+      `Return at most ${Math.max(1, Math.min(6, Math.round(limit)))} additional critiques. This is recall recovery, not permission to lower the quality threshold.`,
     ].join("\n"),
   ].join("\n\n");
 }

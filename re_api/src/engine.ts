@@ -135,6 +135,7 @@ export async function runCritique(
     {
       fallbackCount,
       ...(result.fallbackReason ? { fallbackReason: result.fallbackReason } : {}),
+      ...(result.pipelineDiagnostics ? { pipelineDiagnostics: result.pipelineDiagnostics } : {}),
     },
   );
   tracer.emit("rank_done", `${result.critiques.length} non-overlapping critique(s) selected`);
@@ -223,6 +224,10 @@ export async function runApply(
     boardAppliedIds.add(id);
     if (critique.proposal.kind === "dashboard-title") boardChangedTargets.add("dashboard.title");
     if (critique.proposal.kind === "wire-filter-control") boardChangedTargets.add("dashboard.filters");
+    if (critique.proposal.kind === "edit-filter-control") {
+      boardChangedTargets.add("dashboard.filters");
+      boardChangedTargets.add(`board.filters.${critique.proposal.filterId}`);
+    }
     if (critique.proposal.kind === "add-kpis" || critique.proposal.kind === "recompose-kpis") {
       boardChangedTargets.add("dashboard.kpis");
       boardChangedTargets.add("dashboard.layout");

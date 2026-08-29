@@ -1,9 +1,14 @@
 /**
  * The render gate: a candidate spec is only adopted if Vega-Lite can compile it
- * to a Vega spec. Native (no vl-convert needed) because the backend shares the
- * vega-lite library with the v2 frontend. Compile failure -> rollback.
+ * to a Vega spec AND Vega can parse the compiled runtime graph. `compile()`
+ * alone is not enough: Vega-Lite can emit a Vega program with duplicate signal
+ * names (for example, a top-level selection referenced by two new layers). The
+ * browser then rejects that program and leaves an empty tile even though the
+ * server previously reported the proposal as applied. Compile/parse failure ->
+ * rollback.
  */
 import { compile } from "vega-lite";
+import { parse } from "vega";
 import type { BoardMeta, BoardTileMeta, Bounds, SpecMap, VegaLiteSpec } from "../contracts.ts";
 import { encodedFieldsDeep, markType, unitSpecs } from "../detect/specUtil.ts";
 
@@ -14,8 +19,10 @@ export interface CompileResult {
 
 export function compileSpec(spec: VegaLiteSpec): { ok: boolean; error: string | null } {
   try {
-    // Cast: our VegaLiteSpec is intentionally loose; compile validates it.
-    compile(spec as never);
+    // Cast: our VegaLiteSpec is intentionally loose; Vega-Lite validates and
+    // lowers it, then Vega validates the exact runtime graph the browser uses.
+    const compiled = compile(spec as never);
+    parse(compiled.spec);
     return { ok: true, error: null };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };

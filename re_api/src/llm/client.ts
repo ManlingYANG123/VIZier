@@ -18,6 +18,28 @@ export interface CompleteOptions {
   signal?: AbortSignal;
 }
 
+/** GPT-5.4 uses deliberate reasoning for VIZier's multi-criteria dashboard
+ * analysis. Sampling controls are incompatible with any non-none effort, so
+ * the OpenAI request builder omits temperature for this model family. */
+export const GPT_5_4_REASONING_EFFORT = "low" as const;
+export type GPT54ReasoningEffort = "none" | "low" | "medium" | "high" | "xhigh";
+const GPT_5_4_REASONING_EFFORTS = new Set<GPT54ReasoningEffort>([
+  "none", "low", "medium", "high", "xhigh",
+]);
+
+export function configuredGpt54ReasoningEffort(
+  configured = process.env.RE_API_REASONING_EFFORT,
+): GPT54ReasoningEffort {
+  const normalized = configured?.trim().toLowerCase() as GPT54ReasoningEffort | undefined;
+  return normalized && GPT_5_4_REASONING_EFFORTS.has(normalized)
+    ? normalized
+    : GPT_5_4_REASONING_EFFORT;
+}
+/** max_output_tokens includes hidden reasoning tokens. The older per-call caps
+ * (often 800–2,600) predated non-none reasoning and can end before any JSON is
+ * emitted, so every GPT-5.4 non-none request gets this conservative floor. */
+export const GPT_5_4_MIN_OUTPUT_TOKENS = 8000;
+
 export interface LLMClient {
   available(): boolean;
   complete(userText: string, opts?: CompleteOptions): Promise<string>;
@@ -135,6 +157,32 @@ export function extractJson<T = Record<string, unknown>>(text: string): T | null
 
 type DeltaExtractor = (body: string, onStop?: (reason: string) => void) => string[];
 
+/** Build the Responses API payload independently so model-specific parameter
+ * compatibility stays testable without making a network request. */
+export function buildOpenAIRequestBody(
+  userText: string,
+  opts: CompleteOptions,
+  activeModel: string,
+  reasoningEffort = configuredGpt54ReasoningEffort(),
+): Record<string, unknown> {
+  const usesGpt54 = /^gpt-5\.4(?:$|-)/.test(activeModel);
+  const usesGpt54Reasoning = usesGpt54 && reasoningEffort !== "none";
+  const requestedMaxTokens = opts.maxTokens ?? 4096;
+  return {
+    model: activeModel,
+    input: userText,
+    stream: true,
+    max_output_tokens: usesGpt54Reasoning
+      ? Math.max(requestedMaxTokens, GPT_5_4_MIN_OUTPUT_TOKENS)
+      : requestedMaxTokens,
+    ...(usesGpt54 ? { reasoning: { effort: reasoningEffort } } : {}),
+    ...((!usesGpt54 || reasoningEffort === "none") && opts.temperature !== undefined
+      ? { temperature: opts.temperature }
+      : {}),
+    ...(opts.system ? { instructions: opts.system } : {}),
+  };
+}
+
 /** Concrete client bound to the configured provider. */
 export class GatewayClient implements LLMClient {
   private key: string | null;
@@ -177,16 +225,10 @@ export class GatewayClient implements LLMClient {
     const activeModel = opts.model ?? defaultModel("openai");
     const base = this.base.replace(/\/+$/, "");
     const endpoint = `${base}${base.endsWith("/v1") ? "" : "/v1"}/responses`;
-    const body = {
-      model: activeModel,
-      input: userText,
-      stream: true,
-      max_output_tokens: opts.maxTokens ?? 4096,
-      // Forward the author-set sampling temperature only when a caller supplied
-      // one; the Responses API defaults it otherwise. Without this the review
-      // temperature control is a silent no-op on the OpenAI provider.
-      ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
-      ...(opts.system ? { instructions: opts.system } : {}),
+    const body = buildOpenAIRequestBody(userText, opts, activeModel);
+    const effectiveOpts = {
+      ...opts,
+      maxTokens: body.max_output_tokens as number,
     };
     const res = await fetch(endpoint, {
       method: "POST",
@@ -198,7 +240,7 @@ export class GatewayClient implements LLMClient {
       body: JSON.stringify(body),
       signal: opts.signal,
     });
-    return this.readStream(res, opts, extractOpenAITextDeltas, "OpenAI");
+    return this.readStream(res, effectiveOpts, extractOpenAITextDeltas, "OpenAI");
   }
 
   private async completeAnthropic(

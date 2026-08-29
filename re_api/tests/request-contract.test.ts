@@ -91,6 +91,28 @@ test("a focused request resolves a named board tile title into its semantic targ
   assert.deepEqual(focus?.requestContract?.targetKinds, ["tile", "chart"]);
 });
 
+test("a focused move request resolves a named board filter into its semantic target", () => {
+  const withFilter: BoardMeta = {
+    ...board,
+    filters: [{
+      id: "bird-filter",
+      label: "Bird",
+      kind: "category",
+      field: "bird",
+      targets: ["trend"],
+      wired: true,
+      placement: "left-rail",
+    }],
+  };
+  const focus = normalizeFocusedReview({
+    request: "Move the Bird filter to the top.",
+  }, specs, withFilter);
+  assert.equal(focus?.requestContract?.explicitChange, true);
+  assert.ok(focus?.requestContract?.actions.includes("reposition"));
+  assert.deepEqual(focus?.requestContract?.targetPaths, ["board.filters.bird-filter"]);
+  assert.deepEqual(focus?.requestContract?.targetKinds, ["filter-control"]);
+});
+
 test("a stale refresh evaluates the old issue instead of treating its quoted suggestion as a new author command", () => {
   const focus = normalizeFocusedReview({
     purpose: "stale-refresh",

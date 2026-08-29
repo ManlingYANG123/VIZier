@@ -266,6 +266,59 @@ test("wire-filter-control connects an existing visible filter to valid targets",
   assert.equal(b.filters![0].value, null);
 });
 
+test("edit-filter-control moves an existing filter without changing its interaction state", () => {
+  const b = {
+    ...board(),
+    filters: [{
+      id: "department-filter",
+      label: "Department",
+      kind: "category" as const,
+      field: "department",
+      targets: ["department-tasks"],
+      wired: true,
+      value: "Design",
+      placement: "left-rail" as const,
+      container: "panel" as const,
+    }],
+  };
+  const applied = applyBoardProposal(b, boardCritique({
+    kind: "edit-filter-control",
+    mode: "executable",
+    filterId: "department-filter",
+    filterPlacement: "top-row",
+  }), dashboardSpecMap());
+  assert.equal(applied, true);
+  assert.equal(b.filters![0].placement, "top-row");
+  assert.equal(b.filters![0].wired, true);
+  assert.equal(b.filters![0].value, "Design");
+  assert.equal(b.filters![0].container, "panel");
+});
+
+test("edit-filter-control rejects an off-canvas floating position atomically", () => {
+  const b = {
+    ...board(),
+    filters: [{
+      id: "department-filter",
+      label: "Department",
+      kind: "category" as const,
+      field: "department",
+      targets: ["department-tasks"],
+      wired: true,
+      placement: "top-row" as const,
+    }],
+  };
+  const before = structuredClone(b.filters);
+  const applied = applyBoardProposal(b, boardCritique({
+    kind: "edit-filter-control",
+    mode: "executable",
+    filterId: "department-filter",
+    filterPlacement: "floating",
+    filterPosition: { x: 1040, y: 80, w: 240 },
+  }), dashboardSpecMap());
+  assert.equal(applied, false);
+  assert.deepEqual(b.filters, before);
+});
+
 test("add-kpis is idempotent: applying twice does not double-shift the tiles", () => {
   const b = board();
   applyBoardProposal(b, kpiCritique(), dashboardSpecMap());

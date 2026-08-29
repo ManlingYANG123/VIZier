@@ -79,7 +79,7 @@ test("a Gemini-style running-light ring marks the context box, design-doc upload
   assert.match(source, /function setRefineSolutionGenerating\(/);
 });
 
-test("a focused review send lights the input, then clears it and opens the generated critique", async () => {
+test("a focused review send shows its generated card and unlocks the other review entry points", async () => {
   const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
 
   assert.match(source, /state\.focusedReviewRunning = true/);
@@ -87,9 +87,13 @@ test("a focused review send lights the input, then clears it and opens the gener
   assert.match(source, /succeeded = await runAIAssist\(\{ focusedRequest: request \}\)/);
   assert.match(source, /focusedInput\.value = ""/);
   assert.match(source, /state\.reviewRequest = ""/);
-  // After a focused ask, open the answering critique in the right-hand inspector.
-  assert.match(source, /const opened = \(kept && \["pending", "updated"\]\.includes\(kept\.status\) \? kept : null\)/);
+  // A successful focused ask lands on the main card list; only an explicit
+  // stale-refresh keep id may open the inspector automatically.
+  assert.match(source, /const opened = kept && \["pending", "updated"\]\.includes\(kept\.status\) \? kept : null/);
   assert.match(source, /state\.selectedCritiqueId = opened\?\.id \|\| null/);
+  assert.match(source, /state\.focusedReviewRunning = false;[\s\S]*?syncReviewReadiness\(\)/);
+  assert.match(source, /critique-answer-preview/);
+  assert.doesNotMatch(source, /id="askAnswer"/);
   assert.match(source, /await renderInspector\(\)/);
 });
 
@@ -485,7 +489,7 @@ test("preliminary critiques are visibly labeled and cannot be auto-applied", asy
   assert.match(styles, /focus-source-chip\.tentative/);
 });
 
-test("interaction simulation observes each runtime phase manually via the canvas toggle", async () => {
+test("interaction simulation auto-compares once and remains replayable via the canvas toggle", async () => {
   const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
 
   // The runtime no longer ships its own Original/Proposed switch: the shared
@@ -493,10 +497,12 @@ test("interaction simulation observes each runtime phase manually via the canvas
   // critique) drives phase switching during a test.
   assert.doesNotMatch(source, /id="demoToggle"/);
   assert.doesNotMatch(source, /demo-toggle-opt/);
-  // Phase switching is manual, not an auto-flipping timer loop.
+  // There is no uncontrolled auto-flipping timer loop. The initial run performs
+  // one bounded Original → Proposed comparison; later switching stays manual.
   assert.doesNotMatch(source, /transitionInteractionRuntimePhase\(phase === "before" \? "after" : "before"\)/);
   assert.doesNotMatch(source, /interactionRuntimeLoop|demoLoopId/);
-  // A single observation runs per phase, driven by the canvas toggle.
+  // Each phase uses the same real Vega observation path, and the persistent
+  // canvas toggle can invoke it again after the initial comparison.
   assert.match(source, /async function observeInteractionPhase\(\)/);
   assert.match(source, /async function switchInteractionRuntimePhase\(phase\)/);
   assert.match(source, /if \(state\.demoPlaying\) \{\s*switchInteractionRuntimePhase\(nextPhase\);/);
@@ -532,15 +538,21 @@ test("applying an interaction fix leaves its demonstrated state visible", async 
   assert.match(source, /class="focus-demo-button" id="focusDemoButton"/);
 });
 
-test("an interaction critique is replayable from its focused Run interaction test button", async () => {
+test("an interaction critique replays Original then Proposed from its focused test button", async () => {
   const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
 
-  assert.match(source, /id="focusDemoButton"[^>]*>Run interaction test on the canvas</);
+  assert.match(source, /id="focusDemoButton"[^>]*>Replay Original → Proposed interaction</);
   const demoClick = source.match(
     /getElementById\("focusDemoButton"\)\?\.addEventListener\("click", \(\) => \{[\s\S]*?\n  \}\);/,
   )?.[0] || "";
   assert.match(demoClick, /playInteractionRuntime\(critique\)/);
   assert.match(demoClick, /recordStudyAction\("interaction_replayed"/);
+  const runtime = source.match(/async function playInteractionRuntime[\s\S]*?\n}/)?.[0] || "";
+  assert.match(runtime, /await observeInteractionPhase\(\);[\s\S]*?transitionInteractionRuntimePhase\("after"\)[\s\S]*?await observeInteractionPhase\(\);/);
+  assert.match(source, /staticInteractionPreviewForRender\([\s\S]*?state\.demoPlaying/);
+  assert.match(source, /function runtimeFilterControl\(scenario\)/);
+  assert.match(source, /function dispatchRuntimeFilterControl\(element, scenario\)/);
+  assert.match(source, /scenario\.kind === "filter-control"/);
 });
 
 test("single-critique apply still flows through the focused action, and batch is inline (not the removed modal)", async () => {

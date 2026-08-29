@@ -92,6 +92,7 @@ const EXECUTABLE_PROPOSALS = new Set([
   "add-cross-filter",
   "add-tooltip",
   "wire-filter-control",
+  "edit-filter-control",
   "add-kpis",
   "recompose-kpis",
   "v2-palette",
@@ -127,6 +128,14 @@ const LAYOUT_COMPOSITIONS = new Set([
   "kpi-rail",
   "small-multiples",
 ]);
+const FILTER_PLACEMENTS = new Set([
+  "top-row",
+  "title-inline",
+  "left-rail",
+  "right-rail",
+  "chart-header",
+  "floating",
+]);
 /** Layout limits mirror apply/index.ts so generation never advertises a change
  * that the apply boundary must reject. */
 const MIN_LAYOUT_SIZE = 80;
@@ -138,6 +147,7 @@ const FALLBACK_EXECUTABLE_PROPOSALS = new Set([
   "add-cross-filter",
   "add-tooltip",
   "wire-filter-control",
+  "edit-filter-control",
   "v2-palette",
   "preserve-brand-palette",
   "chart-subtitles",
@@ -161,6 +171,84 @@ function isAdvisoryCritique(critique: Critique): boolean {
  * many (so relaxed prompt wording cannot let guidance-only prose flood a review).
  * The soft target stated in the prompt (1-3) maps to this number. */
 const GUIDANCE_RESERVE = 3;
+/** Presentation branches describe what the artifact looks like. A complete
+ * review also examines what the data means, what the reader must do/understand,
+ * and how the artifact is maintained. These families are used only for recovery
+ * and late slot allocation: they never manufacture, admit, or raise the severity
+ * of a critique. */
+const PRESENTATION_BRANCHES = new Set<Dimension>([
+  "chart", "color", "layout", "text", "visual design",
+]);
+const ANALYTICAL_BRANCHES = new Set<Dimension>([
+  "data", "cognition", "context", "interaction", "task",
+]);
+/** When an eleven-critique full review already contains grounded broader-lens
+ * candidates, retain up to four before presentation fixes consume every slot.
+ * The reserve is unused when the evidence produced no such candidates. */
+const BROADER_LENS_RESERVE = 4;
+
+/** Recommendation branch describes the prescribed remedy, so it can label an
+ * encoding fix as `data` (for example, a tighter y-scale prescribed to support
+ * valid inference). For breadth we care about the diagnosed SUBJECT, not the
+ * remedy label. Prefer the empirical object lens and fall back to dimension only
+ * for an object that has no mapping. This prevents cosmetic/encoding work from
+ * creating fake non-visual coverage by changing its catalog branch. */
+function substantiveLens(item: { object?: string; dimension: Dimension }): Dimension {
+  return EMPIRICAL_OBJECT_BRANCH[item.object || ""] || item.dimension;
+}
+
+function broaderLensCount(critiques: Critique[]): number {
+  return critiques.filter((critique) => !PRESENTATION_BRANCHES.has(substantiveLens(critique))).length;
+}
+
+function reviewCoverageNeedsRecovery(critiques: Critique[], strengths: Strength[]): boolean {
+  const broaderDimensions = new Set(
+    critiques
+      .filter((critique) => !PRESENTATION_BRANCHES.has(substantiveLens(critique)))
+      .map((critique) => substantiveLens(critique)),
+  );
+  return critiques.length < 11 ||
+    broaderLensCount(critiques) < 3 ||
+    broaderDimensions.size < 2 ||
+    strengths.length < 1;
+}
+
+function coverageRecoveryLimit(critiques: Critique[]): number {
+  const missingCount = Math.max(0, 11 - critiques.length);
+  const missingBreadth = Math.max(0, BROADER_LENS_RESERVE - broaderLensCount(critiques));
+  return Math.max(1, Math.min(6, Math.max(missingCount, missingBreadth)));
+}
+
+function strengthSignature(strength: Strength): string {
+  const evidence = (strength.evidenceRefs || []).map((ref) => ref.path).sort().join(",");
+  return [strength.object, strength.dimension, strength.tileId || "dashboard", evidence, strength.title].join("|");
+}
+
+/** Keep positive feedback compact and non-repetitive. In a full review, prefer
+ * one broader-lens strength plus one presentation strength when both exist, then
+ * fill from the remaining grounded observations. This is selection among real
+ * strengths, never a requirement to produce praise. */
+function selectStrengths(strengths: Strength[], limit: number): Strength[] {
+  const unique: Strength[] = [];
+  const signatures = new Set<string>();
+  for (const strength of strengths) {
+    const signature = strengthSignature(strength);
+    if (signatures.has(signature)) continue;
+    signatures.add(signature);
+    unique.push(strength);
+  }
+  if (unique.length <= limit) return unique;
+  const chosen: Strength[] = [];
+  const broader = unique.find((strength) => !PRESENTATION_BRANCHES.has(substantiveLens(strength)));
+  const presentation = unique.find((strength) => PRESENTATION_BRANCHES.has(substantiveLens(strength)));
+  if (broader) chosen.push(broader);
+  if (presentation && chosen.length < limit) chosen.push(presentation);
+  for (const strength of unique) {
+    if (chosen.length >= limit) break;
+    if (!chosen.includes(strength)) chosen.push(strength);
+  }
+  return chosen;
+}
 /** Detector templates are a reliability safety net, not the review's primary
  * author. When the model produced usable critique content, keep only a small
  * number of uncovered detector gaps so repeated defaults cannot dominate. */
@@ -350,9 +438,9 @@ export function normalizeFocusedReview(
     : "author-request";
   const requestContract = buildReviewRequestContract(request);
   // Focused requests do not carry the browser's selected-region semantic hits.
-  // Resolve an explicitly named chart title or tile id against the current
-  // board so the acceptance gate checks the component the author actually
-  // named (for example, "Project Status Distribution" → project-status).
+  // Resolve explicitly named chart titles, tile ids, and filter labels against
+  // the current board so the acceptance gate checks the component the author
+  // actually named (for example, "Bird filter" → board.filters.bird-filter).
   if (!requestContract.targetPaths.length && specMap) {
     const normalizedRequest = request.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
     const namedTileIds = new Set<string>();
@@ -367,6 +455,18 @@ export function normalizeFocusedReview(
     if (namedTileIds.size) {
       requestContract.targetPaths = [...namedTileIds].slice(0, 12).map((id) => `tile.${id}`);
       requestContract.targetKinds = ["tile", "chart"];
+    }
+    if (!requestContract.targetPaths.length && /\b(filter|control|dropdown|selector)\b/i.test(request)) {
+      const namedFilters = (board?.filters || []).filter((filter) => {
+        const normalizedId = filter.id.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+        const normalizedLabel = filter.label.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+        return (normalizedId && normalizedRequest.includes(normalizedId)) ||
+          (normalizedLabel && normalizedRequest.includes(normalizedLabel));
+      });
+      if (namedFilters.length === 1) {
+        requestContract.targetPaths = [`board.filters.${namedFilters[0].id}`];
+        requestContract.targetKinds = ["filter-control"];
+      }
     }
   }
   // A stale-card refresh quotes the old suggestion so the model can reassess
@@ -850,6 +950,10 @@ export function canonicalJson(value: unknown): string {
  * safety gate: an inferred edit-spec whose edits don't sanitize still degrades. */
 function inferKindFromPayload(proposalRaw: JsonObject): string {
   if (Array.isArray(proposalRaw.edits) && proposalRaw.edits.length) return "edit-spec";
+  if (typeof proposalRaw.filterId === "string" &&
+      (typeof proposalRaw.filterPlacement === "string" || proposalRaw.filterPosition)) {
+    return "edit-filter-control";
+  }
   if (Array.isArray(proposalRaw.layout) && proposalRaw.layout.length) return "edit-layout";
   if (typeof proposalRaw.composition === "string") return "edit-layout";
   if (Array.isArray(proposalRaw.kpis) && proposalRaw.kpis.length) return "add-kpis";
@@ -1094,6 +1198,9 @@ export function validatedProposal(raw: JsonObject, tileId: string | null, packet
     kind = "manual";
   }
   let sanitizedFilterId: string | null = null;
+  let sanitizedFilterPlacement: Proposal["filterPlacement"];
+  let sanitizedFilterPosition: Proposal["filterPosition"];
+  let sanitizedAnchorTileId: string | undefined;
   if (kind === "wire-filter-control") {
     const filterId = text(proposalRaw.filterId);
     const control = packet.board.filters?.find((item) => item.id === filterId);
@@ -1102,6 +1209,41 @@ export function validatedProposal(raw: JsonObject, tileId: string | null, packet
     ) || [];
     if (!control || control.wired || !validTargets.length) kind = "manual";
     else sanitizedFilterId = control.id;
+  }
+  if (kind === "edit-filter-control") {
+    const filterId = text(proposalRaw.filterId);
+    const control = packet.board.filters?.find((item) => item.id === filterId);
+    const placement = typeof proposalRaw.filterPlacement === "string" &&
+        FILTER_PLACEMENTS.has(proposalRaw.filterPlacement)
+      ? proposalRaw.filterPlacement as Proposal["filterPlacement"]
+      : undefined;
+    if (!control || !placement) {
+      kind = "manual";
+    } else {
+      sanitizedFilterId = control.id;
+      sanitizedFilterPlacement = placement;
+      if (placement === "chart-header") {
+        sanitizedAnchorTileId = exactTile(proposalRaw.anchorTileId, tileIds) || undefined;
+        if (!sanitizedAnchorTileId) kind = "manual";
+      } else if (placement === "floating") {
+        const rawPosition = object(proposalRaw.filterPosition);
+        const x = Number(rawPosition.x);
+        const y = Number(rawPosition.y);
+        const w = rawPosition.w === undefined ? 240 : Number(rawPosition.w);
+        const canvasWidth = Number(packet.board.canvasWidth) || 1100;
+        const canvasHeight = Number(packet.board.canvasHeight) || 720;
+        if (![x, y, w].every(Number.isFinite) || x < 0 || y < 0 || w < 120 ||
+            x + w > canvasWidth || y + 52 > canvasHeight) {
+          kind = "manual";
+        } else {
+          sanitizedFilterPosition = { x, y, w };
+        }
+      }
+      const samePlacement = control.placement === placement;
+      const sameAnchor = placement !== "chart-header" || control.anchorTile === sanitizedAnchorTileId;
+      const samePosition = placement !== "floating" || canonicalJson(control.position) === canonicalJson(sanitizedFilterPosition);
+      if (kind === "edit-filter-control" && samePlacement && sameAnchor && samePosition) kind = "manual";
+    }
   }
   const sanitizedPalette = kind === "v2-palette" && Array.isArray(proposalRaw.palette)
     ? [...new Set(
@@ -1120,6 +1262,13 @@ export function validatedProposal(raw: JsonObject, tileId: string | null, packet
     }
   }
   if (kind === "wire-filter-control" && sanitizedFilterId) proposal.filterId = sanitizedFilterId;
+  if (kind === "edit-filter-control" && sanitizedFilterId && sanitizedFilterPlacement) {
+    proposal.filterId = sanitizedFilterId;
+    proposal.filterPlacement = sanitizedFilterPlacement;
+    if (sanitizedFilterPosition) proposal.filterPosition = sanitizedFilterPosition;
+    if (sanitizedAnchorTileId) proposal.anchorTileId = sanitizedAnchorTileId;
+    ref.filterId = sanitizedFilterId;
+  }
   if ((kind === "add-kpis" || kind === "recompose-kpis") &&
       (sanitizedKpis.length || kind === "recompose-kpis")) {
     if (sanitizedKpis.length) proposal.kpis = sanitizedKpis;
@@ -1188,10 +1337,8 @@ export function validatedProposal(raw: JsonObject, tileId: string | null, packet
   return { proposal, ref };
 }
 
-/** edit-layout can only move chart tiles. A critique about relocating a filter
- * control must remain guidance until the apply engine has an operation for
- * board.filters[].placement/position; otherwise the model's fallback layout
- * payload reflows unrelated charts while leaving the control untouched. */
+/** Detect filter-placement intent so it routes to edit-filter-control rather
+ * than accidentally reflowing unrelated chart tiles through edit-layout. */
 export function asksToRepositionControl(raw: JsonObject, refs: EvidenceRef[], packet: EvidencePacket): boolean {
   const prose = [raw.title, raw.issue, raw.rationale, raw.evidence, raw.suggestion]
     .filter((value): value is string => typeof value === "string")
@@ -1211,6 +1358,74 @@ export function asksToRepositionControl(raw: JsonObject, refs: EvidenceRef[], pa
   return mentionsControl && requestsPlacement;
 }
 
+function requestedFilterId(
+  raw: JsonObject,
+  refs: EvidenceRef[],
+  contract: ReviewRequestContract | undefined,
+  packet: EvidencePacket,
+): string | null {
+  const controls = packet.board.filters || [];
+  const known = new Set(controls.map((control) => control.id));
+  const candidates = [
+    ...(contract?.targetPaths || []).flatMap((path) => {
+      const match = path.match(/^board\.filters\.([^\.]+)$/);
+      return match ? [match[1]] : [];
+    }),
+    ...refs.flatMap((ref) => {
+      const match = ref.path.match(/^board\.filters\.([^\.]+)$/);
+      return match ? [match[1]] : [];
+    }),
+    text(object(object(raw.target).ref).filterId) || "",
+  ].filter((id) => known.has(id));
+  if (candidates.length) return candidates[0];
+  const prose = [raw.title, raw.issue, raw.rationale, raw.evidence, raw.suggestion]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ")
+    .toLowerCase();
+  const named = controls.filter((control) =>
+    prose.includes(control.id.toLowerCase()) || prose.includes(control.label.toLowerCase()));
+  if (named.length === 1) return named[0].id;
+  return controls.length === 1 ? controls[0].id : null;
+}
+
+/** A direct focused/local request already supplies a validated semantic target.
+ * If the model still emits the legacy tile-layout payload (or prose-only manual
+ * guidance), turn the explicit request into the smallest safe filter move. This
+ * is intentionally limited to an explicit reposition action; open-ended review
+ * remains model-authored. */
+function directFilterMoveProposal(
+  raw: JsonObject,
+  refs: EvidenceRef[],
+  contract: ReviewRequestContract | undefined,
+  packet: EvidencePacket,
+): { proposal: Proposal; ref: JsonObject } | null {
+  if (!contract?.explicitChange || !contract.actions.includes("reposition")) return null;
+  const filterId = requestedFilterId(raw, refs, contract, packet);
+  const control = packet.board.filters?.find((item) => item.id === filterId);
+  if (!control) return null;
+  const request = contract.request.toLowerCase();
+  let filterPlacement: Proposal["filterPlacement"];
+  if (/\b(right|right-hand|right side)\b|右侧|右边/i.test(request)) filterPlacement = "right-rail";
+  else if (/\b(left|left-hand|left side)\b|左侧|左边/i.test(request)) filterPlacement = "left-rail";
+  else if (/\b(title|headline|header)\b|标题|页眉/i.test(request)) filterPlacement = "title-inline";
+  else if (/\b(top|above|upper)\b|顶部|上方/i.test(request)) filterPlacement = "top-row";
+  else {
+    // A bare "move the filter" still needs a visible, reversible result. Move
+    // rail/floating controls into the standard top band; move an already-top
+    // control beside the title so the operation can never sanitize to a no-op.
+    filterPlacement = control.placement === "top-row" ? "title-inline" : "top-row";
+  }
+  return validatedProposal({
+    proposal: {
+      kind: "edit-filter-control",
+      mode: "executable",
+      filterId: control.id,
+      filterPlacement,
+    },
+    target: { ref: { filterId: control.id } },
+  }, null, packet);
+}
+
 function defaultSurface(dimension: Dimension): Surface {
   if (dimension === "interaction") return "interaction";
   if (dimension === "text") return "text";
@@ -1218,6 +1433,44 @@ function defaultSurface(dimension: Dimension): Surface {
     return "encoding";
   }
   return "structural";
+}
+
+/**
+ * The recommendation catalog is a useful semantic prior, but an executable
+ * operation is stronger evidence about what the author will actually change.
+ * Keep Interactivity for behavior that responds to an action; moving the
+ * control itself is Layout, even if the model reached for an interaction leaf
+ * because the component happens to be a filter.
+ */
+export function semanticDimensionForProposal(
+  catalogDimension: Dimension,
+  proposalKind: string,
+): Dimension {
+  if (["add-cross-filter", "add-tooltip", "show-filter-state", "wire-filter-control"].includes(proposalKind)) {
+    return "interaction";
+  }
+  if (["edit-filter-control", "edit-layout", "recompose-kpis"].includes(proposalKind)) {
+    return "layout";
+  }
+  if (proposalKind === "add-kpis") return "data";
+  if (["v2-palette", "preserve-brand-palette"].includes(proposalKind)) return "color";
+  if (["dashboard-title", "chart-subtitles"].includes(proposalKind)) return "text";
+  return catalogDimension;
+}
+
+function semanticSurfaceForProposal(
+  declaredSurface: Surface,
+  proposalKind: string,
+  dimension: Dimension,
+): Surface {
+  if (["add-cross-filter", "add-tooltip", "show-filter-state", "wire-filter-control"].includes(proposalKind)) {
+    return "interaction";
+  }
+  if (["dashboard-title", "chart-subtitles"].includes(proposalKind)) return "text";
+  if (["edit-filter-control", "edit-layout", "add-kpis", "recompose-kpis"].includes(proposalKind)) {
+    return "structural";
+  }
+  return declaredSurface || defaultSurface(dimension);
 }
 
 function proposalMatchesRequestContract(
@@ -1241,6 +1494,14 @@ function proposalMatchesRequestContract(
       if (!before || !after || after.length > Math.floor(before.length * 0.85)) return false;
     }
     return true;
+  }
+  const requestedFilters = new Set(targetPaths.flatMap((path) => {
+    const match = path.match(/^board\.filters\.([^\.]+)$/);
+    return match ? [match[1]] : [];
+  }));
+  if (requestedFilters.size) {
+    return proposal.kind === "edit-filter-control" &&
+      typeof proposal.filterId === "string" && requestedFilters.has(proposal.filterId);
   }
   const requestedTiles = new Set(contractTileIds(contract));
   if (!requestedTiles.size) return true;
@@ -1279,7 +1540,7 @@ function validateCritique(
   // "other", and may still execute when its proposal passes normal safety gates.
   // The rate of "other" remains a coverage signal for future catalog updates.
   const leaf = RECOMMENDATION_LEAF_BY_ID.get(recommendationId);
-  const dimension: Dimension = leaf
+  let dimension: Dimension = leaf
     ? leaf.branch
     : uncataloguedDimension(objectCode, recommendationId, snapshot);
 
@@ -1302,14 +1563,15 @@ function validateCritique(
 
   let priority = PRIORITIES.has(raw.priority as Priority) ? raw.priority as Priority : "medium";
   if (!PRIORITIES.has(raw.priority as Priority)) tentative = true;
-  const surface = SURFACES.has(raw.surface as Surface) ? raw.surface as Surface : defaultSurface(dimension);
+  let surface = SURFACES.has(raw.surface as Surface) ? raw.surface as Surface : defaultSurface(dimension);
   if (!SURFACES.has(raw.surface as Surface)) tentative = true;
 
   const tileIds = new Set(Object.keys(packet.specMap));
   const tileId = raw.tileId === null || raw.tileId === undefined ? null : exactTile(raw.tileId, tileIds);
   if (raw.tileId !== null && raw.tileId !== undefined && !tileId) return null;
   const declaredTargetRef = object(object(raw.target).ref);
-  if (declaredTargetRef.tile !== undefined && !exactTile(declaredTargetRef.tile, tileIds)) {
+  if (declaredTargetRef.tile !== undefined && declaredTargetRef.tile !== null &&
+      !exactTile(declaredTargetRef.tile, tileIds)) {
     return null;
   }
 
@@ -1402,18 +1664,33 @@ function validateCritique(
     : null;
   if (materialityReason) return null;
   const priorDiag = proposal.diag;
-  if (proposal.kind === "edit-layout" && asksToRepositionControl(raw, validatedRefs, packet)) {
-    proposal = { kind: "manual", mode: "guidance_only" };
-    if (process.env.RE_API_DIVERSITY_DEBUG) {
-      proposal.diag = {
-        ...(priorDiag as object),
-        final: "manual",
-        demoted: true,
-        reason: "control-placement-is-not-a-tile-layout-operation",
-      };
+  if (asksToRepositionControl(raw, validatedRefs, packet) && proposal.kind !== "edit-filter-control") {
+    const directMove = directFilterMoveProposal(raw, validatedRefs, requestContract, packet);
+    if (directMove?.proposal.mode === "executable") {
+      proposal = directMove.proposal;
+      ref = directMove.ref;
+    } else if (proposal.kind === "edit-layout") {
+      // A full/open-ended review must never move unrelated tiles as a surrogate
+      // for moving a filter. Directed asks get the deterministic filter operation
+      // above; otherwise keep the recommendation as honest guidance.
+      proposal = { kind: "manual", mode: "guidance_only" };
+      if (process.env.RE_API_DIVERSITY_DEBUG) {
+        proposal.diag = {
+          ...(priorDiag as object),
+          final: "manual",
+          demoted: true,
+          reason: "control-placement-needs-edit-filter-control",
+        };
+      }
+      ref = {};
     }
-    ref = {};
   }
+  // Canonicalize the display/review category from the concrete operation after
+  // all proposal repair and directed-request conversion has finished. This is
+  // the deterministic guard against a filter-placement fix appearing under
+  // Interactivity just because its component is a filter.
+  dimension = semanticDimensionForProposal(dimension, proposal.kind);
+  surface = semanticSurfaceForProposal(surface, proposal.kind, dimension);
   // A tentative DIAGNOSIS (inferred / weaker grounding) no longer forces its FIX
   // to guidance. Executability is orthogonal to diagnostic confidence: the
   // proposal already passed the same real-field, sanitize, compile, and rollback
@@ -1483,7 +1760,10 @@ function validateCritique(
     reviewScope,
     object: objectCode,
     ...(problemCode ? { problem: problemCode } : {}),
-    ...(leaf ? { recommendation: leaf.id } : {}),
+    // Keep the empirical leaf only when its branch still agrees with the
+    // operation-derived category. A mismatched leaf is a model routing error,
+    // not useful provenance for the author-facing card.
+    ...(leaf?.branch === dimension ? { recommendation: leaf.id } : {}),
     diagnosisOutcome: "evaluated_issue",
     priorWeight,
     judgmentBasis: bases,
@@ -1738,6 +2018,22 @@ function critiqueSlotKey(value: { critique: Critique; finding: Finding }): strin
   return `${value.critique.object}|${value.critique.problem ?? ""}|${value.critique.tileId || "dashboard"}|${leaf}${payload}`;
 }
 
+/** Solution refinement is intentionally a set of alternatives for the SAME
+ * diagnosis and target. The ordinary slot key above collapses those siblings —
+ * correct for a review, wrong for a chooser. Key refinement candidates by their
+ * sanitized executable payload instead, so genuinely different implementations
+ * survive while duplicate proposals still collapse deterministically. */
+function refinementAlternativeSlotKey(value: { critique: Critique; finding: Finding }): string {
+  return [
+    value.critique.object,
+    value.critique.problem ?? "",
+    value.critique.dimension,
+    value.critique.tileId || "dashboard",
+    canonicalJson(value.critique.target),
+    canonicalJson(value.critique.proposal),
+  ].join("|");
+}
+
 function critiqueLocationKey(value: { critique: Critique }): string {
   const location = value.critique.tileId ||
     text(object(value.critique.target?.ref).source) ||
@@ -1783,6 +2079,13 @@ function isConsolidatableKind(kind: string): boolean {
 function consolidationSignature(critique: Critique): string {
   const payload = critique.proposal.kind === "edit-spec"
     ? canonicalJson(critique.proposal.edits)
+    : critique.proposal.kind === "edit-filter-control"
+      ? canonicalJson({
+          filterId: critique.proposal.filterId,
+          placement: critique.proposal.filterPlacement,
+          position: critique.proposal.filterPosition,
+          anchor: critique.proposal.anchorTileId,
+        })
     : "";
   return `${critique.object}|${critique.problem ?? ""}|${critique.proposal.kind}|${payload}`;
 }
@@ -1806,12 +2109,17 @@ export function iterationProposalSignature(critique: Critique): string {
     kpis: critique.proposal.kpis || [],
     label: signatureText(critique.proposal.label),
     subtitle: signatureText(critique.proposal.subtitle),
+    ...(critique.proposal.kind === "edit-filter-control"
+      ? { filterPosition: critique.proposal.filterPosition || null }
+      : {}),
   });
   const structure = [
     signatureText(critique.proposal.kpiLayout),
     signatureText(critique.proposal.kpiStyle),
     signatureText(critique.proposal.composition),
     signatureText(critique.proposal.filterId),
+    signatureText(critique.proposal.filterPlacement),
+    signatureText(critique.proposal.anchorTileId),
   ].filter(Boolean).join(",");
   const manualRemedy = critique.proposal.kind === "manual"
     ? critique.recommendation || critique.suggestion
@@ -1835,10 +2143,11 @@ function proposalChangeMagnitude(critique: Critique, round = 1): number {
     : kind === "dashboard-title" || kind === "v2-palette" ? 3
     : kind === "chart-subtitles" || kind === "add-cross-filter" ? 2
     : 1;
-  const laterRoundStructuralBoost = round > 1 && ["edit-layout", "recompose-kpis", "edit-spec"].includes(kind)
-    ? Math.min(3, round - 1)
-    : 0;
-  return base + laterRoundStructuralBoost;
+  // Magnitude is only a final tiebreaker. A later review round must not
+  // systematically promote structural/visual proposals over equally grounded
+  // data, task, context, interaction, or workflow observations.
+  void round;
+  return base;
 }
 
 /** Safety gate for the backstop: would folding `tileId` into this critique's
@@ -1862,11 +2171,14 @@ function mergeAndRank(
   limit: number,
   specMap: SpecMap,
   iterationContext?: IterationContext,
+  preserveSolutionAlternatives = false,
 ): Array<{ critique: Critique; finding: Finding }> {
   const selected = new Map<string, { critique: Critique; finding: Finding }>();
   const scope = new Set(context.scope || []);
   for (const value of values) {
-    const key = critiqueSlotKey(value);
+    const key = preserveSolutionAlternatives
+      ? refinementAlternativeSlotKey(value)
+      : critiqueSlotKey(value);
     const previous = selected.get(key);
     const valueIsDirect = value.critique.requestRelevance === "direct";
     const previousIsDirect = previous?.critique.requestRelevance === "direct";
@@ -1882,7 +2194,7 @@ function mergeAndRank(
   }
   const deduped = [...selected.values()];
   const palette = deduped.filter((item) => item.critique.proposal.kind === "v2-palette" || item.critique.proposal.kind === "preserve-brand-palette");
-  if (palette.length > 1) {
+  if (!preserveSolutionAlternatives && palette.length > 1) {
     const hasBrandConstraint = /brand/i.test(context.constraints || "");
     const preferred = palette.find((item) => item.critique.proposal.kind === (hasBrandConstraint ? "preserve-brand-palette" : "v2-palette")) || palette[0];
     for (const item of palette) {
@@ -1896,7 +2208,7 @@ function mergeAndRank(
   // evidence count. This also governs which critiques survive the limit cut, so
   // severe findings are retained ahead of minor in-scope ones.
   // Genre emphasis is a LATE tiebreaker (after severity, grounding confidence,
-  // change magnitude, and in-scope): among similarly ranked findings it retains
+  // and in-scope): among similarly ranked findings it retains
   // genre-relevant dimensions ahead of genre-peripheral ones when the review is
   // trimmed to `limit`. It never lets a low-severity finding outrank a severe
   // one, so it emphasizes without gating.
@@ -1906,12 +2218,12 @@ function mergeAndRank(
       Number(Boolean(b.critique.requestRelevance)) - Number(Boolean(a.critique.requestRelevance)) ||
       priorityWeight(b.critique.priority) - priorityWeight(a.critique.priority) ||
       supportWeight(b.critique) - supportWeight(a.critique) ||
-      proposalChangeMagnitude(b.critique, iterationContext?.round) -
-        proposalChangeMagnitude(a.critique, iterationContext?.round) ||
       Number(scope.has(b.critique.dimension)) - Number(scope.has(a.critique.dimension)) ||
       dimensionEmphasis(dashboardType, b.critique.dimension) -
         dimensionEmphasis(dashboardType, a.critique.dimension) ||
-      (b.critique.evidenceRefs?.length || 0) - (a.critique.evidenceRefs?.length || 0));
+      (b.critique.evidenceRefs?.length || 0) - (a.critique.evidenceRefs?.length || 0) ||
+      proposalChangeMagnitude(b.critique, iterationContext?.round) -
+        proposalChangeMagnitude(a.critique, iterationContext?.round));
 
   // Cross-tile consolidation backstop (deterministic): the SAME fix emitted once
   // per tile — because the model ignored the prompt's consolidation nudge —
@@ -1987,28 +2299,51 @@ function mergeAndRank(
     ? ranked.filter((item) => !consolidatedAway.has(item))
     : ranked;
 
-  // Reserve + cap the advisory bucket — workflow / "design process" and
-  // uncatalogued ("other") critiques, which are inherently guidance-only. We key
-  // on the branch, NOT proposal.mode: a chart/text/etc. fix the model happened to
-  // leave as prose is a component fix (repairable, not what we bound), whereas an
-  // advisory-branch critique is process/workflow advice with no executable route.
-  // Partition the already-ranked list — within each bucket the severity-first
-  // order above is preserved; only cross-bucket allocation of the `limit` slots
-  // changes. CAP: keep at most GUIDANCE_RESERVE advisory critiques, so relaxed
-  // prompt wording cannot flood the review. RESERVE: guarantee up to
-  // GUIDANCE_RESERVE slots for them before executable fixes consume all of
-  // `limit`, so a validated process critique is not silently crowded out. A
-  // review with no advisory content is unchanged (reserve unused).
+  // Cap advisory workflow/other guidance, then allocate full-review slots across
+  // critique families. This is a RETENTION rule over already validated evidence:
+  // it cannot create a missing data/task/context/process issue. It prevents a
+  // long run of executable chart/text/layout candidates from crowding out the
+  // broader-lens candidates the model did ground. Focused/region reviews (limit
+  // <= 4) remain strict relevance-ranked and do not use this breadth reserve.
   const advisory = consolidated
     .filter((item) => isAdvisoryCritique(item.critique))
     .slice(0, GUIDANCE_RESERVE);
-  if (advisory.length === 0) return consolidated.slice(0, limit);
-  const reserved = advisory.slice(0, Math.min(advisory.length, limit));
-  const nonAdvisory = consolidated.filter((item) => !isAdvisoryCritique(item.critique));
-  const nonAdvisorySlots = Math.max(0, limit - reserved.length);
-  const kept = new Set([...reserved, ...nonAdvisory.slice(0, nonAdvisorySlots)]);
+  const permittedAdvisory = new Set(advisory);
+  const eligible = consolidated.filter((item) =>
+    !isAdvisoryCritique(item.critique) || permittedAdvisory.has(item)
+  );
+  if (limit <= 4) return eligible.slice(0, limit);
+
+  const analytical = eligible.filter((item) => ANALYTICAL_BRANCHES.has(substantiveLens(item.critique)));
+  const otherBroader = eligible.filter((item) =>
+    !PRESENTATION_BRANCHES.has(substantiveLens(item.critique)) &&
+    !ANALYTICAL_BRANCHES.has(substantiveLens(item.critique)) &&
+    !isAdvisoryCritique(item.critique)
+  );
+  const reserved: typeof eligible = [];
+  // Start with distinct analytical dimensions so three near-identical data
+  // notes do not masquerade as breadth, then include one real Guidance item.
+  const seenDimensions = new Set<Dimension>();
+  for (const item of analytical) {
+    if (reserved.length >= 3) break;
+    const lens = substantiveLens(item.critique);
+    if (seenDimensions.has(lens)) continue;
+    seenDimensions.add(lens);
+    reserved.push(item);
+  }
+  if (advisory.length && reserved.length < BROADER_LENS_RESERVE) reserved.push(advisory[0]);
+  for (const item of [...analytical, ...otherBroader, ...advisory]) {
+    if (reserved.length >= BROADER_LENS_RESERVE) break;
+    if (!reserved.includes(item)) reserved.push(item);
+  }
+
+  const kept = new Set(reserved);
+  for (const item of eligible) {
+    if (kept.size >= limit) break;
+    kept.add(item);
+  }
   // Emit in the original ranked order so display ordering still reflects severity.
-  return consolidated.filter((item) => kept.has(item)).slice(0, limit);
+  return eligible.filter((item) => kept.has(item)).slice(0, limit);
 }
 
 export interface CriteriaReviewResult {
@@ -2030,6 +2365,9 @@ export interface CriteriaReviewResult {
    * uploaded design document's hard constraints. For dev observability only —
    * the author-facing `critiques` array already omits them. */
   droppedByConstraint?: ConflictDrop[];
+  /** Evaluation-only stage counts. Emitted through the trace when explicitly
+   * enabled, and never included in the author-facing CritiqueResponse. */
+  pipelineDiagnostics?: Record<string, unknown>;
 }
 
 export async function discoverDashboardCritiques(
@@ -2119,7 +2457,11 @@ export async function discoverDashboardCritiques(
     .filter((item): item is Strength => Boolean(item))
     .filter((item) => !narrowedScope || narrowedScope.has(item.dimension));
 
-  const resultLimit = reviewScope === "full" ? 14 : 4;
+  // The UI renders strengths beside critiques. Cap ordinary full-review
+  // critiques at eleven so two grounded strengths keep the visible review near
+  // the study target of 12–13 cards without hiding lower-priority items later.
+  const solutionRefinement = normalizedFocus?.purpose === "solution-refinement";
+  const resultLimit = reviewScope === "full" ? 11 : solutionRefinement ? 3 : 4;
   const authorRequest = scoped.region?.request || normalizedFocus?.request;
   const requestContract = scoped.region?.requestContract || normalizedFocus?.requestContract;
   const focusPurpose = normalizedFocus?.purpose;
@@ -2138,78 +2480,131 @@ export async function discoverDashboardCritiques(
       )
     )
     .filter((item): item is NonNullable<typeof item> => Boolean(item));
-  // ── Lever I: second discovery pass (full reviews only) ────────────────────
+  const firstPassValidatedCount = validated.length;
+  let secondPassRawCount = 0;
+  let secondPassValidatedCount = 0;
+  let secondPassStrengthCount = 0;
+  let coveragePassCalls = 0;
+  // ── Lever I: adaptive discovery recovery (full reviews only) ──────────────
   // The first pass reliably surfaces the most salient handful of issues, then
   // can stop short of the 8–12 a rich multi-view board supports — the ceiling
   // is GENERATION, not the executable gate (which now clears ~0.9 of critiques).
-  // One additional call — SAME evidence, SAME grounding/sanitize/compile gates —
-  // asks for genuinely distinct, structurally executable issues the first pass
-  // left on the table, told what is already covered so it does not repeat. It is
+  // One additional call — and, only while the result remains sparse, at most one
+  // final recovery call — uses the SAME evidence and grounding/sanitize/compile
+  // gates to ask for genuinely distinct issues the earlier passes left on the
+  // table. Every recovery call is told what is already covered. It is
   // best-effort: a failure here never sinks the run (pass one already produced a
   // valid review), and mergeAndRank dedupes any overlap by slot + payload. It is
   // gated on an explicit coverage experiment OR adaptively when the production
-  // server sees fewer than nine validated first-pass candidates. The adaptive
-  // call is bounded to the small number of missing slots and keeps every normal
-  // quality/safety gate; library/test callers remain single-pass by default.
+  // server sees too few validated candidates OR a one-family review with little
+  // analytical/contextual/workflow coverage or no grounded strength. Adaptive
+  // calls are bounded to the small number of missing count/breadth slots and
+  // keep every normal quality/safety gate; library/test callers remain
+  // single-pass by default.
   // Judge + executable preflight can legitimately remove several grounded
-  // drafts. Trigger recall recovery below nine first-pass survivors so those
-  // quality gates still have enough headroom to leave a useful 8-ish set.
-  const adaptiveCoverage = process.env.RE_API_ADAPTIVE_COVERAGE === "1" && validated.length < 9;
+  // drafts or a document constraint can remove a supported candidate. Target
+  // eleven pre-constraint candidates so the visible mix can stay near 12–13
+  // cards once two grounded strengths are included.
+  const adaptiveCoverage = process.env.RE_API_ADAPTIVE_COVERAGE === "1" &&
+    reviewCoverageNeedsRecovery(validated.map((item) => item.critique), strengths);
   if (
     reviewScope === "full" &&
     !normalizedFocus &&
     !scoped.region &&
     (process.env.RE_API_SECOND_PASS === "1" || adaptiveCoverage)
   ) {
-    const covered = validated.map((item) => ({
-      object: item.critique.object || "component",
-      tileId: item.critique.tileId ?? null,
-      dimension: item.critique.dimension,
-      title: item.critique.title,
-    }));
-    try {
-      const secondResponse = await client.completeJson<JsonObject>(
-        // Leave headroom for the downstream quality judge and executable
-        // preflight to reject weak/no-op drafts. The author-facing target is
-        // eight or more strong critiques, not merely eight raw candidates.
-        `${dashboardReviewUser(snapshot, packet, grounding, undefined, undefined, savedRationales, iterationContext, constraintSet, designDocumentText)}\n\n${secondPassDirective(covered, 11 - validated.length)}`,
-        { system: DASHBOARD_REVIEW_SYSTEM, temperature, maxTokens: 4500, onToken },
-      );
-      const secondRawDiagnoses = Array.isArray(secondResponse.diagnoses) ? secondResponse.diagnoses : [];
-      const secondRawCritiques = Array.isArray(secondResponse.critiques) ? secondResponse.critiques.slice(0, 24) : [];
-      // Merge pass-2 diagnoses so pass-2 critiques get the same OPTIONAL grounding
-      // backfill pass-1 critiques do. validateCritique treats a missing diagnosis
-      // as backfill only, never an admission gate, so this can only help.
-      for (const raw of secondRawDiagnoses) {
-        const parsed = parseDiagnosis(raw, packet, snapshot, secondRawCritiques);
-        if (!parsed) continue;
-        const key = comboKey(parsed.object, parsed.problem);
-        const previous = diagnosisByKey.get(key);
-        if (!previous || (parsed.outcome === "evaluated_issue" && previous.outcome !== "evaluated_issue")) {
-          diagnosisByKey.set(key, parsed);
+    // A normal rich board gets one recovery call. A second call costs another
+    // full model latency and is reserved for a genuinely sparse first pass (<5),
+    // where one bounded recovery cannot plausibly reach a useful review. This
+    // keeps the usual 12–13 visible-card target (critiques + strengths) without
+    // making every balanced review wait through three model rounds.
+    const maxCoveragePasses = adaptiveCoverage && validated.length < 5 ? 2 : 1;
+    for (let coveragePass = 1; coveragePass <= maxCoveragePasses; coveragePass += 1) {
+      if (
+        coveragePass > 1 &&
+        !reviewCoverageNeedsRecovery(validated.map((item) => item.critique), strengths)
+      ) break;
+      const covered = validated.map((item) => ({
+        object: item.critique.object || "component",
+        tileId: item.critique.tileId ?? null,
+        dimension: item.critique.dimension,
+        lens: substantiveLens(item.critique),
+        title: item.critique.title,
+      }));
+      const coveredStrengths = strengths.map((item) => ({
+        object: item.object,
+        tileId: item.tileId ?? null,
+        dimension: item.dimension,
+        lens: substantiveLens(item),
+        title: item.title,
+      }));
+      try {
+        coveragePassCalls += 1;
+        const recoveryLimit = coverageRecoveryLimit(validated.map((item) => item.critique));
+        const secondResponse = await client.completeJson<JsonObject>(
+          `${dashboardReviewUser(snapshot, packet, grounding, undefined, undefined, savedRationales, iterationContext, constraintSet, designDocumentText)}\n\n${secondPassDirective(covered, recoveryLimit, coveredStrengths)}`,
+          { system: DASHBOARD_REVIEW_SYSTEM, temperature, maxTokens: 4500, onToken },
+        );
+        const secondRawDiagnoses = Array.isArray(secondResponse.diagnoses) ? secondResponse.diagnoses : [];
+        const secondRawCritiques = Array.isArray(secondResponse.critiques) ? secondResponse.critiques.slice(0, 24) : [];
+        const secondRawStrengths = Array.isArray(secondResponse.strengths) ? secondResponse.strengths.slice(0, 6) : [];
+        secondPassRawCount += secondRawCritiques.length;
+        // Merge recovery diagnoses so their critiques get the same OPTIONAL
+        // grounding backfill pass-one critiques do. A missing diagnosis is
+        // backfill only, never an admission gate, so this can only help.
+        for (const raw of secondRawDiagnoses) {
+          const parsed = parseDiagnosis(raw, packet, snapshot, secondRawCritiques);
+          if (!parsed) continue;
+          const key = comboKey(parsed.object, parsed.problem);
+          const previous = diagnosisByKey.get(key);
+          if (!previous || (parsed.outcome === "evaluated_issue" && previous.outcome !== "evaluated_issue")) {
+            diagnosisByKey.set(key, parsed);
+          }
         }
-      }
-      const secondReviewable = secondRawCritiques.filter((item) =>
-        !(boardAlreadyHasKpis && text(object(object(item).proposal).kind) === "add-kpis")
-      );
-      // Offset the index so pass-2 critique ids never collide with pass-1 ids.
-      const secondValidated = secondReviewable
-        .map((item, i) =>
-          validateCritique(
-            item,
-            1000 + i,
-            diagnosisByKey,
+        const secondReviewable = secondRawCritiques.filter((item) =>
+          !(boardAlreadyHasKpis && text(object(object(item).proposal).kind) === "add-kpis")
+        );
+        // Offset ids by recovery pass so they never collide with pass one or
+        // another recovery call.
+        const secondValidated = secondReviewable
+          .map((item, i) =>
+            validateCritique(
+              item,
+              coveragePass * 1000 + i,
+              diagnosisByKey,
+              packet,
+              snapshot,
+              reviewScope,
+              authorRequest,
+              requestContract,
+              focusPurpose,
+            ))
+          .filter((item): item is NonNullable<typeof item> => Boolean(item));
+        secondPassValidatedCount += secondValidated.length;
+        validated.push(...secondValidated);
+        const knownStrengths = new Set(strengths.map(strengthSignature));
+        let addedStrengths = 0;
+        for (let i = 0; i < secondRawStrengths.length; i += 1) {
+          const parsed = validateStrength(
+            secondRawStrengths[i],
+            coveragePass * 1000 + i,
             packet,
             snapshot,
             reviewScope,
-            authorRequest,
-            requestContract,
-            focusPurpose,
-          ))
-        .filter((item): item is NonNullable<typeof item> => Boolean(item));
-      validated.push(...secondValidated);
-    } catch {
-      // Pass-2 is best-effort coverage expansion; its failure is non-fatal.
+          );
+          if (!parsed || (narrowedScope && !narrowedScope.has(parsed.dimension))) continue;
+          const signature = strengthSignature(parsed);
+          if (knownStrengths.has(signature)) continue;
+          knownStrengths.add(signature);
+          strengths.push(parsed);
+          addedStrengths += 1;
+        }
+        secondPassStrengthCount += addedStrengths;
+        if (!secondValidated.length && !addedStrengths) break;
+      } catch {
+        // Coverage recovery is best-effort; its failure never sinks pass one.
+        break;
+      }
     }
   }
   // A focused/selected-region ask carries an explicit author question. The
@@ -2310,7 +2705,14 @@ export async function discoverDashboardCritiques(
     item.critique.requestRelevance === "direct" ||
     !priorSignatures.has(iterationProposalSignature(item.critique))
   );
-  const ranked = mergeAndRank(novelCandidates, context, resultLimit, packet.specMap, iterationContext);
+  const ranked = mergeAndRank(
+    novelCandidates,
+    context,
+    resultLimit,
+    packet.specMap,
+    iterationContext,
+    solutionRefinement,
+  );
 
   // A compact judge checks the part deterministic validators cannot: whether a
   // safe executable proposal actually resolves its critique with a visible,
@@ -2319,6 +2721,12 @@ export async function discoverDashboardCritiques(
   const qualityDecisions = process.env.RE_API_SOLUTION_JUDGE === "1"
     ? await judgeSolutionQuality(ranked, packet, context, reviewScope, requestContract, client)
     : new Map();
+  const qualityVerdicts = { pass: 0, rewrite: 0, drop: 0, missing: 0 };
+  for (const item of ranked) {
+    const decision = qualityDecisions.get(item.critique.id);
+    if (!decision) qualityVerdicts.missing += 1;
+    else qualityVerdicts[decision.verdict] += 1;
+  }
   const qualityChecked: typeof ranked = [];
   for (const item of ranked) {
     const decision = qualityDecisions.get(item.critique.id);
@@ -2372,9 +2780,38 @@ export async function discoverDashboardCritiques(
     }
     try {
       const outcome = await applyProposals(packet.specMap, [item.critique], [item.critique.id]);
-      if (!outcome.rollback.rolledBack && outcome.changedTargets.length) preflighted.push(item);
+      if (!outcome.rollback.rolledBack && outcome.changedTargets.length) {
+        preflighted.push(item);
+      } else if (outcome.rollback.rolledBack) {
+        // The diagnosis can remain grounded even when its proposed JSON fails
+        // the real compile/runtime-render gate. Keep the useful observation as
+        // honest Guidance, but remove Accept Change so the UI can never call a
+        // blank or invalid canvas "Applied". A pure no-op is still dropped below
+        // because it indicates no visible change is needed.
+        item.critique.proposal = {
+          kind: "manual",
+          mode: "guidance_only",
+          diag: {
+            final: "manual",
+            demoted: true,
+            reason: "proposal-runtime-validation",
+            detail: outcome.rollback.reason,
+          },
+        };
+        item.finding.proposalKind = "manual";
+        preflighted.push(item);
+      }
     } catch {
-      // Keep a no-op or compile failure out of the author-facing list.
+      // An unexpected preflight exception cannot authorize an Apply button.
+      // Preserve the grounded diagnosis as Guidance rather than losing review
+      // breadth because the implementation payload failed.
+      item.critique.proposal = {
+        kind: "manual",
+        mode: "guidance_only",
+        diag: { final: "manual", demoted: true, reason: "proposal-preflight-error" },
+      };
+      item.finding.proposalKind = "manual";
+      preflighted.push(item);
     }
   }
   // Silently drop critiques that conflict with an uploaded design document's
@@ -2397,6 +2834,9 @@ export async function discoverDashboardCritiques(
     ...filtered.map((item) => item.critique),
     ...(requestFallback ? [requestFallback.critique] : []),
   ];
+  const finalStrengths = solutionRefinement
+    ? []
+    : selectStrengths(strengths, reviewScope === "full" ? 2 : 4);
   // Production prompts no longer ask the model to repeat every issue in a
   // separate diagnoses array. Preserve the research/trace contract by deriving
   // one diagnosis from each critique that actually survived grounding,
@@ -2432,12 +2872,33 @@ export async function discoverDashboardCritiques(
     ],
     critiques: finalCritiques,
     diagnoses,
-    strengths,
+    strengths: finalStrengths,
     contextSnapshotId: snapshot.id,
     reviewScope,
     evidencePacket: packet,
     ...(fallbackReason ? { fallbackReason } : {}),
     ...(answer ? { answer } : {}),
     ...(dropped.length ? { droppedByConstraint: dropped } : {}),
+    ...(process.env.RE_API_PIPELINE_DIAGNOSTICS === "1"
+      ? {
+          pipelineDiagnostics: {
+            firstPassRaw: reviewableRawCritiques.length,
+            firstPassValidated: firstPassValidatedCount,
+            secondPassRaw: secondPassRawCount,
+            secondPassValidated: secondPassValidatedCount,
+            secondPassStrengths: secondPassStrengthCount,
+            coveragePassCalls,
+            deterministicFallback: fallback.length,
+            candidatesBeforeRank: novelCandidates.length,
+            ranked: ranked.length,
+            qualityVerdicts,
+            afterQualityJudge: qualityChecked.length,
+            afterProposalPreflight: preflighted.length,
+            droppedByConstraint: dropped.length,
+            final: finalCritiques.length,
+            finalStrengths: finalStrengths.length,
+          },
+        }
+      : {}),
   };
 }

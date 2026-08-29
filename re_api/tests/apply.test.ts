@@ -152,6 +152,66 @@ test("compile gate accepts good specs and rejects malformed ones", async () => {
   assert.equal(compileSpec({ data: { values: [] }, encoding: {} }).ok, false);
 });
 
+test("render gate rejects a layered proposal whose compiled Vega has duplicate selection signals", async () => {
+  // Regression from the garden-birds critique "Put the garden-bird counts on
+  // the bars". Vega-Lite compile() accepts this shape, but the browser's Vega
+  // parser throws `Duplicate signal name: bird_sel_tuple`, leaving the tile
+  // blank. The backend must reject it before the UI can call it Applied.
+  const original = {
+    data: { values: [{ bird: "House Sparrow", count: 4.3 }, { bird: "Blue Tit", count: 3 }] },
+    params: [{
+      name: "bird_sel",
+      select: { type: "point", fields: ["bird"], on: "click", clear: "dblclick" },
+    }],
+    mark: { type: "bar" },
+    encoding: {
+      y: { field: "bird", type: "nominal" },
+      x: { field: "count", type: "quantitative" },
+      opacity: { condition: { param: "bird_sel", value: 1 }, value: 0.3 },
+    },
+  };
+  const critique = {
+    id: "c-layer-labels",
+    tileId: "birds-ranking",
+    proposal: {
+      kind: "edit-spec",
+      mode: "executable",
+      edits: [{
+        op: "set",
+        path: ["layer"],
+        value: [{
+          mark: { type: "bar" },
+          encoding: {
+            y: { field: "bird", type: "nominal" },
+            x: { field: "count", type: "quantitative" },
+            opacity: { condition: { param: "bird_sel", value: 1 }, value: 0.3 },
+          },
+        }, {
+          mark: { type: "text", dx: 6 },
+          encoding: {
+            y: { field: "bird", type: "nominal" },
+            x: { field: "count", type: "quantitative" },
+            text: { field: "count", type: "quantitative" },
+            opacity: { condition: { param: "bird_sel", value: 1 }, value: 0.3 },
+          },
+        }],
+      }, { op: "remove", path: ["mark"] }, { op: "remove", path: ["encoding"] }],
+    },
+    target: { granularity: "chart", ref: { tile: "birds-ranking" } },
+  } as unknown as Critique;
+
+  const invalid = structuredClone(original);
+  const edits = critique.proposal.edits!;
+  // The public apply path is the assertion that matters; compileSpec's direct
+  // result documents the precise validation layer that catches it.
+  const directOutcome = await applyProposals({ "birds-ranking": invalid }, [critique], [critique.id]);
+  assert.equal(compileSpec(directOutcome.specMap["birds-ranking"]).ok, true, "rollback must restore the valid original");
+  assert.equal(directOutcome.rollback.rolledBack, true);
+  assert.match(directOutcome.rollback.reason ?? "", /Duplicate signal name: "bird_sel_tuple"/);
+  assert.deepEqual(directOutcome.specMap["birds-ranking"], original);
+  assert.ok(edits.length > 0);
+});
+
 test("a consolidated edit-spec fans out to every tile in target.ref.tiles", async () => {
   const specMap = dashboardSpecMap();
   const tiles = ["task-velocity", "department-tasks", "sprint-burndown"];

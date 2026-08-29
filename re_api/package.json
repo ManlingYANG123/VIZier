@@ -16,6 +16,7 @@
     "report": "node scripts/report.ts"
   },
   "dependencies": {
+    "vega": "^6.2.0",
     "vega-lite": "^6.4.3"
   },
   "devDependencies": {

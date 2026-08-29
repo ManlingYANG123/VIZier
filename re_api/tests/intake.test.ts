@@ -5,11 +5,18 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { adapterFor, IntakeUnsupportedError } from "../src/intake/sources.ts";
 import { INTAKE_SYSTEM, intakeUser } from "../src/intake/prompt.ts";
 import { normalizeConstraintSet, emptyConstraintSet } from "../src/intake/normalize.ts";
-import { buildConstraintSet } from "../src/intake/index.ts";
-import { StubClient } from "./helpers.ts";
+import {
+  buildConstraintSet,
+  clearConstraintIntakeCache,
+  INTAKE_MAX_OUTPUT_TOKENS,
+} from "../src/intake/index.ts";
+import { SequenceClient, StubClient } from "./helpers.ts";
 
 test("raw-text adapter yields text-only material", async () => {
   const material = await adapterFor("raw-text").extract({ kind: "raw-text", text: "  Use brand blue.\r\n" });
@@ -107,6 +114,76 @@ test("the content-hash id is stable for identical input", () => {
   assert.equal(a.constraints[0].id, b.constraints[0].id);
 });
 
+test("identical design material reuses one exact extracted rule set", async () => {
+  clearConstraintIntakeCache();
+  const client = new SequenceClient([
+    { constraints: [{ category: "layout", rule: "Keep one focal point", sourceText: "Keep one focal point.", confidence: "medium" }] },
+    { constraints: [
+      { category: "layout", rule: "Keep one focal point", sourceText: "Keep one focal point.", confidence: "medium" },
+      { category: "other", rule: "A second unstable rule", sourceText: "Second.", confidence: "low" },
+    ] },
+  ]);
+  const source = { kind: "pdf-text" as const, text: "Keep one focal point.", filename: "stable.pdf", pageCount: 1 };
+  const first = await buildConstraintSet(source, client, { requireLLM: true });
+  const second = await buildConstraintSet(source, client, { requireLLM: true });
+  assert.equal(first.source, "llm");
+  assert.equal(second.source, "cache");
+  assert.deepEqual(second.constraintSet, first.constraintSet);
+  assert.equal(client.userTexts.length, 1, "the same document is not generated twice");
+});
+
+test("harmless PDF whitespace differences share the stable extraction cache", async () => {
+  clearConstraintIntakeCache();
+  const client = new StubClient({
+    constraints: [{ category: "typography", rule: "Use the brand font", sourceText: "Use the brand font.", confidence: "high" }],
+  });
+  const common = { kind: "pdf-text" as const, filename: "spacing.pdf", pageCount: 2 };
+  const first = await buildConstraintSet({ ...common, text: "Use  the brand font.\nPage two." }, client);
+  const second = await buildConstraintSet({ ...common, text: "Use the brand font.   Page two." }, client);
+  assert.equal(second.source, "cache");
+  assert.deepEqual(second.constraintSet, first.constraintSet);
+  assert.equal(client.userTexts.length, 1);
+});
+
+test("changing the author's extraction note intentionally creates a new rule set", async () => {
+  clearConstraintIntakeCache();
+  const client = new StubClient({ constraints: [] });
+  const common = { kind: "raw-text" as const, text: "Use blue. Keep labels short." };
+  await buildConstraintSet({ ...common, note: "find palette rules" }, client);
+  await buildConstraintSet({ ...common, note: "find typography rules" }, client);
+  assert.equal(client.userTexts.length, 2);
+});
+
+test("the content-addressed rule cache survives an API-process restart", async () => {
+  clearConstraintIntakeCache();
+  const directory = await mkdtemp(join(tmpdir(), "vizier-intake-test-"));
+  const cacheFile = join(directory, "cache.json");
+  const source = { kind: "pdf-text" as const, text: "Use a 12-column grid.", filename: "durable.pdf", pageCount: 1 };
+  try {
+    const firstClient = new StubClient({
+      constraints: [{ category: "layout", rule: "Use a 12-column grid", sourceText: "Use a 12-column grid.", confidence: "high" }],
+    });
+    const first = await buildConstraintSet(source, firstClient, {
+      cacheFile,
+      cacheNamespace: "openai/test/reasoning=low",
+    });
+    clearConstraintIntakeCache(); // simulate a new Node process
+    const changedClient = new StubClient({
+      constraints: [{ category: "other", rule: "Unstable replacement", sourceText: "replacement", confidence: "low" }],
+    });
+    const second = await buildConstraintSet(source, changedClient, {
+      cacheFile,
+      cacheNamespace: "openai/test/reasoning=low",
+    });
+    assert.equal(first.source, "llm");
+    assert.equal(second.source, "cache");
+    assert.deepEqual(second.constraintSet, first.constraintSet);
+    assert.equal(changedClient.userTexts.length, 0, "cold memory cache still avoids a new model call");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("normalizeConstraintSet caps runaway model output at 40 constraints", () => {
   const constraints = Array.from({ length: 60 }, (_, i) => ({
     category: "layout",
@@ -149,6 +226,8 @@ test("buildConstraintSet with a stub client returns a normalized set", async () 
   assert.equal(result.constraintSet.constraints[0].category, "palette");
   assert.equal(result.constraintSet.provenance, "b.pdf · 3 page(s)");
   assert.equal(client.userTexts.length, 1);
+  assert.equal(client.completeOptions[0]?.maxTokens, INTAKE_MAX_OUTPUT_TOKENS);
+  assert.equal(INTAKE_MAX_OUTPUT_TOKENS, 8000);
 });
 
 test("emptyConstraintSet is well-formed", () => {

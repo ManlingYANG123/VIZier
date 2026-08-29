@@ -155,6 +155,25 @@ test("re-asking a rejected critique keeps it rejected", () => {
   assert.equal(merged[0].status, "rejected");
 });
 
+test("a direct focused answer gets a new visible card without reviving a decided critique", () => {
+  const existing = [critique({ id: "done", status: "resolved" })];
+  const incoming = [critique({
+    id: "focused-answer",
+    status: "pending",
+    requestRelevance: "direct",
+    answer: "Yes — the issue is still material in the current dashboard.",
+  })];
+  const merged = mergeAskResults(existing, incoming, { askId: 4, reviewScope: "focused" });
+
+  assert.equal(merged.length, 2);
+  assert.equal(merged[0].id, "done");
+  assert.equal(merged[0].status, "resolved");
+  assert.equal(merged[1].id, "focused-answer");
+  assert.equal(merged[1].status, "pending");
+  assert.equal(merged[1].askId, 4);
+  assert.equal(merged[1].requestRelevance, "direct");
+});
+
 test("duplicate pending critique is deduped, not doubled", () => {
   const existing = [critique({ id: "p1", status: "pending" })];
   const incoming = [critique({ id: "p2", status: "pending" })]; // same identity
@@ -407,6 +426,7 @@ test("solution refinement keeps the diagnosis fixed and requests one member of a
     proposal: { kind: "edit-layout", mode: "executable" },
     requestContract: { explicitChange: false, actions: ["evaluate"] },
     revision: 2,
+    revisions: [{ rationale: "Existing saved rationale", suggestion: "Shrink the callout" }],
   });
   const request = critiqueSolutionRefinementRequest(
     previous,
@@ -434,7 +454,7 @@ test("solution refinement keeps the diagnosis fixed and requests one member of a
     suggestion: "Tighten padding inside the callout",
     proposal: { kind: "edit-spec", mode: "executable" },
     requestContract: { explicitChange: true, actions: ["resize"] },
-  }, "Keep the layout", 4);
+  }, 4);
   assert.equal(refined.id, previous.id);
   assert.equal(refined.title, previous.title);
   assert.equal(refined.issue, previous.issue);
@@ -444,10 +464,8 @@ test("solution refinement keeps the diagnosis fixed and requests one member of a
   assert.equal(refined.revision, 3);
   assert.equal(refined.lastEvaluatedVersion, 4);
   assert.deepEqual(refined.requestContract, previous.requestContract);
-  assert.deepEqual(refined.revisions.at(-1), {
-    rationale: "Keep the layout",
-    suggestion: "Tighten padding inside the callout",
-  });
+  assert.deepEqual(refined.revisions, previous.revisions);
+  assert.doesNotMatch(JSON.stringify(refined), /Keep the layout/);
   assert.equal(solutionAttemptChanged(previous, refined), true);
   assert.equal(solutionAttemptChanged(previous, {
     suggestion: previous.suggestion,
