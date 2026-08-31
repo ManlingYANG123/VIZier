@@ -549,7 +549,7 @@ test("shorter-text refinement becomes a prompt constraint and a client acceptanc
     },
   });
   assert.equal(refinementDirectionRequiresShorterText("the text is too long"), true);
-  assert.equal(refinementDirectionRequiresShorterText("文本太长，请精简"), true);
+  assert.equal(refinementDirectionRequiresShorterText("The text is too long; make it concise."), true);
   assert.match(
     critiqueSolutionRefinementRequest(previous, "the text is too long"),
     /HARD ACCEPTANCE CONSTRAINT[\s\S]*at least 20% shorter/,

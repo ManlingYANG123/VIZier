@@ -8,21 +8,21 @@ import type {
 } from "../contracts.ts";
 
 const ACTION_PATTERNS: Array<[RequestAction, RegExp]> = [
-  ["shorten", /\b(shorten|shorter|condense|concise|trim|too\s+long)\b|缩短|精简|太长/i],
-  ["lengthen", /\b(lengthen|longer|expand\s+the\s+(?:text|copy))\b|加长|展开文字/i],
-  ["remove", /\b(remove|delete|drop|hide|omit)\b|删除|删掉|移除|隐藏/i],
-  ["rename", /\b(rename|retitle|rewrite|replace\s+the\s+(?:title|headline|label|copy))\b|重命名|改标题|改写/i],
-  ["reposition", /\b(move|relocate|reposition|place|align)\b|移动|换位置|对齐/i],
-  ["resize", /\b(resize|larger|bigger|smaller|wider|narrower|taller|shorter\s+height)\b|放大|缩小|加宽|变窄/i],
-  ["recolor", /\b(recolou?r|change\s+(?:the\s+)?colou?r|palette)\b|改颜色|配色/i],
-  ["simplify", /\b(simplify|reduce\s+(?:clutter|complexity)|clean\s+up)\b|简化|减少杂乱/i],
-  ["emphasize", /\b(emphasize|highlight|prioriti[sz]e|make\s+prominent)\b|强调|突出/i],
-  ["deemphasize", /\b(deemphasize|de-emphasize|reduce\s+emphasis|make\s+subtle)\b|弱化|降低强调/i],
-  ["restructure", /\b(restructure|reorganize|recompose|redesign|change\s+(?:the\s+)?layout|rebalance)\b|重组|重新布局|重新设计/i],
-  ["fix", /\b(fix|correct|improve|tweak|adjust|change|make)\b|修复|改善|调整|修改/i],
+  ["shorten", /\b(shorten|shorter|condense|concise|trim|too\s+long)\b/i],
+  ["lengthen", /\b(lengthen|longer|expand\s+the\s+(?:text|copy))\b/i],
+  ["remove", /\b(remove|delete|drop|hide|omit)\b/i],
+  ["rename", /\b(rename|retitle|rewrite|replace\s+the\s+(?:title|headline|label|copy))\b/i],
+  ["reposition", /\b(move|relocate|reposition|place|align)\b/i],
+  ["resize", /\b(resize|larger|bigger|smaller|wider|narrower|taller|shorter\s+height)\b/i],
+  ["recolor", /\b(recolou?r|change\s+(?:the\s+)?colou?r|palette)\b/i],
+  ["simplify", /\b(simplify|reduce\s+(?:clutter|complexity)|clean\s+up)\b/i],
+  ["emphasize", /\b(emphasize|highlight|prioriti[sz]e|make\s+prominent)\b/i],
+  ["deemphasize", /\b(deemphasize|de-emphasize|reduce\s+emphasis|make\s+subtle)\b/i],
+  ["restructure", /\b(restructure|reorganize|recompose|redesign|change\s+(?:the\s+)?layout|rebalance)\b/i],
+  ["fix", /\b(fix|correct|improve|tweak|adjust|change|make)\b/i],
 ];
 
-const EVALUATE_PATTERN = /\b(is|are|does|do|should|could|review|evaluate|check|critique|what\s+is\s+wrong)\b|是否|检查|评价|问题/i;
+const EVALUATE_PATTERN = /\b(is|are|does|do|should|could|review|evaluate|check|critique|what\s+is\s+wrong)\b/i;
 
 function finiteBounds(value: unknown): Bounds | null {
   if (!value || typeof value !== "object") return null;
@@ -120,7 +120,6 @@ function requestActions(request: string): RequestAction[] {
 function preserveClauses(request: string): string[] {
   const matches = [
     ...request.matchAll(/(?:preserve|preserving|keep|keeping|maintain|maintaining|retain|retaining|without changing)\s+([^.;!?]+)/gi),
-    ...request.matchAll(/(?:保留|保持|不要改变|不改变)\s*([^。；！？]+)/g),
   ];
   return [...new Set(matches.map((match) => match[1].replace(/\s+/g, " ").trim()).filter(Boolean))]
     .slice(0, 4)
@@ -129,8 +128,8 @@ function preserveClauses(request: string): string[] {
 
 function inferredPaths(request: string): string[] {
   const paths: string[] = [];
-  if (/\b(headline|dashboard\s+title|main\s+title)\b|主标题|仪表盘标题/i.test(request)) paths.push("board.title");
-  if (/\b(subtitle|subheading)\b|副标题/i.test(request)) paths.push("board.subtitle");
+  if (/\b(headline|dashboard\s+title|main\s+title)\b/i.test(request)) paths.push("board.title");
+  if (/\b(subtitle|subheading)\b/i.test(request)) paths.push("board.subtitle");
   // Focused/refinement requests are whitespace-normalized before reaching this
   // helper, so "Target:" may no longer begin on its own line.
   const namedTarget = request.match(/\bTarget:\s*([a-z0-9][a-z0-9_-]{0,159})\b/i)?.[1];

@@ -186,9 +186,9 @@ export function groupCritiquesByAsk(critiques) {
 }
 
 const NOT_APPLICABLE_PATTERN = /no material issue|no longer (present|applicable|needed|relevant)|not (present|applicable) (any more|anymore|any longer)|issue (is |has been )?(gone|resolved|fixed|addressed)|keep the current treatment/i;
-const SHORTER_TEXT_PATTERN = /\b(?:text|copy|title|label|wording)?\s*(?:is|are|feels?|seems?)?\s*too\s+(?:long|wordy|verbose)\b|\b(?:shorter|shorten|concise|condense|trim|less\s+text|reduce\s+(?:the\s+)?(?:text|copy|wording))\b|(?:文字|文本|标题|文案).*(?:太长|过长)|(?:缩短|精简|简短)/iu;
+const SHORTER_TEXT_PATTERN = /\b(?:text|copy|title|label|wording)?\s*(?:is|are|feels?|seems?)?\s*too\s+(?:long|wordy|verbose)\b|\b(?:shorter|shorten|concise|condense|trim|less\s+text|reduce\s+(?:the\s+)?(?:text|copy|wording))\b/iu;
 const AUTHORED_TEXT_KEY_PATTERN = /^(?:label|title|subtitle|text|copy|caption|description)$/i;
-const COMPARISON_DIAGNOSIS_PATTERN = /\b(?:across|between|compare|comparison|difference|which\s+\w+|by\s+(?:department|team|group|category|region|segment|status))\b|跨(?:部门|团队|组别|类别|地区)|比较|对比|哪个(?:部门|团队|组别|类别|地区)/iu;
+const COMPARISON_DIAGNOSIS_PATTERN = /\b(?:across|between|compare|comparison|difference|which\s+\w+|by\s+(?:department|team|group|category|region|segment|status))\b/iu;
 const COMPARISON_CHANNELS = new Set([
   "x", "x2", "y", "y2", "color", "row", "column", "facet", "detail",
   "theta", "radius", "shape", "strokedash",

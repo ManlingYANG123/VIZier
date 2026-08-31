@@ -47,7 +47,7 @@ test("clusterForDimension and clusterPresentation resolve real dimensions and re
 
 test("custom scopes receive a stable key and color", () => {
   assert.equal(customScopeKey("Brand consistency"), "custom:brand-consistency");
-  assert.notEqual(customScopeKey("视觉层次"), customScopeKey("品牌一致性"));
+  assert.notEqual(customScopeKey("Visual hierarchy"), customScopeKey("Brand consistency"));
   assert.deepEqual(
     customScopePresentation("Brand consistency"),
     customScopePresentation("Brand consistency"),

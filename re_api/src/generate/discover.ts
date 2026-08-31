@@ -1405,10 +1405,10 @@ function directFilterMoveProposal(
   if (!control) return null;
   const request = contract.request.toLowerCase();
   let filterPlacement: Proposal["filterPlacement"];
-  if (/\b(right|right-hand|right side)\b|右侧|右边/i.test(request)) filterPlacement = "right-rail";
-  else if (/\b(left|left-hand|left side)\b|左侧|左边/i.test(request)) filterPlacement = "left-rail";
-  else if (/\b(title|headline|header)\b|标题|页眉/i.test(request)) filterPlacement = "title-inline";
-  else if (/\b(top|above|upper)\b|顶部|上方/i.test(request)) filterPlacement = "top-row";
+  if (/\b(right|right-hand|right side)\b/i.test(request)) filterPlacement = "right-rail";
+  else if (/\b(left|left-hand|left side)\b/i.test(request)) filterPlacement = "left-rail";
+  else if (/\b(title|headline|header)\b/i.test(request)) filterPlacement = "title-inline";
+  else if (/\b(top|above|upper)\b/i.test(request)) filterPlacement = "top-row";
   else {
     // A bare "move the filter" still needs a visible, reversible result. Move
     // rail/floating controls into the standard top band; move an already-top
