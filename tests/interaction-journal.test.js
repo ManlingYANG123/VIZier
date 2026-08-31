@@ -9,7 +9,9 @@ import {
   mergePendingContextSuggestions,
   mergeSuggestionIntoContext,
   recordWorkingDraftApplication,
+  recordWorkingDraftRestore,
   strongInteractionEventCount,
+  undoWorkingDraftTransaction,
   upsertCritiqueRationale,
 } from "../src/interaction-journal.js";
 
@@ -207,6 +209,59 @@ test("working draft counts only critiques the engine actually applied", () => {
   });
   assert.deepEqual(draft.applicationOrder, ["critique-1"]);
   assert.deepEqual(draft.appliedCritiques.map((item) => item.id), ["critique-1"]);
+});
+
+test("working draft transactions restore the exact state before the latest apply", () => {
+  const initial = createWorkingDraft(2);
+  const first = recordWorkingDraftApplication(initial, {
+    appliedCritiques: [{ id: "critique-1", title: "Add a title" }],
+    result: {
+      applicationOrder: ["critique-1"],
+      changedTargets: ["dashboard.title"],
+    },
+    beforeSnapshot: { board: { title: "Before" }, specMap: {} },
+    afterSnapshot: { board: { title: "After" }, specMap: {} },
+    transaction: {
+      applyId: "apply-1",
+      beforeVersion: 4,
+      afterVersion: 5,
+      beforeSnapshot: { board: { title: "Before" }, specMap: {} },
+    },
+  });
+
+  const undone = undoWorkingDraftTransaction(first);
+  assert.equal(undone.transaction.applyId, "apply-1");
+  assert.equal(undone.draft.dirty, false);
+  assert.equal(undone.draft.baseCheckpointId, 2);
+  assert.deepEqual(undone.draft.applicationOrder, []);
+  assert.deepEqual(undone.draft.transactions, []);
+});
+
+test("checkpoint restore becomes a reversible unsaved working draft", () => {
+  const current = recordWorkingDraftApplication(createWorkingDraft(3), {
+    appliedCritiques: [{ id: "critique-4", title: "Improve labels" }],
+    result: { applicationOrder: ["critique-4"], changedTargets: ["chart.labels"] },
+    beforeSnapshot: { board: { title: "Current" }, specMap: {} },
+    afterSnapshot: { board: { title: "Edited" }, specMap: {} },
+  });
+  const restored = recordWorkingDraftRestore(current, {
+    checkpointId: 1,
+    beforeSnapshot: { board: { title: "Edited" }, specMap: {} },
+    afterSnapshot: { board: { title: "Original" }, specMap: {} },
+    transaction: {
+      beforeVersion: 7,
+      afterVersion: 8,
+      beforeSnapshot: { board: { title: "Edited" }, specMap: {} },
+    },
+  });
+
+  assert.equal(restored.dirty, true);
+  assert.equal(restored.restoredFromCheckpointId, 1);
+  assert.equal(restored.transactions.at(-1).type, "checkpoint_restore");
+  const undone = undoWorkingDraftTransaction(restored);
+  assert.equal(undone.transaction.checkpointId, 1);
+  assert.deepEqual(undone.draft.applicationOrder, ["critique-4"]);
+  assert.equal(undone.draft.restoredFromCheckpointId, null);
 });
 
 test("critique rationale can be edited without losing its source link", () => {

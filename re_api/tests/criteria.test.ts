@@ -226,6 +226,31 @@ test("the model user prompt exposes grounding availability without legacy criter
   assert.doesNotMatch(userPrompt, /ENGINE ELIGIBILITY/);
 });
 
+test("the model user prompt carries the exact human label for a custom scope", () => {
+  const snapshot = buildContextSnapshot({
+    scope: ["custom:visual-hierarchy"],
+    customTypes: ["Visual Hierarchy"],
+  });
+  const packet = buildEvidencePacket(dashboardSpecMap(), dashboardBoard(), undefined);
+  const userPrompt = dashboardReviewUser(snapshot, packet, determineGroundingAvailability(snapshot));
+  assert.match(userPrompt, /"authorSelectedScopes": \[/);
+  assert.match(userPrompt, /"custom:visual-hierarchy"/);
+  assert.match(userPrompt, /"authorSelectedCustomScopes": \[/);
+  assert.match(userPrompt, /"Visual Hierarchy"/);
+});
+
+test("a custom concern stays additive when all standard scopes remain selected", () => {
+  const snapshot = buildContextSnapshot({
+    scope: [...RECOMMENDATION_BRANCHES, "custom:visual-hierarchy"],
+    customTypes: ["Visual Hierarchy"],
+  });
+  const packet = buildEvidencePacket(dashboardSpecMap(), dashboardBoard(), undefined);
+  const userPrompt = dashboardReviewUser(snapshot, packet, determineGroundingAvailability(snapshot));
+  assert.doesNotMatch(userPrompt, /"authorSelectedScopes": \[/);
+  assert.match(userPrompt, /"authorSelectedCustomScopes": \[/);
+  assert.match(userPrompt, /"Visual Hierarchy"/);
+});
+
 test("saved rationale keeps author text separate from its critique snapshot", () => {
   const snapshot = buildContextSnapshot({ notes: ["Keep the department colors."] });
   const packet = buildEvidencePacket(dashboardSpecMap(), dashboardBoard(), undefined);

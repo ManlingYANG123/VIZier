@@ -33,7 +33,9 @@ import {
   mergePendingContextSuggestions,
   mergeSuggestionIntoContext,
   recordWorkingDraftApplication,
+  recordWorkingDraftRestore,
   strongInteractionEventCount,
+  undoWorkingDraftTransaction,
   upsertCritiqueRationale,
 } from "./interaction-journal.js";
 import {
@@ -113,6 +115,7 @@ import {
   contextWorkflowPresentation,
   createContextWorkflow,
 } from "./context-workflow.js";
+import { createUndoToastController } from "./undo-toast-controller.js";
 import {
   buildRefinedCritique,
   DECIDED_STATUSES,
@@ -454,6 +457,7 @@ const state = {
   selectedVersionId: 1,
   checkpointComparison: { before: 1, after: 1 },
   workingDraft: createWorkingDraft(1),
+  historyMutationInFlight: false,
   critiqueInspect: { critiqueId: null, openedAtMs: 0 },
   rationales: [],
   nextRationaleId: 1,
@@ -470,6 +474,7 @@ const state = {
   // the dashboard version changes; it is UI recovery, not saved rationale.
   lastRefinementBatch: null,
   interactionJournal: [],
+  iterationContextResetEventId: null,
   nextInteractionEventId: 1,
   preferenceAgent: {
     status: "idle",
@@ -749,6 +754,10 @@ document.querySelector("#app").innerHTML = `
               <svg class="revision-dock-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 6 3.5 3.5L11.5 6"/></svg>
             </button>
             <div class="revision-dock-actions">
+              <button class="undo-working-draft-button" id="undoWorkingDraftButton" type="button" hidden>
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 4 3 7.5 6.5 11M3.5 7.5h5.25a4 4 0 0 1 4 4"/></svg>
+                <span>Undo last change</span>
+              </button>
               <button class="save-checkpoint-button" id="saveCheckpointButton" type="button" disabled>
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5h8l2 2v9H3z"/><path d="M5 2.5v4h5v-4M5.5 10.5h5"/></svg>
                 <span>Save Checkpoint</span>
@@ -868,6 +877,14 @@ document.querySelector("#app").innerHTML = `
       </aside>
     </div>
     <footer class="status-bar" id="statusBar"></footer>
+    <div class="change-undo-toast" id="changeUndoToast" role="status" aria-live="polite" aria-atomic="true" hidden>
+      <span class="change-undo-toast-copy">
+        <strong id="changeUndoToastTitle">Change applied</strong>
+        <span id="changeUndoToastDetail"></span>
+      </span>
+      <button class="change-undo-toast-action" id="changeUndoToastAction" type="button">Undo</button>
+      <button class="change-undo-toast-dismiss" id="changeUndoToastDismiss" type="button" aria-label="Dismiss notification">×</button>
+    </div>
     <div class="local-review-popover" id="localReviewPopover" hidden>
       <form id="localReviewForm" role="dialog" aria-modal="false" aria-labelledby="localReviewTitle">
         <div class="local-review-head">
@@ -940,9 +957,19 @@ function reviewContextForEngine() {
   return {
     ...state.context,
     notes: [...(state.context.notes || []), ...rationaleNotes],
-    customTypes: (state.context.customTypes || []).filter((label) =>
-      scope.includes(customScopeKey(label))),
+    customTypes: selectedCustomScopeLabels({ ...state.context, scope }),
   };
+}
+
+function selectedCustomScopeLabels(context = state.context) {
+  const scope = context.scope || [];
+  return (context.customTypes || []).filter((label) => scope.includes(customScopeKey(label)));
+}
+
+function feedbackScopeUsesDefaultSelection(context = state.context) {
+  const selected = new Set(context.scope || []);
+  return CATEGORY_ORDER.every((scope) => selected.has(scope)) &&
+    selectedCustomScopeLabels(context).length === 0;
 }
 
 function feedbackScopeIsNarrowed() {
@@ -965,10 +992,13 @@ function syncFeedbackScopeStatus() {
   const status = document.getElementById("scopeSelectionStatus");
   if (!status) return;
   const count = (state.context.scope || []).length;
+  const selectedCustom = selectedCustomScopeLabels();
   const empty = count === 0;
   status.classList.toggle("context-describe-error", empty);
   status.textContent = empty
     ? "Choose at least one area for the next review."
+    : selectedCustom.length
+      ? `${count} selected · Custom focus included: ${selectedCustom.join(", ")}.`
     : feedbackScopeIsNarrowed()
       ? `${count} selected · The next review is limited to these areas.`
       : "All areas selected · The next review covers the full dashboard.";
@@ -1034,9 +1064,24 @@ function iterationContextForEngine() {
     ...(state.critiques || []),
     ...(state.workingDraft?.appliedCritiques || []),
   ].map((critique) => [critique.id, critique]));
+  const resetSequence = Number(
+    String(state.iterationContextResetEventId || "").replace(/^event-/, ""),
+  ) || 0;
+  const iterationEvents = resetSequence
+    ? (state.interactionJournal || []).filter((event) => (
+        Number(String(event.id || "").replace(/^event-/, "")) || 0
+      ) > resetSequence)
+    : state.interactionJournal || [];
+  const revertedApplyIds = new Set(
+    iterationEvents
+      .filter((event) => event.kind === "changes_reverted" && event.data?.revertedApplyId)
+      .map((event) => event.data.revertedApplyId),
+  );
   const acceptedIds = new Set(
-    (state.interactionJournal || [])
-      .filter((event) => event.kind === "recommendation_accepted" && event.critiqueId)
+    iterationEvents
+      .filter((event) => event.kind === "recommendation_accepted"
+        && event.critiqueId
+        && (!event.data?.applyId || !revertedApplyIds.has(event.data.applyId)))
       .map((event) => event.critiqueId),
   );
   const applied = [...acceptedIds].map((id) => byId.get(id)).filter(Boolean).map((critique) => ({
@@ -1145,27 +1190,86 @@ function syncReviewReadiness() {
 }
 
 function workingDraftChangeCount() {
-  return (state.workingDraft.applicationOrder || []).length;
+  const applied = (state.workingDraft.applicationOrder || []).length;
+  return applied + (state.workingDraft.restoredFromCheckpointId ? 1 : 0);
+}
+
+function latestWorkingDraftTransaction() {
+  const transactions = state.workingDraft?.transactions;
+  return Array.isArray(transactions) ? transactions.at(-1) || null : null;
+}
+
+function transactionDisplayLabel(transaction = latestWorkingDraftTransaction()) {
+  if (!transaction) return "last change";
+  if (transaction.type === "checkpoint_restore") {
+    return `restore of Checkpoint ${transaction.checkpointId}`;
+  }
+  const titles = Array.isArray(transaction.recommendationTitles)
+    ? transaction.recommendationTitles.filter(Boolean)
+    : [];
+  if (titles.length === 1) return `“${titles[0]}”`;
+  const count = Number(transaction.recommendationIds?.length) || titles.length;
+  return count > 1 ? `${count} applied changes` : "last applied change";
 }
 
 function renderWorkingDraftStatus() {
   const status = document.getElementById("workingDraftStatus");
   const saveButton = document.getElementById("saveCheckpointButton");
+  const undoButton = document.getElementById("undoWorkingDraftButton");
   const dirty = Boolean(state.workingDraft.dirty);
   const count = workingDraftChangeCount();
+  const restoredCheckpointId = state.workingDraft.restoredFromCheckpointId;
   if (status) {
     status.classList.toggle("dirty", dirty);
     status.classList.toggle("clean", !dirty);
     status.querySelector("span:last-child").textContent = dirty
-      ? `Working Draft · ${count} unsaved ${count === 1 ? "change" : "changes"}`
+      ? restoredCheckpointId
+        ? `Working Draft · Checkpoint ${restoredCheckpointId} restored`
+        : `Working Draft · ${count} unsaved ${count === 1 ? "change" : "changes"}`
       : "Working Draft saved";
   }
   if (saveButton) {
-    saveButton.disabled = !dirty;
-    saveButton.title = dirty
+    saveButton.disabled = !dirty || state.historyMutationInFlight;
+    saveButton.title = state.historyMutationInFlight
+      ? "Finishing the current history change"
+      : dirty
       ? `Save ${count} ${count === 1 ? "change" : "changes"} as a checkpoint`
       : "No unsaved changes";
   }
+  if (undoButton) {
+    const transaction = latestWorkingDraftTransaction();
+    undoButton.hidden = !transaction;
+    undoButton.disabled = !transaction || state.historyMutationInFlight;
+    undoButton.title = transaction
+      ? `Undo ${transactionDisplayLabel(transaction)}`
+      : "No change to undo";
+  }
+}
+
+const changeUndoToastController = createUndoToastController({
+  toast: document.getElementById("changeUndoToast"),
+  titleNode: document.getElementById("changeUndoToastTitle"),
+  detailNode: document.getElementById("changeUndoToastDetail"),
+  actionButton: document.getElementById("changeUndoToastAction"),
+  dismissButton: document.getElementById("changeUndoToastDismiss"),
+  onUndo: () => undoLastWorkingDraftChange({ source: "apply-notification" }),
+  onError: (error) => {
+    console.error("[undo notification]", error);
+    showChangeUndoToast({
+      title: "Undo could not be completed",
+      detail: "The current dashboard was preserved. Try again from the Working Draft bar.",
+      canUndo: false,
+      duration: 8000,
+    });
+  },
+});
+
+function hideChangeUndoToast() {
+  changeUndoToastController.hide();
+}
+
+function showChangeUndoToast(options) {
+  changeUndoToastController.show(options);
 }
 function escapeHTML(value) {
   return String(value ?? "")
@@ -2311,22 +2415,78 @@ async function captureDashboardDisplaySvg() {
   return raster.svg;
 }
 
-async function captureDashboardPngFromSvg(svg, width, height, scale = 2) {
-  if (!svg) return null;
-  const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
-  const objectURL = URL.createObjectURL(blob);
-  try {
-    const image = await loadExportImage(objectURL);
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(width * scale));
-    canvas.height = Math.max(1, Math.round(height * scale));
-    const context = canvas.getContext("2d");
-    if (!context) return null;
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    return canvasPngDataUrl(canvas);
-  } finally {
-    URL.revokeObjectURL(objectURL);
+const CAPTURE_COLOR_PROPERTIES = [
+  "color", "background-color", "border-top-color", "border-right-color",
+  "border-bottom-color", "border-left-color", "outline-color",
+  "text-decoration-color", "fill", "stroke",
+];
+
+function legacyCaptureColor(value) {
+  const match = String(value || "").trim().match(
+    /^color\(srgb\s+([\d.]+%?)\s+([\d.]+%?)\s+([\d.]+%?)(?:\s*\/\s*([\d.]+%?))?\)$/i,
+  );
+  if (!match) return null;
+  const channel = (raw) => {
+    const number = Number.parseFloat(raw);
+    const unitValue = raw.endsWith("%") ? number / 100 : number;
+    return Math.round(Math.max(0, Math.min(1, unitValue)) * 255);
+  };
+  const alphaRaw = match[4] || "1";
+  const alphaNumber = Number.parseFloat(alphaRaw);
+  const alpha = Math.max(0, Math.min(1, alphaRaw.endsWith("%") ? alphaNumber / 100 : alphaNumber));
+  return `rgba(${channel(match[1])}, ${channel(match[2])}, ${channel(match[3])}, ${alpha})`;
+}
+
+function copyCaptureSafeColors(source, target) {
+  const sourceNodes = [source, ...source.querySelectorAll("*")];
+  const targetNodes = [target, ...target.querySelectorAll("*")];
+  const count = Math.min(sourceNodes.length, targetNodes.length);
+  for (let index = 0; index < count; index += 1) {
+    const computed = getComputedStyle(sourceNodes[index]);
+    for (const property of CAPTURE_COLOR_PROPERTIES) {
+      const normalized = legacyCaptureColor(computed.getPropertyValue(property));
+      if (normalized) targetNodes[index].style.setProperty(property, normalized, "important");
+    }
   }
+}
+
+async function captureDashboardCanvasFromDom(width, height, scale = 2) {
+  const source = els.dashboardArtboard;
+  if (!source) return null;
+  const { default: html2canvas } = await import("html2canvas");
+  return html2canvas(source, {
+    allowTaint: false,
+    backgroundColor: "#fbfbfd",
+    height,
+    logging: false,
+    scale,
+    useCORS: true,
+    width,
+    windowHeight: height,
+    windowWidth: width,
+    onclone: (clonedDocument) => {
+      const cloned = clonedDocument.getElementById("dashboardArtboard");
+      const world = clonedDocument.getElementById("canvasWorld");
+      if (world) world.style.transform = "none";
+      if (!cloned) return;
+      copyCaptureSafeColors(source, cloned);
+      cloned.querySelector("#markersLayer")?.replaceChildren();
+      cloned.querySelectorAll(".selected, .canvas-preview-affected").forEach((node) => {
+        node.classList.remove("selected", "canvas-preview-affected");
+      });
+      cloned.classList.remove("canvas-proposed");
+      Object.assign(cloned.style, {
+        position: "relative",
+        inset: "auto",
+        width: `${width}px`,
+        height: `${height}px`,
+        transform: "none",
+        margin: "0",
+        boxShadow: "none",
+        overflow: "hidden",
+      });
+    },
+  });
 }
 
 async function settleDashboardForCapture() {
@@ -2357,23 +2517,16 @@ async function captureDashboardExport() {
   } catch (error) {
     console.warn("[revision-screenshot] Faithful SVG capture failed.", error);
   }
-  let png = null;
+  let canvas = null;
   try {
-    png = await captureDashboardPngFromSvg(svg, width, height);
+    canvas = await captureDashboardCanvasFromDom(width, height);
   } catch (error) {
-    console.warn("[revision-screenshot] Faithful SVG-to-PNG capture failed.", error);
+    console.warn("[revision-screenshot] Safe DOM-to-PNG capture failed.", error);
   }
-  if (!png) return { screenshot: null, png: null, svg, snapshot };
-  try {
-    const image = await loadExportImage(png);
-    const hi = document.createElement("canvas");
-    fillCanvas(hi, image, image.naturalWidth || width * 2, image.naturalHeight || height * 2);
-    const pair = exportPairFromCanvas(hi, width, height);
-    return { screenshot: pair?.screenshot || png, png: pair?.png || png, svg, snapshot };
-  } catch (error) {
-    console.warn("[revision-screenshot] PNG encode failed.", error);
-    return { screenshot: png, png, svg, snapshot };
-  }
+  if (!canvas) return { screenshot: null, png: null, svg, snapshot };
+  const pair = exportPairFromCanvas(canvas, width, height);
+  if (!pair) return { screenshot: null, png: null, svg, snapshot };
+  return { screenshot: pair.screenshot, png: pair.png, svg, snapshot };
 }
 
 async function captureDashboardScreenshot() {
@@ -2631,6 +2784,8 @@ function renderVersions() {
     const timelineMeta = version.kind === "revision"
       ? isRoundComplete
         ? "Previous Round Complete"
+        : version.purpose === "restored"
+          ? `Restored from Checkpoint ${version.restoredFromCheckpointId}`
         : `${changeCount} ${changeCount === 1 ? "change" : "changes"}`
       : "Original dashboard";
     const originLabel = isBefore
@@ -2670,16 +2825,27 @@ function renderVersions() {
       : hasTwoCheckpoints
         ? "Select one more checkpoint from the timeline to compare."
         : "Save the Working Draft when you reach a meaningful moment.";
+    const checkpointIsCurrent = !state.workingDraft.dirty
+      && afterVersion.id === state.workingDraft.baseCheckpointId;
+    const checkpointCanRestore = Boolean(afterVersion.afterSnapshot)
+      && !checkpointIsCurrent
+      && !state.historyMutationInFlight;
     detail.innerHTML = `
       <div class="revision-detail-head comparison">
         <div>
           <h3>${comparisonTitle}</h3>
           <p>${comparisonInstruction}</p>
         </div>
-        ${validated ? "" : `<span class="revision-validation warning">Review Needed</span>`}
+        <div class="revision-detail-actions">
+          ${validated ? "" : `<span class="revision-validation warning">Review Needed</span>`}
+          <button type="button" class="checkpoint-restore-button" data-restore-checkpoint="${afterVersion.id}" ${checkpointCanRestore ? "" : "disabled"} title="${checkpointIsCurrent ? "This checkpoint is the current Working Draft" : "Restore this checkpoint as a new Working Draft"}">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 4 3 7.5 6.5 11M3.5 7.5h5.25a4 4 0 0 1 4 4"/></svg>
+            <span>${checkpointIsCurrent ? "Current checkpoint" : `Restore Checkpoint ${afterVersion.id}`}</span>
+          </button>
+        </div>
       </div>
       <div class="revision-visual-comparison" id="revisionVisualComparison"></div>
-      ${afterVersion.kind === "revision" ? `
+      ${afterVersion.kind === "revision" && (afterVersion.appliedRecommendations || []).length ? `
         <div class="revision-applied-list">
           <span class="revision-applied-label">In Checkpoint ${afterVersion.id}</span>
           ${(afterVersion.appliedRecommendations || []).map((item) => `
@@ -2715,6 +2881,9 @@ function renderVersions() {
       renderCritiques();
       await renderInspector();
     });
+  });
+  detail?.querySelector("[data-restore-checkpoint]")?.addEventListener("click", (event) => {
+    void requestCheckpointRestore(Number(event.currentTarget.dataset.restoreCheckpoint));
   });
   renderWorkingDraftStatus();
 }
@@ -2958,6 +3127,7 @@ function resetInteractionMemory() {
   preferenceAgentTimer = null;
   state.selectedVersionId = 1;
   state.interactionJournal = [];
+  state.iterationContextResetEventId = null;
   state.nextInteractionEventId = 1;
   state.preferenceAgent = {
     status: "idle",
@@ -3304,6 +3474,15 @@ function syncSidebarComponents() {
   });
 }
 
+function clearCritiqueSearch() {
+  const hadQuery = Boolean(state.search || els.searchInput?.value);
+  state.search = "";
+  if (els.searchInput) els.searchInput.value = "";
+  if (!hadQuery) return;
+  renderCritiques();
+  renderMarkers();
+}
+
 function closeSidebarPopovers({ restoreFocus = true } = {}) {
   const currentName = state.sidebarPopover;
   const currentPanel = currentName
@@ -3312,6 +3491,7 @@ function closeSidebarPopovers({ restoreFocus = true } = {}) {
   const focusWasInside = currentPanel?.contains(document.activeElement);
   state.sidebarPopover = null;
   syncSidebarComponents();
+  if (currentName === "search") clearCritiqueSearch();
   if (restoreFocus && focusWasInside) {
     document.querySelector(`[data-sidebar-popover="${currentName}"]`)?.focus();
   }
@@ -3349,6 +3529,7 @@ function closeSidebarComponent(name) {
   if (state.sidebarPopover === name) state.sidebarPopover = null;
   if (state.pinnedSidebarComponent === name) state.pinnedSidebarComponent = null;
   syncSidebarComponents();
+  if (name === "search") clearCritiqueSearch();
   document.querySelector(`[data-sidebar-popover="${name}"]`)?.focus();
 }
 
@@ -3922,13 +4103,33 @@ function feedbackScopeMarkup() {
         <button type="button" class="remove-custom-scope" data-remove-custom-scope="${escapeHTML(label)}" aria-label="Remove ${escapeHTML(label)} scope">×</button>
       </span>`;
   }).join("");
-  const custom = customChips
-    ? `
-      <div class="scope-cluster scope-cluster-custom" role="group" aria-label="custom">
-        <span class="scope-cluster-label">custom</span>
-        <div class="scope-cluster-chips">${customChips}</div>
-      </div>`
-    : "";
+  const custom = `
+    <div class="scope-cluster scope-cluster-custom" role="group" aria-label="Custom feedback scopes">
+      <span class="scope-cluster-label">custom</span>
+      <div class="scope-add-control">
+        <div class="scope-cluster-chips scope-cluster-chips-custom">
+          ${customChips}
+          <span class="scope-add-composer">
+            <button type="button" class="scope-add-trigger" id="scopeAddTrigger">
+              <span class="scope-add-icon" aria-hidden="true">＋</span><span>Add scope</span>
+            </button>
+            <form class="scope-add-editor" id="scopeAddEditor" hidden>
+              <input
+                id="customScopeInput"
+                maxlength="32"
+                autocomplete="off"
+                enterkeyhint="done"
+                placeholder="Type scope…"
+                aria-label="Custom feedback scope. Press Enter to add or Escape to cancel."
+                aria-describedby="customScopeHint customScopeError"
+              />
+              <span class="visually-hidden" id="customScopeHint">Press Enter to add this scope or Escape to cancel.</span>
+            </form>
+          </span>
+        </div>
+        <p class="scope-add-error" id="customScopeError" role="alert" hidden></p>
+      </div>
+    </div>`;
   return clustered + custom;
 }
 
@@ -3943,6 +4144,14 @@ function rerankForUpdatedScope() {
   renderCritiques();
   renderMarkers();
   if (selectedWasHidden) void renderInspector();
+}
+
+function markFeedbackScopeChanged() {
+  // A Practice overall review is complete only for the scope it evaluated.
+  // Re-open the action after any scope edit; customized scopes bypass the fixed
+  // practice response and run through the live engine on the next confirmation.
+  if (practiceIsActive()) practiceRuntime.overallReviewCacheConsumed = false;
+  markContextNeedsReview("Your feedback scope changed. Confirm which criteria the next review should cover.", "scope");
 }
 
 function addCustomFeedbackScope() {
@@ -3968,7 +4177,7 @@ function addCustomFeedbackScope() {
   }
   state.context.customTypes = [...customTypes, label];
   state.context.scope = [...new Set([...(state.context.scope || []), customScopeKey(label)])];
-  markContextNeedsReview("Your feedback scope changed. Confirm which criteria the next review should cover.", "scope");
+  markFeedbackScopeChanged();
   renderFixedContextPanel();
   rerankForUpdatedScope();
   updateContextSaveState();
@@ -4054,7 +4263,7 @@ function updateContextWorkflowControls() {
     '#briefScope input[name="briefScope"]',
     "#contextInferBtn",
     "#scopeAddTrigger",
-    "#scopeAddConfirm",
+    "#customScopeInput",
   ].join(",")).forEach((control) => { control.disabled = generating; });
 
   const confirmButton = document.getElementById("saveContextBtn");
@@ -4132,17 +4341,6 @@ function renderFixedContextPanel() {
         ${feedbackScopeMarkup()}
       </div>
       <p class="context-merged-status scope-selection-status" id="scopeSelectionStatus" role="status" aria-live="polite"></p>
-      <div class="scope-add-control">
-        <button type="button" class="scope-add-trigger" id="scopeAddTrigger">
-          <span aria-hidden="true">＋</span> Add Scope
-        </button>
-        <div class="scope-add-editor" id="scopeAddEditor" hidden>
-          <input id="customScopeInput" maxlength="32" placeholder="e.g., Brand consistency" aria-label="Custom feedback scope" />
-          <button type="button" class="scope-add-confirm" id="scopeAddConfirm">Add</button>
-          <button type="button" class="scope-add-cancel" id="scopeAddCancel" aria-label="Cancel adding scope">×</button>
-        </div>
-        <p class="scope-add-error" id="customScopeError" role="alert" hidden></p>
-      </div>
     </div>
 
     <section class="rationale-memory" aria-labelledby="rationaleMemoryTitle" ${showSavedRationale ? "" : "hidden"}>
@@ -4235,36 +4433,61 @@ function attachContextPanelEventListeners() {
   document.querySelectorAll('#briefScope input[name="briefScope"]').forEach(c =>
     c.addEventListener("change", () => {
       readBriefIntoState({ confirmEditedFields: false });
-      markContextNeedsReview("Your feedback scope changed. Confirm which criteria the next review should cover.", "scope");
+      markFeedbackScopeChanged();
       rerankForUpdatedScope();
     }));
 
-  document.getElementById("scopeAddTrigger")?.addEventListener("click", () => {
-    document.getElementById("scopeAddTrigger").hidden = true;
-    document.getElementById("scopeAddEditor").hidden = false;
-    document.getElementById("customScopeInput").focus();
+  const scopeAddTrigger = document.getElementById("scopeAddTrigger");
+  const scopeAddEditor = document.getElementById("scopeAddEditor");
+  const customScopeInput = document.getElementById("customScopeInput");
+  const customScopeError = document.getElementById("customScopeError");
+  const closeCustomScopeEditor = ({ restoreFocus = true } = {}) => {
+    if (!scopeAddTrigger || !scopeAddEditor || !customScopeInput || !customScopeError) return;
+    customScopeInput.value = "";
+    customScopeError.hidden = true;
+    scopeAddEditor.hidden = true;
+    scopeAddTrigger.hidden = false;
+    if (restoreFocus) scopeAddTrigger.focus();
+  };
+  scopeAddTrigger?.addEventListener("click", () => {
+    scopeAddTrigger.hidden = true;
+    scopeAddEditor.hidden = false;
+    customScopeInput.value = "";
+    customScopeError.hidden = true;
+    customScopeInput.focus();
   });
-  document.getElementById("scopeAddConfirm")?.addEventListener("click", addCustomFeedbackScope);
-  document.getElementById("scopeAddCancel")?.addEventListener("click", () => {
-    document.getElementById("scopeAddEditor").hidden = true;
-    document.getElementById("scopeAddTrigger").hidden = false;
-    document.getElementById("customScopeError").hidden = true;
+  scopeAddEditor?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    addCustomFeedbackScope();
   });
-  document.getElementById("customScopeInput")?.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
+  customScopeInput?.addEventListener("input", () => {
+    customScopeError.hidden = true;
+  });
+  customScopeInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.isComposing) {
       event.preventDefault();
       addCustomFeedbackScope();
+      return;
     }
     if (event.key === "Escape") {
-      document.getElementById("scopeAddCancel").click();
+      event.preventDefault();
+      closeCustomScopeEditor();
     }
+  });
+  customScopeInput?.addEventListener("blur", () => {
+    requestAnimationFrame(() => {
+      if (document.getElementById("customScopeInput") !== customScopeInput) return;
+      if (!scopeAddEditor.contains(document.activeElement)) {
+        closeCustomScopeEditor({ restoreFocus: false });
+      }
+    });
   });
   document.querySelectorAll("[data-remove-custom-scope]").forEach((button) => {
     button.addEventListener("click", () => {
       const label = button.dataset.removeCustomScope;
       state.context.customTypes = (state.context.customTypes || []).filter((item) => item !== label);
       state.context.scope = (state.context.scope || []).filter((item) => item !== customScopeKey(label));
-      markContextNeedsReview("Your feedback scope changed. Confirm which criteria the next review should cover.", "scope");
+      markFeedbackScopeChanged();
       renderFixedContextPanel();
       rerankForUpdatedScope();
     });
@@ -4448,7 +4671,7 @@ function bindContextConfirmationButton() {
 // deliberately NOT a sort key: order reflects importance, not auto-applicability.
 function scopeRank(critiques) {
   const scope = state.context.scope || [];
-  const customTypes = state.context.customTypes || [];
+  const customTypes = selectedCustomScopeLabels();
   const prio = { critical: 0, high: 1, medium: 2, low: 3, none: 4 };
   const support = (c) => c.supportStatus === "validated" ? 0
     : c.supportStatus === "tentative" ? 1 : 2;
@@ -4643,6 +4866,17 @@ async function previewRefinementAlternative(critique, alternative, index) {
     if (result?.rollback?.rolledBack) {
       throw new Error(result.rollback.reason || "This alternative did not pass the preview checks.");
     }
+    const hadProposedCanvas = Boolean(activeCanvasPreviewResult());
+    state.canvasPreview = null;
+    renderCanvasPreviewControl();
+    renderDashboardChrome({ renderContext: false });
+    if (hadProposedCanvas) {
+      await renderTiles();
+      renderMarkers();
+    }
+    await afterDashboardPaint();
+    const baselineReport = renderedDashboardLayoutReport();
+    if (!state.refinementAlternatives || state.refinementAlternatives.previewToken !== previewToken) return false;
     state.canvasPreview = {
       critiqueId: critique.id,
       critiqueTitle: critique.title,
@@ -4657,9 +4891,22 @@ async function previewRefinementAlternative(critique, alternative, index) {
     renderDashboardChrome({ renderContext: false });
     await renderTiles();
     renderMarkers();
+    await afterDashboardPaint();
+    const renderedErrors = renderedBatchPreviewErrors(baselineReport);
+    if (renderedErrors.length) {
+      throw new Error(`Rendered layout check failed: ${renderedErrors[0]}`);
+    }
+    state.canvasPreview.renderValidation = { ok: true, errors: [] };
     return true;
   } catch (error) {
     if (!state.refinementAlternatives || state.refinementAlternatives.previewToken !== previewToken) return false;
+    if (state.canvasPreview?.alternativePreview) {
+      state.canvasPreview = null;
+      renderCanvasPreviewControl();
+      renderDashboardChrome({ renderContext: false });
+      await renderTiles();
+      renderMarkers();
+    }
     const message = error instanceof Error ? error.message : String(error);
     const errorElement = document.getElementById("rationaleError");
     errorElement.textContent = `This option could not be previewed: ${message}`;
@@ -5054,7 +5301,7 @@ const DIMENSION_GROUP_ORDER = CATEGORY_ORDER;
 
 function critiqueGroupPresentation(group) {
   return CRITIQUE_GROUPS[group] || {
-    ...categoryPresentation(group, state.context.customTypes),
+    ...categoryPresentation(group, selectedCustomScopeLabels()),
     icon: '<path d="M5 7h14M5 12h14M5 17h14"/>',
   };
 }
@@ -5784,45 +6031,139 @@ async function computeBatchPreview(selectedIds, source = null) {
   }
 }
 
-function renderedBatchPreviewErrors() {
-  const errors = [];
-  const overlap = (first, second, inset = 1) => (
-    first.left < second.right - inset
-    && first.right > second.left + inset
-    && first.top < second.bottom - inset
-    && first.bottom > second.top + inset
+function renderedDashboardLayoutReport() {
+  const report = new Map();
+  const record = (key, message, magnitude = 1, tolerance = 0) => {
+    const previous = report.get(key);
+    if (!previous || magnitude > previous.magnitude) {
+      report.set(key, { key, message, magnitude, tolerance });
+    }
+  };
+  const overlapArea = (first, second, inset = 1) => {
+    const width = Math.min(first.right, second.right) - Math.max(first.left, second.left);
+    const height = Math.min(first.bottom, second.bottom) - Math.max(first.top, second.top);
+    return width > inset && height > inset ? width * height : 0;
+  };
+  const outsideMagnitude = (rect, frame, inset = 1) => (
+    Math.max(0, frame.left - rect.left - inset)
+    + Math.max(0, rect.right - frame.right - inset)
+    + Math.max(0, frame.top - rect.top - inset)
+    + Math.max(0, rect.bottom - frame.bottom - inset)
   );
   const visible = (element) => element
     && !element.hidden
     && getComputedStyle(element).display !== "none"
     && getComputedStyle(element).visibility !== "hidden";
+  const artboardRect = visible(els.dashboardArtboard)
+    ? els.dashboardArtboard.getBoundingClientRect()
+    : null;
   const heading = els.dashboardTitle?.closest(".dashboard-heading");
-  const headingRect = visible(heading) ? heading.getBoundingClientRect() : null;
+  const headingParts = visible(heading)
+    ? [...heading.querySelectorAll("h1, span, p")].filter(visible).map((element, index) => ({
+        key: `heading-${index}`,
+        label: index === 0 ? "dashboard heading" : "dashboard heading metadata",
+        rect: element.getBoundingClientRect(),
+      }))
+    : [];
   const kpiRect = visible(els.kpiRow) ? els.kpiRow.getBoundingClientRect() : null;
+  const tileElements = [...els.tilesLayer.querySelectorAll(".tile")];
+  const tileRects = tileElements.map((tile) => ({
+    element: tile,
+    id: tile.dataset.tileId || tile.querySelector(".tile-label")?.textContent?.trim() || "chart",
+    name: tile.querySelector(".tile-label")?.textContent?.trim() || "A chart",
+    rect: tile.getBoundingClientRect(),
+  }));
+  const boardFilters = canvasBoardState().filters || [];
+  const filters = [...els.dashboardFilterBar.querySelectorAll(".dashboard-filter-control")]
+    .map((element, index) => ({
+      element,
+      control: boardFilters[index] || {},
+      id: boardFilters[index]?.id || `filter-${index + 1}`,
+      rect: element.getBoundingClientRect(),
+    }))
+    .filter(({ element }) => visible(element));
 
-  if (headingRect && kpiRect && overlap(headingRect, kpiRect)) {
-    errors.push("The dashboard heading overlaps the KPI summary.");
+  for (const headingPart of headingParts) {
+    if (artboardRect) {
+      const outside = outsideMagnitude(headingPart.rect, artboardRect);
+      if (outside > 0) record(
+        `${headingPart.key}:canvas-overflow`,
+        `The ${headingPart.label} extends outside the dashboard canvas.`,
+        outside,
+        2,
+      );
+    }
+    if (kpiRect) {
+      const area = overlapArea(headingPart.rect, kpiRect);
+      if (area > 0) record(
+        `${headingPart.key}:kpi-overlap`,
+        "The dashboard heading overlaps the KPI summary.",
+        area,
+        16,
+      );
+    }
   }
 
-  els.tilesLayer.querySelectorAll(".tile").forEach((tile) => {
-    const tileRect = tile.getBoundingClientRect();
-    const tileName = tile.querySelector(".tile-label")?.textContent?.trim() || "A chart";
-    if (headingRect && overlap(headingRect, tileRect)) {
-      errors.push(`${tileName} overlaps the dashboard heading.`);
+  for (let index = 0; index < tileRects.length; index += 1) {
+    const tileInfo = tileRects[index];
+    const { element: tile, id: tileId, name: tileName, rect: tileRect } = tileInfo;
+    if (artboardRect) {
+      const outside = outsideMagnitude(tileRect, artboardRect);
+      if (outside > 0) record(
+        `tile:${tileId}:canvas-overflow`,
+        `${tileName} extends outside the dashboard canvas.`,
+        outside,
+        2,
+      );
     }
-    if (kpiRect && overlap(kpiRect, tileRect)) {
-      errors.push(`${tileName} overlaps the KPI summary.`);
+    for (let siblingIndex = index + 1; siblingIndex < tileRects.length; siblingIndex += 1) {
+      const sibling = tileRects[siblingIndex];
+      const area = overlapArea(tileRect, sibling.rect);
+      if (area > 0) record(
+        `tiles:${[tileId, sibling.id].sort().join("|")}:overlap`,
+        `${tileName} overlaps ${sibling.name}.`,
+        area,
+        16,
+      );
     }
+    for (const headingPart of headingParts) {
+      const area = overlapArea(headingPart.rect, tileRect);
+      if (area > 0) record(
+        `tile:${tileId}:${headingPart.key}:overlap`,
+        `${tileName} overlaps the dashboard heading.`,
+        area,
+        16,
+      );
+    }
+    if (kpiRect) {
+      const area = overlapArea(kpiRect, tileRect);
+      if (area > 0) record(
+        `tile:${tileId}:kpi-overlap`,
+        `${tileName} overlaps the KPI summary.`,
+        area,
+        16,
+      );
+    }
+
+    [...tile.querySelectorAll(".tile-label, .tile-subtitle")].filter(visible).forEach((text, textIndex) => {
+      const overflow = outsideMagnitude(text.getBoundingClientRect(), tileRect);
+      if (overflow > 0) record(
+        `tile:${tileId}:chrome-overflow:${textIndex}`,
+        `${tileName} has title text outside its tile frame.`,
+        overflow,
+        2,
+      );
+    });
 
     const host = tile.querySelector(".vega-host");
     const svg = host?.querySelector("svg");
     if (!host || !svg) {
-      errors.push(`${tileName} did not render.`);
-      return;
+      record(`tile:${tileId}:missing-render`, `${tileName} did not render.`);
+      continue;
     }
     const hostRect = host.getBoundingClientRect();
     const visibleMarks = [...svg.querySelectorAll(
-      ".role-mark path, .role-mark rect, .role-mark circle, .role-mark line, .role-mark text, .role-mark symbol",
+      ".role-mark path, .role-mark rect, .role-mark circle, .role-mark line, .role-mark text, .role-mark symbol, .role-mark image",
     )].filter((mark) => {
       const rect = mark.getBoundingClientRect();
       const style = getComputedStyle(mark);
@@ -5832,19 +6173,100 @@ function renderedBatchPreviewErrors() {
         && rect.width > 0.5
         && rect.height > 0.5;
     });
-    if (!visibleMarks.length) errors.push(`${tileName} rendered without visible data or narrative content.`);
+    if (!visibleMarks.length) record(
+      `tile:${tileId}:no-visible-content`,
+      `${tileName} rendered without visible data or narrative content.`,
+    );
 
     const clipTolerance = 4;
-    const clippedText = [...svg.querySelectorAll("text")].some((text) => {
+    let clippedTextMagnitude = 0;
+    [...svg.querySelectorAll("text")].forEach((text) => {
       const rect = text.getBoundingClientRect();
-      if (!rect.width || !rect.height) return false;
-      return rect.left < hostRect.left - clipTolerance
-        || rect.right > hostRect.right + clipTolerance
-        || rect.top < hostRect.top - clipTolerance
-        || rect.bottom > hostRect.bottom + clipTolerance;
+      if (!rect.width || !rect.height) return;
+      clippedTextMagnitude += outsideMagnitude(rect, hostRect, clipTolerance);
     });
-    if (clippedText) errors.push(`${tileName} has labels clipped outside its chart frame.`);
-  });
+    if (clippedTextMagnitude > 0) record(
+      `tile:${tileId}:clipped-labels`,
+      `${tileName} has labels clipped outside its chart frame.`,
+      clippedTextMagnitude,
+      2,
+    );
+  }
+
+  for (let index = 0; index < filters.length; index += 1) {
+    const filter = filters[index];
+    if (artboardRect) {
+      const outside = outsideMagnitude(filter.rect, artboardRect);
+      if (outside > 0) record(
+        `filter:${filter.id}:canvas-overflow`,
+        `${filter.control.label || "A dashboard filter"} extends outside the dashboard canvas.`,
+        outside,
+        2,
+      );
+    }
+    for (const headingPart of headingParts) {
+      const area = overlapArea(filter.rect, headingPart.rect);
+      if (area > 0) record(
+        `filter:${filter.id}:${headingPart.key}:overlap`,
+        `${filter.control.label || "A dashboard filter"} overlaps the dashboard heading.`,
+        area,
+        16,
+      );
+    }
+    if (kpiRect) {
+      const area = overlapArea(filter.rect, kpiRect);
+      if (area > 0) record(
+        `filter:${filter.id}:kpi-overlap`,
+        `${filter.control.label || "A dashboard filter"} overlaps the KPI summary.`,
+        area,
+        16,
+      );
+    }
+    for (const tile of tileRects) {
+      if (filter.control.placement === "chart-header" && filter.control.anchorTile === tile.id) continue;
+      const area = overlapArea(filter.rect, tile.rect);
+      if (area > 0) record(
+        `filter:${filter.id}:tile:${tile.id}:overlap`,
+        `${filter.control.label || "A dashboard filter"} overlaps ${tile.name}.`,
+        area,
+        16,
+      );
+    }
+    for (let siblingIndex = index + 1; siblingIndex < filters.length; siblingIndex += 1) {
+      const sibling = filters[siblingIndex];
+      const area = overlapArea(filter.rect, sibling.rect);
+      if (area > 0) record(
+        `filters:${[filter.id, sibling.id].sort().join("|")}:overlap`,
+        `${filter.control.label || "A dashboard filter"} overlaps ${sibling.control.label || "another dashboard filter"}.`,
+        area,
+        16,
+      );
+    }
+  }
+
+  if (kpiRect) {
+    [...els.kpiRow.querySelectorAll(".kpi")].filter(visible).forEach((kpi, index) => {
+      const overflow = outsideMagnitude(kpi.getBoundingClientRect(), kpiRect);
+      if (overflow > 0) record(
+        `kpi:${index}:overflow`,
+        "A KPI value or label overflows the KPI summary.",
+        overflow,
+        2,
+      );
+    });
+  }
+
+  return report;
+}
+
+function renderedBatchPreviewErrors(baselineReport = new Map()) {
+  const current = renderedDashboardLayoutReport();
+  const errors = [];
+  for (const issue of current.values()) {
+    const baseline = baselineReport.get?.(issue.key);
+    const tolerance = Math.max(issue.tolerance || 0, baseline ? baseline.magnitude * 0.03 : 0);
+    if (!baseline || issue.magnitude > baseline.magnitude + tolerance) errors.push(issue.message);
+  }
 
   return [...new Set(errors)];
 }
@@ -5853,7 +6275,66 @@ function afterDashboardPaint() {
   return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 }
 
-async function presentBatchPreview(outcome, { renderBar = true, baselineErrors = [] } = {}) {
+/** Single recommendations used to stop at the engine's structural gate while
+ * combined previews also received a browser-rendered check. Run the same real
+ * DOM/SVG gate before enabling a focused recommendation so long text, filters,
+ * legends, and CSS chrome cannot slip through one-at-a-time. */
+async function configureAndValidateFocusedCanvasPreview(critique, descriptor) {
+  const needsRenderedValidation = !state.batchMode
+    && descriptor.executable
+    && descriptor.livePreview
+    && !descriptor.previewFailure;
+  if (!needsRenderedValidation) {
+    configureCanvasPreview(critique, descriptor);
+    return false;
+  }
+
+  // Establish the committed dashboard as the baseline. Existing defects remain
+  // visible but do not block an unrelated recommendation; a candidate may not
+  // introduce a new issue or materially worsen an existing one.
+  const hadProposedCanvas = Boolean(activeCanvasPreviewResult());
+  state.canvasPreview = null;
+  renderCanvasPreviewControl();
+  renderDashboardChrome({ renderContext: false });
+  if (hadProposedCanvas) {
+    await renderTiles();
+    renderMarkers();
+  }
+  await afterDashboardPaint();
+  const baselineReport = renderedDashboardLayoutReport();
+  if (state.selectedCritiqueId !== critique.id || critiqueById(critique.id) !== critique) return true;
+
+  configureCanvasPreview(critique, descriptor);
+  await renderTiles();
+  renderMarkers();
+  await afterDashboardPaint();
+  const renderedErrors = renderedBatchPreviewErrors(baselineReport);
+  if (!renderedErrors.length) {
+    if (state.canvasPreview) {
+      state.canvasPreview.renderValidation = { ok: true, errors: [] };
+    }
+    return true;
+  }
+
+  const reason = `Rendered layout check failed: ${renderedErrors[0]}`;
+  descriptor.previewFailure = reason;
+  descriptor.executable = false;
+  descriptor.livePreview = null;
+  state.canvasPreview = null;
+  renderCanvasPreviewControl();
+  renderDashboardChrome({ renderContext: false });
+  await renderTiles();
+  renderMarkers();
+  recordStudyAction("single_preview_failed", "Focused preview failed rendered layout checks", {
+    critiqueId: critique.id,
+    reason,
+    errors: renderedErrors,
+    dashboardVersion: Number(state.version) || 1,
+  });
+  return true;
+}
+
+async function presentBatchPreview(outcome, { renderBar = true, baselineReport = new Map() } = {}) {
   state.batchPreviewValidated = false;
   state.batchPreviewFailure = null;
   state.canvasPreview = {
@@ -5871,8 +6352,7 @@ async function presentBatchPreview(outcome, { renderBar = true, baselineErrors =
   await renderTiles();
   renderMarkers();
   await afterDashboardPaint();
-  const baseline = new Set(baselineErrors);
-  const renderedErrors = renderedBatchPreviewErrors().filter((error) => !baseline.has(error));
+  const renderedErrors = renderedBatchPreviewErrors(baselineReport);
   if (renderedErrors.length) {
     state.batchPreviewFailure = `Preview failed the rendered layout check: ${renderedErrors[0]}`;
     await clearBatchPreview();
@@ -5888,7 +6368,7 @@ async function presentBatchPreview(outcome, { renderBar = true, baselineErrors =
 // Add its candidates back one at a time so one bad transformation does not erase
 // every other safe preview. Selection stays untouched; rejected candidates are
 // named in the same excluded map as deterministic conflicts.
-async function recoverRenderedBatchPreview(selectedIds, initialOutcome, baselineErrors, token) {
+async function recoverRenderedBatchPreview(selectedIds, initialOutcome, baselineReport, token) {
   let acceptedIds = [];
   let bestOutcome = null;
   const excluded = new Map(initialOutcome.excluded.map((item) => [item.id, item.reason]));
@@ -5901,7 +6381,7 @@ async function recoverRenderedBatchPreview(selectedIds, initialOutcome, baseline
       continue;
     }
     state.batchPreviewIds = new Set(trial.previewedIds);
-    const presented = await presentBatchPreview(trial, { renderBar: false, baselineErrors });
+    const presented = await presentBatchPreview(trial, { renderBar: false, baselineReport });
     if (presented.ok) {
       acceptedIds = [...trial.previewedIds];
       bestOutcome = trial;
@@ -5920,7 +6400,7 @@ async function recoverRenderedBatchPreview(selectedIds, initialOutcome, baseline
   state.batchPreviewExcluded = excluded;
   const finalPresentation = await presentBatchPreview(bestOutcome, {
     renderBar: false,
-    baselineErrors,
+    baselineReport,
   });
   if (!finalPresentation.ok) return null;
   const recovered = {
@@ -5993,7 +6473,7 @@ async function refreshBatchPreview() {
   // pre-existing clipping/overlap issue does not block an unrelated preview.
   await clearBatchPreview();
   await afterDashboardPaint();
-  const baselineErrors = renderedBatchPreviewErrors();
+  const baselineReport = renderedDashboardLayoutReport();
   renderBatchApplyBar();
   let outcome = await computeBatchPreview(selectedIds);
   if (token !== state.batchPreviewToken) {
@@ -6033,7 +6513,7 @@ async function refreshBatchPreview() {
     );
   }
   renderCritiques();
-  const presentation = await presentBatchPreview(outcome, { baselineErrors });
+  const presentation = await presentBatchPreview(outcome, { baselineReport });
   if (presentation.ok) {
     cacheCurrentBatchCanvasPreview();
     setBatchPreviewPending(false);
@@ -6048,7 +6528,7 @@ async function refreshBatchPreview() {
     notifyStudyWorkspaceChanged("batch_preview_ready");
     return outcome;
   }
-  const recovered = await recoverRenderedBatchPreview(selectedIds, outcome, baselineErrors, token);
+  const recovered = await recoverRenderedBatchPreview(selectedIds, outcome, baselineReport, token);
   if (recovered) {
     cacheCurrentBatchCanvasPreview();
     setBatchPreviewPending(false);
@@ -6403,6 +6883,11 @@ async function applyRecommendationSelection(selectedIds, conflictChoices = {}, {
     });
     return { ok: false, plan: extra.plan || null, reason, applyId, ...extra };
   };
+  if (state.historyMutationInFlight) {
+    return failApply("Finish the current undo or checkpoint restore before applying another change.", {
+      failureStage: "history_busy",
+    });
+  }
   if (!reviewResultsMatchContext()) {
     return failApply("Regenerate critiques for the confirmed context before applying changes.", {
       failureStage: "context_mismatch",
@@ -6450,6 +6935,17 @@ async function applyRecommendationSelection(selectedIds, conflictChoices = {}, {
     .map((critique) => clone(critique));
   const beforeSpecMap = buildEngineSpecMap();
   const beforeBoard = buildEngineBoardMeta();
+  const beforeReviewState = {
+    critiques: clone(state.critiques),
+    strengths: clone(state.strengths),
+    criterionEvaluations: clone(state.criterionEvaluations),
+    lastReviewContextFingerprint: state.lastReviewContextFingerprint,
+    iterationContextResetEventId: state.iterationContextResetEventId,
+    selectedCritiqueId: state.selectedCritiqueId,
+    selectedTileId: state.selectedTileId,
+    critiqueRefreshNotice: clone(state.critiqueRefreshNotice),
+    crossFilterSelection: clone(state.crossFilterSelection),
+  };
   const beforeScreenshot = await captureDashboardScreenshot();
 
   let result;
@@ -6638,6 +7134,21 @@ async function applyRecommendationSelection(selectedIds, conflictChoices = {}, {
       appliedEvent.id,
       evaluationEvent.id,
     ],
+    transaction: {
+      type: "apply",
+      applyId,
+      via: applyVia,
+      beforeVersion,
+      afterVersion: nextVersion,
+      recommendationIds: [...committedIds],
+      recommendationTitles: committedCritiques.map((critique) => critique.title),
+      changedTargets: [...(result.changedTargets || [])],
+      beforeSnapshot: {
+        specMap: beforeSpecMap,
+        board: beforeBoard,
+      },
+      beforeReviewState,
+    },
   });
   state.selectedCritiqueId = null;
   state.selectedTileId = null;
@@ -6668,6 +7179,10 @@ async function applyRecommendationSelection(selectedIds, conflictChoices = {}, {
       state.settleDemoPlaying = false;
     }
   }
+  showChangeUndoToast({
+    title: committedCritiques.length === 1 ? "Change applied" : "Changes applied",
+    detail: transactionDisplayLabel(),
+  });
   emitPracticeAction(applyVia === "batch" ? "apply:batch" : "apply:single", {
     applyId,
     requestedCritiqueIds,
@@ -6813,16 +7328,20 @@ async function saveWorkingDraftCheckpoint({ force = false, source = "manual" } =
   try {
     const checkpointId = Math.max(...state.versions.map((version) => version.id)) + 1;
     const recommendationIds = [...(state.workingDraft.applicationOrder || [])];
+    const restoredFromCheckpointId = state.workingDraft.restoredFromCheckpointId;
     const isRoundComplete = source === "critique-request";
     const checkpointEvent = appendInteractionEvent({
       kind: "checkpoint_saved",
-      summary: isRoundComplete
-        ? `Saved Checkpoint ${checkpointId} at the end of the previous round`
-        : `Saved Checkpoint ${checkpointId} with ${recommendationIds.length} ${recommendationIds.length === 1 ? "change" : "changes"}`,
+      summary: restoredFromCheckpointId
+        ? `Saved Checkpoint ${checkpointId} restored from Checkpoint ${restoredFromCheckpointId}`
+        : isRoundComplete
+          ? `Saved Checkpoint ${checkpointId} at the end of the previous round`
+          : `Saved Checkpoint ${checkpointId} with ${recommendationIds.length} ${recommendationIds.length === 1 ? "change" : "changes"}`,
       data: {
         checkpointId,
         baseCheckpointId: state.workingDraft.baseCheckpointId,
         recommendationIds,
+        restoredFromCheckpointId,
         source,
       },
     }, { synthesize: false });
@@ -6856,6 +7375,11 @@ async function saveWorkingDraftCheckpoint({ force = false, source = "manual" } =
       checkpoint.purpose = "round_complete";
       checkpoint.label = `Checkpoint ${checkpointId} · Previous Round Complete`;
       checkpoint.note = "Automatically saved before the next critique run";
+    } else if (restoredFromCheckpointId) {
+      checkpoint.purpose = "restored";
+      checkpoint.restoredFromCheckpointId = restoredFromCheckpointId;
+      checkpoint.label = `Checkpoint ${checkpointId} · Restored from Checkpoint ${restoredFromCheckpointId}`;
+      checkpoint.note = "Saved as a new revision; later checkpoints remain available";
     }
     const captured = await captureDashboardExport().catch((error) => {
       console.warn("[revision-screenshot] checkpoint PNG capture failed", error);
@@ -6887,6 +7411,359 @@ async function saveWorkingDraftCheckpoint({ force = false, source = "manual" } =
   } finally {
     if (buttonLabel) buttonLabel.textContent = "Save Checkpoint";
     renderWorkingDraftStatus();
+  }
+}
+
+function restoreReviewStateFromTransaction(transaction) {
+  const saved = transaction?.beforeReviewState || {};
+  state.critiques = clone(saved.critiques || []);
+  state.strengths = clone(saved.strengths || []);
+  state.criterionEvaluations = clone(saved.criterionEvaluations || []);
+  state.lastReviewContextFingerprint = saved.lastReviewContextFingerprint || null;
+  state.iterationContextResetEventId = saved.iterationContextResetEventId || null;
+  state.selectedCritiqueId = saved.selectedCritiqueId || null;
+  state.selectedTileId = saved.selectedTileId || null;
+  state.critiqueRefreshNotice = clone(saved.critiqueRefreshNotice || null);
+  state.crossFilterSelection = clone(saved.crossFilterSelection || null);
+}
+
+async function undoLastWorkingDraftChange({ source = "checkpoint-dock" } = {}) {
+  if (state.historyMutationInFlight) return false;
+  const undo = undoWorkingDraftTransaction(state.workingDraft);
+  const transaction = undo.transaction;
+  if (!transaction?.beforeSnapshot) {
+    showChangeUndoToast({
+      title: "Nothing to undo",
+      detail: "Savepoints and earlier checkpoints are still available.",
+      canUndo: false,
+    });
+    return false;
+  }
+
+  state.historyMutationInFlight = true;
+  renderWorkingDraftStatus();
+  showChangeUndoToast({
+    title: transaction.type === "checkpoint_restore" ? "Undoing checkpoint restore…" : "Undoing change…",
+    detail: "Restoring the previous Working Draft.",
+    canUndo: false,
+    busy: true,
+    duration: 0,
+  });
+  const versionBeforeUndo = Number(state.version) || Number(transaction.afterVersion) || 1;
+  const undoFailureSafe = {
+    snapshot: {
+      specMap: buildEngineSpecMap(),
+      board: buildEngineBoardMeta(),
+    },
+    version: versionBeforeUndo,
+    workingDraft: clone(state.workingDraft),
+    reviewState: {
+      critiques: clone(state.critiques),
+      strengths: clone(state.strengths),
+      criterionEvaluations: clone(state.criterionEvaluations),
+      lastReviewContextFingerprint: state.lastReviewContextFingerprint,
+      iterationContextResetEventId: state.iterationContextResetEventId,
+      selectedCritiqueId: state.selectedCritiqueId,
+      selectedTileId: state.selectedTileId,
+      critiqueRefreshNotice: clone(state.critiqueRefreshNotice),
+      crossFilterSelection: clone(state.crossFilterSelection),
+    },
+  };
+  let undoSucceeded = false;
+  try {
+    cancelAllBackgroundCritiqueRefreshes("working_draft_undo");
+    applyLiveSnapshot(transaction.beforeSnapshot);
+    state.version = Number(transaction.beforeVersion) || Math.max(1, versionBeforeUndo - 1);
+    restoreReviewStateFromTransaction(transaction);
+    state.workingDraft = undo.draft;
+    state.refinementAlternatives = null;
+    state.lastRefinementBatch = null;
+    state.previewCache.clear();
+    state.canvasPreview = null;
+    resetBatchState();
+
+    const revertedApplyId = transaction.type === "apply" ? transaction.applyId || null : null;
+    appendInteractionEvent({
+      kind: "changes_reverted",
+      summary: transaction.type === "checkpoint_restore"
+        ? `Undid restore of Checkpoint ${transaction.checkpointId}`
+        : `Undid ${transactionDisplayLabel(transaction)}`,
+      data: {
+        source,
+        transactionType: transaction.type,
+        revertedApplyId,
+        revertedRestoreCheckpointId: transaction.type === "checkpoint_restore"
+          ? transaction.checkpointId
+          : null,
+        recommendationIds: [...(transaction.recommendationIds || [])],
+        beforeVersion: versionBeforeUndo,
+        afterVersion: state.version,
+      },
+    }, { synthesize: false });
+    recordDashboardChanged({
+      source: "vizier_undo",
+      operation: transaction.type === "checkpoint_restore" ? "restore" : "revert",
+      targetIds: [...(transaction.changedTargets || [])],
+      beforeVersion: versionBeforeUndo,
+      afterVersion: state.version,
+      relatedCritiqueIds: [...(transaction.recommendationIds || [])],
+      relatedApplyId: revertedApplyId,
+      diffSummary: {
+        transactionType: transaction.type,
+        restoredCheckpointId: transaction.checkpointId || null,
+      },
+    });
+    await refreshAfterDashboardMutation();
+    syncReviewReadiness();
+    emitPracticeAction("change:undone", {
+      source,
+      transactionType: transaction.type,
+      recommendationIds: [...(transaction.recommendationIds || [])],
+      dashboardVersion: state.version,
+    });
+    undoSucceeded = true;
+    return true;
+  } catch (error) {
+    console.error("[working draft undo]", error);
+    applyLiveSnapshot(undoFailureSafe.snapshot);
+    state.version = undoFailureSafe.version;
+    state.workingDraft = undoFailureSafe.workingDraft;
+    restoreReviewStateFromTransaction({ beforeReviewState: undoFailureSafe.reviewState });
+    await refreshAfterDashboardMutation().catch((refreshError) => {
+      console.error("[working draft undo recovery]", refreshError);
+    });
+    showChangeUndoToast({
+      title: "Undo could not be completed",
+      detail: "The current dashboard was restored. Try a saved checkpoint instead.",
+      canUndo: false,
+      duration: 8000,
+    });
+    return false;
+  } finally {
+    state.historyMutationInFlight = false;
+    renderVersions();
+    renderWorkingDraftStatus();
+    if (undoSucceeded) {
+      showChangeUndoToast({
+        title: transaction.type === "checkpoint_restore" ? "Checkpoint restore undone" : "Change undone",
+        detail: latestWorkingDraftTransaction()
+          ? `You can also undo ${transactionDisplayLabel()}.`
+          : "The previous Working Draft is back.",
+        canUndo: Boolean(latestWorkingDraftTransaction()),
+      });
+    }
+  }
+}
+
+function promptCheckpointRestore(checkpoint) {
+  if (!state.workingDraft.dirty) return Promise.resolve("restore");
+  return new Promise((resolve) => {
+    const previouslyFocused = document.activeElement;
+    const overlay = document.createElement("div");
+    overlay.className = "conflict-overlay checkpoint-restore-overlay";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.setAttribute("aria-labelledby", "checkpointRestoreTitle");
+    overlay.setAttribute("aria-describedby", "checkpointRestoreDescription");
+    overlay.innerHTML = `
+      <section class="conflict-modal checkpoint-restore-modal">
+        <div class="checkpoint-restore-icon" aria-hidden="true">
+          <svg viewBox="0 0 20 20"><path d="M8 5 4 9l4 4M4.5 9H11a5 5 0 0 1 5 5"/></svg>
+        </div>
+        <div class="checkpoint-restore-copy">
+          <h2 class="conflict-title" id="checkpointRestoreTitle">Restore Checkpoint ${checkpoint.id}?</h2>
+          <p class="conflict-subtitle" id="checkpointRestoreDescription">Your current Working Draft has unsaved changes. Save them as a checkpoint, or discard them before restoring. Existing checkpoints will not be deleted.</p>
+        </div>
+        <div class="modal-actions checkpoint-restore-actions">
+          <button type="button" class="button ghost small" data-restore-choice="cancel">Cancel</button>
+          <button type="button" class="button small checkpoint-restore-discard" data-restore-choice="discard">Discard &amp; restore</button>
+          <button type="button" class="button primary small" data-restore-choice="save">Save current &amp; restore</button>
+        </div>
+      </section>`;
+    const focusable = () => [...overlay.querySelectorAll("button:not(:disabled)")];
+    const close = (choice) => {
+      document.removeEventListener("keydown", onKey);
+      overlay.remove();
+      previouslyFocused?.focus?.();
+      resolve(choice);
+    };
+    const onKey = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close("cancel");
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      if (!items.length) return;
+      const first = items[0];
+      const last = items.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) close("cancel");
+      const button = event.target.closest("[data-restore-choice]");
+      if (button) close(button.dataset.restoreChoice);
+    });
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(overlay);
+    overlay.querySelector('[data-restore-choice="save"]')?.focus();
+  });
+}
+
+async function restoreCheckpointAsWorkingDraft(checkpoint, { source = "checkpoint-dock" } = {}) {
+  if (state.historyMutationInFlight || !checkpoint?.afterSnapshot) return false;
+  const currentDraft = state.workingDraft;
+  const beforeVersion = Number(state.version) || 1;
+  const nextVersion = beforeVersion + 1;
+  const beforeSnapshot = {
+    specMap: buildEngineSpecMap(),
+    board: buildEngineBoardMeta(),
+  };
+  const beforeReviewState = {
+    critiques: clone(state.critiques),
+    strengths: clone(state.strengths),
+    criterionEvaluations: clone(state.criterionEvaluations),
+    lastReviewContextFingerprint: state.lastReviewContextFingerprint,
+    iterationContextResetEventId: state.iterationContextResetEventId,
+    selectedCritiqueId: state.selectedCritiqueId,
+    selectedTileId: state.selectedTileId,
+    critiqueRefreshNotice: clone(state.critiqueRefreshNotice),
+    crossFilterSelection: clone(state.crossFilterSelection),
+  };
+  const beforeHistoryView = {
+    drawers: clone(state.drawers),
+    selectedVersionId: state.selectedVersionId,
+    checkpointComparison: clone(state.checkpointComparison),
+  };
+
+  state.historyMutationInFlight = true;
+  renderWorkingDraftStatus();
+  try {
+    cancelAllBackgroundCritiqueRefreshes("checkpoint_restore");
+    applyLiveSnapshot(checkpoint.afterSnapshot);
+    state.version = nextVersion;
+    state.critiques = [];
+    state.strengths = [];
+    state.criterionEvaluations = [];
+    state.lastReviewContextFingerprint = null;
+    state.selectedCritiqueId = null;
+    state.selectedTileId = null;
+    state.critiqueRefreshNotice = null;
+    state.crossFilterSelection = null;
+    state.refinementAlternatives = null;
+    state.lastRefinementBatch = null;
+    state.previewCache.clear();
+    state.canvasPreview = null;
+    resetBatchState();
+    state.workingDraft = recordWorkingDraftRestore(currentDraft, {
+      checkpointId: checkpoint.id,
+      beforeSnapshot,
+      afterSnapshot: checkpoint.afterSnapshot,
+      transaction: {
+        beforeVersion,
+        afterVersion: nextVersion,
+        beforeSnapshot,
+        beforeReviewState,
+        changedTargets: [...(checkpoint.changedTargets || [])],
+      },
+    });
+    const restoreEvent = appendInteractionEvent({
+      kind: "checkpoint_restored",
+      summary: `Restored Checkpoint ${checkpoint.id} as a new Working Draft`,
+      data: {
+        checkpointId: checkpoint.id,
+        source,
+        beforeVersion,
+        afterVersion: nextVersion,
+        preservedCheckpointIds: state.versions.map((version) => version.id),
+      },
+    }, { synthesize: false });
+    state.iterationContextResetEventId = restoreEvent.id;
+    state.workingDraft.createdFromEventIds = [restoreEvent.id];
+    state.drawers.versions = true;
+    state.selectedVersionId = checkpoint.id;
+    state.checkpointComparison = {
+      before: currentDraft.baseCheckpointId,
+      after: checkpoint.id,
+    };
+    recordDashboardChanged({
+      source: "checkpoint_restore",
+      operation: "restore",
+      targetIds: [...(checkpoint.changedTargets || [])],
+      beforeVersion,
+      afterVersion: nextVersion,
+      relatedCritiqueIds: [...(checkpoint.appliedRecommendationIds || [])],
+      diffSummary: {
+        checkpointId: checkpoint.id,
+        checkpointsPreserved: true,
+      },
+    });
+    await refreshAfterDashboardMutation();
+    applyDrawers();
+    syncReviewReadiness();
+    emitPracticeAction("checkpoint:restored", {
+      checkpointId: checkpoint.id,
+      source,
+      dashboardVersion: state.version,
+    });
+    showChangeUndoToast({
+      title: `Checkpoint ${checkpoint.id} restored`,
+      detail: "It is now an unsaved Working Draft. Existing checkpoints are unchanged.",
+    });
+    return true;
+  } catch (error) {
+    console.error("[checkpoint restore]", error);
+    applyLiveSnapshot(beforeSnapshot);
+    state.version = beforeVersion;
+    restoreReviewStateFromTransaction({ beforeReviewState });
+    state.workingDraft = currentDraft;
+    state.drawers = beforeHistoryView.drawers;
+    state.selectedVersionId = beforeHistoryView.selectedVersionId;
+    state.checkpointComparison = beforeHistoryView.checkpointComparison;
+    await refreshAfterDashboardMutation().catch((refreshError) => {
+      console.error("[checkpoint restore recovery]", refreshError);
+    });
+    applyDrawers();
+    showChangeUndoToast({
+      title: "Checkpoint could not be restored",
+      detail: "The current Working Draft was preserved. Try again from Saved Checkpoints.",
+      canUndo: false,
+      duration: 8000,
+    });
+    return false;
+  } finally {
+    state.historyMutationInFlight = false;
+    renderVersions();
+    renderWorkingDraftStatus();
+  }
+}
+
+async function requestCheckpointRestore(checkpointId) {
+  const checkpoint = state.versions.find((version) => version.id === Number(checkpointId));
+  if (!checkpoint?.afterSnapshot || state.historyMutationInFlight) return;
+  const choice = await promptCheckpointRestore(checkpoint);
+  if (choice === "cancel") return;
+  try {
+    if (choice === "save") {
+      const saved = await saveWorkingDraftCheckpoint({ source: "pre-restore" });
+      if (!saved) return;
+    }
+    await restoreCheckpointAsWorkingDraft(checkpoint, { source: "checkpoint-dock" });
+  } catch (error) {
+    console.error("[checkpoint restore request]", error);
+    showChangeUndoToast({
+      title: "Checkpoint could not be restored",
+      detail: "The current Working Draft was preserved. Try again from Saved Checkpoints.",
+      canUndo: false,
+      duration: 8000,
+    });
   }
 }
 
@@ -8083,6 +8960,9 @@ async function renderInspector() {
   const backgroundRefreshJob = state.backgroundCritiqueRefreshes.get(critique.id);
   const backgroundRefreshActive = backgroundRefreshJob?.status === "updating";
   const backgroundRefreshFailed = backgroundRefreshJob?.status === "failed";
+  const canvasWasShowingProposal = Boolean(activeCanvasPreviewResult());
+  const previewPainted = await configureAndValidateFocusedCanvasPreview(critique, descriptor);
+  if (state.selectedCritiqueId !== critique.id || critiqueById(critique.id) !== critique) return;
   const applicationPlan = buildApplicationPlan([critique.id], state.critiques);
   // The critiques were built for a specific confirmed context. If the author
   // edited and re-confirmed the context afterward, these results are stale and
@@ -8118,8 +8998,6 @@ async function renderInspector() {
     && !backgroundRefreshActive
     && !reviewedForBatch;
   const acceptEnabled = state.batchMode ? canAcceptForBatch : canAcceptIndividually;
-  const canvasWasShowingProposal = Boolean(activeCanvasPreviewResult());
-  configureCanvasPreview(critique, descriptor);
   const runtimeReport = state.interactionObservations.get(critique.id);
   const runtimeEvidence = runtimeReport
     ? critique.interactionKind === "hover-tooltip"
@@ -8544,7 +9422,7 @@ async function renderInspector() {
     openRationaleModal(critique, critiqueRationales.at(-1) || null, event.currentTarget));
   document.getElementById("focusEditRationale")?.addEventListener("click", (event) =>
     openRationaleModal(critique, critiqueRationales.at(-1), event.currentTarget));
-  if (state.canvasPreview?.phase === "after" || canvasWasShowingProposal) {
+  if (!previewPainted && (state.canvasPreview?.phase === "after" || canvasWasShowingProposal)) {
     await renderTiles();
     renderMarkers();
   }
@@ -9433,6 +10311,7 @@ async function generateCritiquesFromEngine(focusedRequest = "", options = {}) {
     explicitlyRequested: options.usePracticeOverallCache,
     cacheConsumed: practiceRuntime.overallReviewCacheConsumed,
     focusedRequest: normalizedRequest,
+    scopeCustomized: !feedbackScopeUsesDefaultSelection(),
   });
   const resp = usePracticeOverallCache
     ? await (async () => {
@@ -9693,6 +10572,9 @@ async function runAIAssist(options = {}) {
     } = await generateCritiquesFromEngine(focusedRequest, {
       usePracticeOverallCache: options.practiceOverallReview === true,
     });
+    if (practiceIsActive() && options.practiceOverallReview === true && !focusedRequest) {
+      practiceRuntime.overallReviewCacheConsumed = true;
+    }
     // Synchronize the active list with the dashboard the engine just reviewed:
     // refresh still-valid cards, add new findings, remove obsolete/duplicate
     // undecided cards, and preserve only explicit decisions as durable history.
@@ -10440,6 +11322,9 @@ document.getElementById("canvasPreviewToggle").addEventListener("click", () => {
   setCanvasPreviewPhase(nextPhase);
 });
 document.getElementById("saveCheckpointButton").addEventListener("click", saveWorkingDraftCheckpoint);
+document.getElementById("undoWorkingDraftButton").addEventListener("click", () => {
+  void undoLastWorkingDraftChange({ source: "checkpoint-dock" });
+});
 els.localReviewButton.addEventListener("click", () => {
   if (!els.localReviewPopover.hidden) closeLocalReviewPopover();
   if (state.mode === "annotate") cancelLocalReviewSelection();
@@ -11626,6 +12511,7 @@ export function captureStudyRunnerWorkspaceState() {
         rationales: state.rationales,
         nextRationaleId: state.nextRationaleId,
         interactionJournal: state.interactionJournal,
+        iterationContextResetEventId: state.iterationContextResetEventId,
         nextInteractionEventId: state.nextInteractionEventId,
         lastReviewContextFingerprint: state.lastReviewContextFingerprint,
         reviewScope: state.reviewScope,
@@ -11681,7 +12567,8 @@ export async function restoreStudyRunnerWorkspaceState(snapshot) {
     "contextWorkflow", "studyContextGenerated", "constraintSet",
     "constraintSelection", "designDoc", "critiques", "strengths",
     "criterionEvaluations", "rationales", "interactionJournal",
-    "lastReviewContextFingerprint", "checkpointComparison", "workingDraft",
+    "iterationContextResetEventId", "lastReviewContextFingerprint",
+    "checkpointComparison", "workingDraft",
     "crossFilterSelection",
   ].forEach((key) => assignClone(key));
   state.version = Number(saved.version) || state.version;

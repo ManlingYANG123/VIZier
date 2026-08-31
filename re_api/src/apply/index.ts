@@ -31,7 +31,7 @@ import {
   unitSpecs,
   type SpecPath,
 } from "../detect/specUtil.ts";
-import { compileSpecMap } from "./validate.ts";
+import { compileSpecMap } from "./compile.ts";
 import { applySpecEdits } from "./editSpec.ts";
 import { computeKpis } from "../compute/kpis.ts";
 import { hasEmbeddedKpis } from "../detect/kpi.ts";
@@ -846,7 +846,7 @@ export async function applyProposals(
   const rolledBack = new Set<string>();
   let active = units;
   let run = attempt(specMap, active);
-  let compiled = compileSpecMap(run.draft);
+  let compiled = compileSpecMap(run.draft, specMap);
   let compileError: string | null = null;
   const wholeRollback = (): ApplyOutcome => {
     // Nothing survived compile — report a whole-batch rollback (original spec map
@@ -858,7 +858,7 @@ export async function applyProposals(
       specMap,
       changedTargets: [],
       applicationOrder: [],
-      rollback: { rolledBack: true, reason: `Spec for "${tile}" failed to compile: ${msg}` },
+      rollback: { rolledBack: true, reason: `Spec for "${tile}" failed compile/render validation: ${msg}` },
       compileError: msg,
       critiqueStatuses: [...status.values()],
       unresolvedConflicts: unresolved,
@@ -876,7 +876,7 @@ export async function applyProposals(
     // a whole rollback, not a silent no-op.
     if (!active.length) return wholeRollback();
     run = attempt(specMap, active);
-    compiled = compileSpecMap(run.draft);
+    compiled = compileSpecMap(run.draft, specMap);
   }
 
   // 4. Honest per-critique statuses over the surviving units.

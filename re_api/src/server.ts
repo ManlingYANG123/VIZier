@@ -110,6 +110,52 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
+class RequestJsonError extends Error {
+  readonly status = 400;
+  readonly code = "invalid_json";
+
+  constructor() {
+    super("Malformed JSON request body");
+    this.name = "RequestJsonError";
+  }
+}
+
+async function readJsonBody<T>(req: IncomingMessage): Promise<T> {
+  const raw = (await readBody(req)) || "{}";
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    throw new RequestJsonError();
+  }
+}
+
+function writeRequestJsonError(req: IncomingMessage, res: ServerResponse, error: unknown): boolean {
+  if (!(error instanceof RequestJsonError)) return false;
+  cors(req, res);
+  res.writeHead(error.status, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ error: error.message, code: error.code }));
+  return true;
+}
+
+function dispatchAsync(
+  req: IncomingMessage,
+  res: ServerResponse,
+  handler: (req: IncomingMessage, res: ServerResponse) => Promise<void>,
+): void {
+  void handler(req, res).catch((error) => {
+    console.error("[re_api] unhandled route error:", error instanceof Error ? error.message : error);
+    if (res.writableEnded || res.destroyed) return;
+    if (res.headersSent) {
+      sseWrite(res, "error", { message: "Internal server error" });
+      res.end();
+      return;
+    }
+    cors(req, res);
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Internal server error", code: "internal_error" }));
+  });
+}
+
 function requestPathname(req: IncomingMessage): string | null {
   try {
     return new URL(req.url || "/", "http://localhost").pathname;
@@ -204,7 +250,13 @@ function openSSE(req: IncomingMessage, res: ServerResponse): void {
 }
 
 async function handleCritique(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const body = JSON.parse((await readBody(req)) || "{}") as CritiqueRequest;
+  let body: CritiqueRequest;
+  try {
+    body = await readJsonBody<CritiqueRequest>(req);
+  } catch (error) {
+    if (writeRequestJsonError(req, res, error)) return;
+    throw error;
+  }
   openSSE(req, res);
   const client = makeClient();
   const requestedScope = body.reviewScope || (body.region ? "selected-region" : body.focus ? "focused" : "full");
@@ -231,7 +283,13 @@ async function handleCritique(req: IncomingMessage, res: ServerResponse): Promis
 }
 
 async function handleApply(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const body = JSON.parse((await readBody(req)) || "{}") as ApplyRequest;
+  let body: ApplyRequest;
+  try {
+    body = await readJsonBody<ApplyRequest>(req);
+  } catch (error) {
+    if (writeRequestJsonError(req, res, error)) return;
+    throw error;
+  }
   openSSE(req, res);
   const client = makeClient();
   console.log(`\n[re_api] POST /apply  (selected: ${(body.selectedRecommendationIds || []).join(", ")})`);
@@ -259,7 +317,7 @@ async function handleApply(req: IncomingMessage, res: ServerResponse): Promise<v
 async function handleScaffold(req: IncomingMessage, res: ServerResponse): Promise<void> {
   cors(req, res);
   try {
-    const body = JSON.parse((await readBody(req)) || "{}") as ScaffoldRequest;
+    const body = await readJsonBody<ScaffoldRequest>(req);
     const client = makeClient();
     console.log(`\n[re_api] POST /scaffold  (LLM: ${client ? "on" : "off/templates"})`);
     const result = await buildScaffold(body, client);
@@ -276,7 +334,7 @@ async function handleScaffold(req: IncomingMessage, res: ServerResponse): Promis
 async function handleIntakeConstraints(req: IncomingMessage, res: ServerResponse): Promise<void> {
   cors(req, res);
   try {
-    const body = JSON.parse((await readBody(req)) || "{}") as IntakeConstraintsRequest;
+    const body = await readJsonBody<IntakeConstraintsRequest>(req);
     if (!body.source || typeof body.source !== "object" || typeof body.source.kind !== "string") {
       throw new Error("INVALID_SOURCE: intake requires a { kind, ... } design source");
     }
@@ -306,7 +364,7 @@ async function handleIntakeConstraints(req: IncomingMessage, res: ServerResponse
 async function handlePreferenceSynthesis(req: IncomingMessage, res: ServerResponse): Promise<void> {
   cors(req, res);
   try {
-    const body = JSON.parse((await readBody(req)) || "{}") as PreferenceSynthesisRequest;
+    const body = await readJsonBody<PreferenceSynthesisRequest>(req);
     const client = makeClient();
     console.log(
       `\n[re_api] POST /infer-context  (events: ${(body.events || []).length}, model adapter: ${client ? "available" : "unavailable"})`,
@@ -326,7 +384,7 @@ async function handlePreferenceSynthesis(req: IncomingMessage, res: ServerRespon
 async function handleStudySession(req: IncomingMessage, res: ServerResponse): Promise<void> {
   cors(req, res);
   try {
-    const body = JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>;
+    const body = await readJsonBody<Record<string, unknown>>(req);
     if (!body || typeof body !== "object" || !body.participantId || !body.sessionId) {
       throw new Error("INVALID_BUNDLE: study session requires participantId and sessionId");
     }
@@ -412,27 +470,27 @@ const server = createServer((req, res) => {
     }
   }
   if (req.method === "POST" && pathname === "/critique") {
-    void handleCritique(req, res);
+    dispatchAsync(req, res, handleCritique);
     return;
   }
   if (req.method === "POST" && pathname === "/apply") {
-    void handleApply(req, res);
+    dispatchAsync(req, res, handleApply);
     return;
   }
   if (req.method === "POST" && pathname === "/scaffold") {
-    void handleScaffold(req, res);
+    dispatchAsync(req, res, handleScaffold);
     return;
   }
   if (req.method === "POST" && pathname === "/intake-constraints") {
-    void handleIntakeConstraints(req, res);
+    dispatchAsync(req, res, handleIntakeConstraints);
     return;
   }
   if (req.method === "POST" && pathname === "/infer-context") {
-    void handlePreferenceSynthesis(req, res);
+    dispatchAsync(req, res, handlePreferenceSynthesis);
     return;
   }
   if (req.method === "POST" && pathname === "/study-session") {
-    void handleStudySession(req, res);
+    dispatchAsync(req, res, handleStudySession);
     return;
   }
   if (

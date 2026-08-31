@@ -16,8 +16,10 @@ test("Overall Review does not change the canvas or force a review mode", async (
 test("a combined preview is validated again after the browser renders it", async () => {
   const source = await appSource();
 
-  assert.match(source, /function renderedBatchPreviewErrors\(\)/);
+  assert.match(source, /function renderedDashboardLayoutReport\(\)/);
+  assert.match(source, /function renderedBatchPreviewErrors\(/);
   assert.match(source, /The dashboard heading overlaps the KPI summary/);
+  assert.match(source, /filter:\$\{filter\.id\}:tile:\$\{tile\.id\}:overlap/);
   assert.match(source, /rendered without visible data or narrative content/);
   assert.match(source, /has labels clipped outside its chart frame/);
   assert.match(source, /await afterDashboardPaint\(\)/);
@@ -110,12 +112,23 @@ test("excluded selections remain checked and receive a visible recovery path", a
   assert.match(source, /id="batchExclusionNotice"[\s\S]*?Show excluded/);
   assert.match(source, /state\.batchPreviewExcluded = new Map\(outcome\.excluded/);
   assert.match(source, /async function recoverEngineBatchPreview\(selectedIds, token\)/);
-  assert.match(source, /async function recoverRenderedBatchPreview\(selectedIds, initialOutcome, baselineErrors, token\)/);
-  assert.match(source, /const baselineErrors = renderedBatchPreviewErrors\(\)/);
+  assert.match(source, /async function recoverRenderedBatchPreview\(selectedIds, initialOutcome, baselineReport, token\)/);
+  assert.match(source, /const baselineReport = renderedDashboardLayoutReport\(\)/);
   assert.match(source, /batchChecked[\s\S]*?batchExcluded/);
   assert.match(styles, /\.batch-exclusion-notice \{/);
   assert.match(styles, /\.critique-list-view \.critique-card\.batch-checked\.batch-excluded/);
   assert.doesNotMatch(styles, /\.batch-exclusion-notice \{[\s\S]{0,360}?#fff8e8/);
+});
+
+test("focused single recommendations receive the same rendered safety gate", async () => {
+  const source = await appSource();
+
+  assert.match(source, /async function configureAndValidateFocusedCanvasPreview\(critique, descriptor\)/);
+  assert.match(source, /const renderedErrors = renderedBatchPreviewErrors\(baselineReport\)/);
+  assert.match(source, /descriptor\.previewFailure = reason/);
+  assert.match(source, /descriptor\.executable = false/);
+  assert.match(source, /single_preview_failed/);
+  assert.match(source, /const previewPainted = await configureAndValidateFocusedCanvasPreview\(critique, descriptor\)/);
 });
 
 test("solution alternatives remain on demand through Refine Solution", async () => {
@@ -125,4 +138,6 @@ test("solution alternatives remain on demand through Refine Solution", async () 
   assert.match(source, /critiqueSolutionRefinementRequest\(critique, direction, \{/);
   assert.match(source, /id="refinementChoices"/);
   assert.match(source, /usePracticeOverallCache: false/);
+  assert.match(source, /state\.canvasPreview\.renderValidation = \{ ok: true, errors: \[\] \}/);
+  assert.match(source, /if \(state\.canvasPreview\?\.alternativePreview\)/);
 });

@@ -122,13 +122,17 @@ function stableHash(value) {
 }
 
 export function customScopeKey(label) {
-  const slug = normalizedLabel(label)
+  const normalized = normalizedLabel(label);
+  const slug = normalized
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
-  return `custom:${slug || "scope"}`;
+  // Preserve the readable key for Latin labels while keeping non-Latin custom
+  // scopes distinct. Falling back to the literal `custom:scope` made every
+  // Chinese/Japanese/etc. label collide with every other one.
+  return `custom:${slug || stableHash(normalized).toString(36)}`;
 }
 
 export function customScopePresentation(label) {
@@ -140,16 +144,30 @@ export function customScopePresentation(label) {
 export function categoryPresentation(category, customTypes = []) {
   if (CATEGORY_PRESENTATIONS[category]) return CATEGORY_PRESENTATIONS[category];
   const normalizedCategory = normalizedLabel(category);
+  // The engine deliberately routes uncatalogued author scopes through the
+  // contract's `other` dimension. Give a single active custom concern its real
+  // author-facing name instead of making a successful custom review look like
+  // a generic "Other" result.
+  if (normalizedCategory.toLowerCase() === "other" && customTypes.length === 1) {
+    return customScopePresentation(customTypes[0]);
+  }
   const customLabel = customTypes.find((label) =>
     customScopeKey(label) === normalizedCategory ||
     normalizedLabel(label).toLowerCase() === normalizedCategory.toLowerCase());
-  const label = customLabel || normalizedCategory.replace(/^custom:/, "").replace(/-/g, " ");
+  const label = customLabel || (
+    normalizedCategory.toLowerCase() === "other" && customTypes.length > 1
+      ? "Custom Scope"
+      : normalizedCategory.replace(/^custom:/, "").replace(/-/g, " ")
+  );
   return customScopePresentation(label);
 }
 
 export function scopeMatchesDimension(scope = [], dimension, customTypes = []) {
   const normalizedDimension = normalizedLabel(dimension).toLowerCase();
-  return scope.includes(dimension) || customTypes.some((label) =>
+  const selectedCustom = customTypes.some((label) => scope.includes(customScopeKey(label)));
+  return scope.includes(dimension) ||
+    (normalizedDimension === "other" && selectedCustom) ||
+    customTypes.some((label) =>
     scope.includes(customScopeKey(label)) &&
     normalizedLabel(label).toLowerCase() === normalizedDimension);
 }

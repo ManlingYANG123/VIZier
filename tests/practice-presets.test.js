@@ -68,6 +68,7 @@ test("the Practice cache is restricted to one explicitly requested overall revie
   assert.equal(shouldUsePracticeOverallCache({ ...base, explicitlyRequested: false }), false);
   assert.equal(shouldUsePracticeOverallCache({ ...base, cacheConsumed: true }), false);
   assert.equal(shouldUsePracticeOverallCache({ ...base, focusedRequest: "Should I change the layout?" }), false);
+  assert.equal(shouldUsePracticeOverallCache({ ...base, scopeCustomized: true }), false);
 });
 
 test("single and batch practice Apply mutate clones, not the dashboard fixture", () => {

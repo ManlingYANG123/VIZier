@@ -268,12 +268,17 @@ export function shouldUsePracticeOverallCache({
   explicitlyRequested = false,
   cacheConsumed = false,
   focusedRequest = "",
+  scopeCustomized = false,
 } = {}) {
   return Boolean(
     practiceActive
     && explicitlyRequested
     && !cacheConsumed
     && !String(focusedRequest || "").trim()
+    // The fixed practice response exists only for the prepared default review.
+    // A custom or narrowed Feedback Scope is an author request and must reach
+    // the live engine instead of silently receiving unrelated cached content.
+    && !scopeCustomized
   );
 }
 

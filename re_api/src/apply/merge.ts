@@ -18,7 +18,7 @@
 import type { Critique, SpecMap, VegaLiteSpec } from "../contracts.ts";
 import type { LLMClient } from "../llm/client.ts";
 import { applySpecEdits, safeSpecEdits, type SpecEdit } from "./editSpec.ts";
-import { compileSpec } from "./validate.ts";
+import { compileSpec } from "./compile.ts";
 import { encodedFieldsDeep } from "../detect/specUtil.ts";
 
 /** The tiles an edit-spec critique targets — the same union applyOne fans out
@@ -179,7 +179,7 @@ export async function mergeEditSpecConflict(
   const safe = safeSpecEdits(trial, proposed);
   if (!safe.length) return null;
   if (!applySpecEdits(trial, safe)) return null; // merge that changes nothing is no merge
-  if (!compileSpec(trial).ok) return null;
+  if (!compileSpec(trial, spec).ok) return null;
   if (!stillRenders(spec, trial)) return null;
   return safe;
 }

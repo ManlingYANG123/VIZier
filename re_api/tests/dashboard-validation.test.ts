@@ -54,6 +54,96 @@ test("post-apply validation does not block an unrelated change for a pre-existin
   assert.equal(result.ok, true);
 });
 
+test("post-apply validation rejects a materially worsened pre-existing overlap", () => {
+  const original = board();
+  original.tiles![1].bounds = { x: 500, y: 96, w: 516, h: 260 };
+  const next = structuredClone(original);
+  next.tiles![1].bounds = { x: 360, y: 96, w: 516, h: 260 };
+  const result = validateAppliedDashboard(original, next, specs, specs);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join(" "), /worsened overlap/);
+});
+
+test("post-apply validation rejects a floating filter placed over a chart", () => {
+  const original = board();
+  original.filters = [{
+    id: "region-filter",
+    label: "Region",
+    kind: "category",
+    field: "region",
+    targets: ["a", "b"],
+    wired: true,
+    placement: "floating",
+    position: { x: 820, y: 650, w: 220 },
+  }];
+  const next = structuredClone(original);
+  next.filters![0].position = { x: 60, y: 140, w: 220 };
+  const result = validateAppliedDashboard(original, next, specs, specs);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join(" "), /filter region-filter overlaps tile a/);
+});
+
+test("post-apply validation rejects a materially worsened existing filter collision", () => {
+  const original = board();
+  original.filters = [{
+    id: "region-filter",
+    label: "Region",
+    kind: "category",
+    field: "region",
+    targets: ["a", "b"],
+    wired: true,
+    placement: "floating",
+    position: { x: 60, y: 340, w: 220 },
+  }];
+  const next = structuredClone(original);
+  next.filters![0].position = { x: 60, y: 140, w: 220 };
+  const result = validateAppliedDashboard(original, next, specs, specs);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join(" "), /chrome collision .* materially worsened/);
+});
+
+test("post-apply validation rejects a title-inline filter that covers a long heading", () => {
+  const original = board();
+  original.title = "Operational performance";
+  original.filters = [{
+    id: "region-filter",
+    label: "Region",
+    kind: "category",
+    field: "region",
+    targets: ["a", "b"],
+    wired: true,
+    placement: "floating",
+    position: { x: 820, y: 650, w: 220 },
+  }];
+  const next = structuredClone(original);
+  next.title = "Operational performance by region, product category, customer segment, and reporting period";
+  next.filters![0].placement = "title-inline";
+  delete next.filters![0].position;
+  const result = validateAppliedDashboard(original, next, specs, specs);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join(" "), /filter region-filter overlaps the dashboard heading/);
+});
+
+test("post-apply validation permits a chart-header filter inside its anchor tile", () => {
+  const original = board();
+  original.filters = [{
+    id: "region-filter",
+    label: "Region",
+    kind: "category",
+    field: "region",
+    targets: ["a", "b"],
+    wired: true,
+    placement: "floating",
+    position: { x: 820, y: 650, w: 220 },
+  }];
+  const next = structuredClone(original);
+  next.filters![0].placement = "chart-header";
+  next.filters![0].anchorTile = "a";
+  delete next.filters![0].position;
+  const result = validateAppliedDashboard(original, next, specs, specs);
+  assert.equal(result.ok, true);
+});
+
 test("post-apply validation rejects charts compressed into unreadable strips", () => {
   const original = board();
   const next = structuredClone(original);

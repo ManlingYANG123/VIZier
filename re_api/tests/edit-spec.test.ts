@@ -7,7 +7,7 @@ import {
   safeSpecEdits,
 } from "../src/apply/editSpec.ts";
 import { applyProposals } from "../src/apply/index.ts";
-import { compileSpecMap } from "../src/apply/validate.ts";
+import { compileSpecMap } from "../src/apply/compile.ts";
 import type { Critique } from "../src/contracts.ts";
 
 function barTile() {

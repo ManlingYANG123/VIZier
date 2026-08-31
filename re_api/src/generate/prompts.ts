@@ -270,9 +270,9 @@ OUTPUT POLICY:
 - Work critique-first. For every evaluable tile, cross-view relationship, and board-level element, test multiple plausible object×problem hypotheses before deciding there is no issue. Write every distinct evidence-grounded critique that would materially improve the dashboard; do not stop because several positive observations were easy to find. One internally diagnosed issue may produce zero, one, or several critiques when several genuinely independent dashboard-specific fixes are supported; return each distinct issue separately rather than collapsing them into generic advice. But when ONE identical fix applies to several tiles (e.g. the same axis-label or sort edit-spec fix on three charts, or the same missing-hover add-tooltip on three KPI tiles), emit ONE critique and list every affected tile id in target.ref.tiles — do NOT repeat the same fix once per tile.
 - Every critique names an object and either a recommendation leaf or, when no leaf fits, an omitted recommendation with a specific fix in suggestion. Use a distinct kind slug for every distinct observation. For manual guidance, the kind identifies the fix and must describe the actual dashboard issue.
 - For focused and selected-region review, ALWAYS write a plain-language answer to the author's explicit request in the answer field of at least one critique, even when the honest response is "no material issue" or "this looks fine". The answer must directly address what the author asked before offering any diagnosis and suggestion. When the artifact and evidence do not support a full grounded critique, still return one critique carrying the answer (its issue/rationale/evidence/suggestion may restate the observation that led to the answer). Additional related critiques may omit answer.
-- A scope the author EXPLICITLY chooses must come back with content — never empty — because choosing it signals they want feedback there. This covers a focused or selected-region request AND every dimension named in REQUEST SCOPE.authorSelectedScopes (the review dimensions the author restricted a full review to). For each explicitly chosen scope, return at least one grounded critique; when you genuinely find no fault in that scope, return a grounded strength (Well Done) for it instead, so the author still gets substantive feedback rather than an empty result. Leave a chosen scope without any item only when the dashboard contains nothing evaluable in it at all. This never licenses manufacturing: the strength must pass the SAME grounding gate as any other, so a grounded Well Done is the honest floor here — never invent an issue or inflate praise to fill a scope.
-- When REQUEST SCOPE.authorSelectedScopes is present, it is a strict output filter: return critiques and strengths ONLY for those selected dimensions. You may reason across the whole dashboard to understand evidence, but do not emit items from unchecked dimensions.
-- A selected scope beginning with "custom:" is author-written rather than a catalog branch. Address that concern with an uncatalogued recommendation (dimension "other") instead of forcing it into an unrelated standard dimension.
+- A scope the author EXPLICITLY chooses must come back with content — never empty — because choosing it signals they want feedback there. This covers a focused or selected-region request, every dimension named in REQUEST SCOPE.authorSelectedScopes (a narrowed standard review), AND every exact concern named in REQUEST SCOPE.authorSelectedCustomScopes. For each explicitly chosen scope, return at least one grounded critique; when you genuinely find no fault in that scope, return a grounded strength (Well Done) for it instead, so the author still gets substantive feedback rather than an empty result. Leave a chosen scope without any item only when the dashboard contains nothing evaluable in it at all. This never licenses manufacturing: the strength must pass the SAME grounding gate as any other, so a grounded Well Done is the honest floor here — never invent an issue or inflate praise to fill a scope.
+- When REQUEST SCOPE.authorSelectedScopes is present, it is a strict output filter: return critiques and strengths ONLY for those selected dimensions. You may reason across the whole dashboard to understand evidence, but do not emit items from unchecked dimensions. When only authorSelectedCustomScopes is present, keep ordinary full-review coverage and reserve content for each named custom concern; the custom concern is additive, not a request for eleven standard dimensions to each consume an output slot.
+- A selected scope beginning with "custom:" is author-written rather than a catalog branch. REQUEST SCOPE.authorSelectedCustomScopes carries its exact human label. Address each named concern with an uncatalogued recommendation (dimension "other") instead of forcing it into an unrelated standard dimension.
 - Seek useful coverage across individual tiles, cross-view relationships, dashboard-level framing, analytical substance (data, cognition, task, and context), use behavior (interaction), and the dashboard's authoring/workflow/process (the "design process" dimension — how the dashboard is built, maintained, evaluated, and fitted to its audience's workflow). Do not equate "executable" with "important": a grounded Guidance item can be more valuable than another styling edit. Do not translate a data, task, context, cognition, or process concern into a visual change merely to make it executable. Process/workflow is a first-class coverage dimension: aim for 1–3 grounded process observations, not zero and not a flood, and do not omit a well-grounded one merely because it cannot be auto-applied. Never manufacture issues to meet a quota.
 - Coverage target, not a quota: a multi-view full dashboard will often support 8–12 distinct formative observations spanning tiles, cross-view relationships, dashboard framing, analytical context, and design-process/workflow. Seek breadth without relaxing quality: do not add cosmetic, generic, causally weak, or duplicate items merely to reach the range. Count a shared fix that applies to several tiles as ONE observation.
 - Full review may return up to 11 critiques. Focused or selected-region review may return up to 4.
@@ -317,9 +317,13 @@ export function dashboardReviewUser(
     ? snapshot.values.scope.filter((s): s is string => typeof s === "string" && s.trim().length > 0)
     : [];
   const hasCustomScope = selectedScopes.some((scope) => scope.startsWith("custom:"));
+  const standardScopeIsNarrowed = RECOMMENDATION_BRANCHES.some((branch) => !selectedScopes.includes(branch));
+  const selectedCustomScopes = Array.isArray(snapshot.values.customTypes)
+    ? snapshot.values.customTypes.filter((scope): scope is string => typeof scope === "string" && scope.trim().length > 0)
+    : [];
   const scopeIsNarrowed =
     selectedScopes.length > 0 &&
-    (hasCustomScope || RECOMMENDATION_BRANCHES.some((branch) => !selectedScopes.includes(branch)));
+    (hasCustomScope || standardScopeIsNarrowed);
   const requestScope = region
     ? {
         kind: "selected-region",
@@ -333,7 +337,11 @@ export function dashboardReviewUser(
     : focus
       ? { kind: "focused", request: focus.request, requestContract: focus.requestContract }
       : scopeIsNarrowed
-        ? { kind: "full", authorSelectedScopes: selectedScopes }
+        ? {
+            kind: "full",
+            ...(standardScopeIsNarrowed ? { authorSelectedScopes: selectedScopes } : {}),
+            ...(selectedCustomScopes.length ? { authorSelectedCustomScopes: selectedCustomScopes } : {}),
+          }
         : { kind: "full" };
   const contextEvidenceAddresses = ["goal", "audience", "constraints", "notes", "customTypes"]
     .map((field) => ({

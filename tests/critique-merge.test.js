@@ -59,6 +59,73 @@ test("solution refinement keeps the accepted diagnosis and exact target", () => 
   }), false);
 });
 
+test("solution refinement preserves the visible fields of an accepted cross-group comparison", () => {
+  const previous = critique({
+    object: "task",
+    problem: "unclear | ambiguous",
+    dimension: "task",
+    tileId: "project-status",
+    title: "The dashboard does not identify which department needs attention first",
+    issue: "Risk is not compared across departments.",
+    target: { granularity: "chart", ref: { tile: "project-status" } },
+    proposal: {
+      kind: "edit-spec",
+      mode: "executable",
+      edits: [
+        { op: "set", path: ["encoding", "y"], value: { field: "Department", type: "nominal" } },
+        { op: "set", path: ["encoding", "color"], value: { field: "Status", type: "nominal" } },
+        { op: "set", path: ["encoding", "x"], value: { field: "Count", type: "quantitative" } },
+      ],
+    },
+  });
+  const shared = {
+    ...previous,
+    id: "alternative",
+    suggestion: "Use a more compact status comparison.",
+  };
+
+  assert.equal(solutionRefinementCandidateMatches(previous, {
+    ...shared,
+    proposal: {
+      kind: "edit-spec",
+      mode: "executable",
+      edits: [
+        { op: "set", path: ["encoding", "y"], value: { field: "Status", type: "nominal" } },
+        { op: "set", path: ["encoding", "x"], value: { aggregate: "count", type: "quantitative" } },
+      ],
+    },
+  }), false, "status-only bars lose the department comparison");
+
+  assert.equal(solutionRefinementCandidateMatches(previous, {
+    ...shared,
+    proposal: {
+      kind: "edit-spec",
+      mode: "executable",
+      edits: [
+        { op: "set", path: ["transform"], value: [{ filter: { field: "Department", equal: "Eng" } }] },
+        { op: "set", path: ["encoding", "color"], value: { field: "Status", type: "nominal" } },
+      ],
+    },
+  }), false, "a single-department filter does not preserve cross-department comparison");
+
+  assert.equal(solutionRefinementCandidateMatches(previous, {
+    ...shared,
+    proposal: {
+      kind: "edit-spec",
+      mode: "executable",
+      edits: [
+        { op: "set", path: ["encoding", "y"], value: { field: "Department", type: "nominal" } },
+        { op: "set", path: ["encoding", "color"], value: { field: "Status", type: "nominal" } },
+        { op: "set", path: ["encoding", "x"], value: { aggregate: "count", type: "quantitative" } },
+      ],
+    },
+  }), true, "a compact chart that still encodes department and status remains valid");
+
+  const request = critiqueSolutionRefinementRequest(previous, "Keep the colors and make it compact.");
+  assert.match(request, /REQUIRED COMPARISON FIELDS: Department, Status/);
+  assert.match(request, /Filtering to one group.*does not preserve the accepted comparison/);
+});
+
 test("critiqueIdentityKey matches on object|problem|location|remedy", () => {
   const a = critique();
   const b = critique({ id: "c-2" });

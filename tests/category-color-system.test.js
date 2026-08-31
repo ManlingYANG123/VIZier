@@ -47,6 +47,7 @@ test("clusterForDimension and clusterPresentation resolve real dimensions and re
 
 test("custom scopes receive a stable key and color", () => {
   assert.equal(customScopeKey("Brand consistency"), "custom:brand-consistency");
+  assert.notEqual(customScopeKey("视觉层次"), customScopeKey("品牌一致性"));
   assert.deepEqual(
     customScopePresentation("Brand consistency"),
     customScopePresentation("Brand consistency"),
@@ -63,7 +64,16 @@ test("a checked custom scope can rank a matching critique dimension", () => {
     scopeMatchesDimension(["custom:brand-consistency"], "Brand consistency", customTypes),
     true,
   );
+  assert.equal(
+    scopeMatchesDimension(["custom:brand-consistency"], "other", customTypes),
+    true,
+  );
   assert.equal(scopeMatchesDimension([], "Brand consistency", customTypes), false);
+});
+
+test("an uncatalogued result keeps the single active custom scope label", () => {
+  assert.equal(categoryPresentation("other", ["Visual Hierarchy"]).label, "Visual Hierarchy");
+  assert.equal(categoryPresentation("other", ["Mobile", "Brand consistency"]).label, "Custom Scope");
 });
 
 test("a narrowed Feedback Scope strictly filters standard dimensions", () => {

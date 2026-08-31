@@ -2560,84 +2560,109 @@ button { font: inherit; }
 }
 
 .remove-custom-scope:focus-visible,
-.scope-add-trigger:focus-visible,
-.scope-add-editor input:focus-visible,
-.scope-add-editor button:focus-visible {
+.scope-add-trigger:focus-visible {
   outline: 2px solid #515154;
   outline-offset: 2px;
 }
 
 .scope-add-control {
-  margin-top: 7px;
+  min-width: 0;
+}
+
+.scope-add-composer {
+  display: inline-flex;
+  min-width: 0;
+  vertical-align: middle;
 }
 
 .scope-add-trigger {
-  min-height: 26px;
+  min-height: 28px;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 7px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: #6e6e73;
+  gap: 5px;
+  padding: 4px 9px 4px 7px;
+  border: 1px solid #b8b8bd;
+  border-radius: 999px;
+  background: #fff;
+  color: #3a3a3c;
   font-size: 10.5px;
-  font-weight: 600;
+  font-weight: 650;
   cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
 }
 
 .scope-add-trigger:hover {
-  background: #ededf0;
+  border-color: #7c7c82;
+  background: #f2f2f4;
   color: #1d1d1f;
 }
 
-.scope-add-editor {
+.scope-add-trigger[hidden] {
+  display: none;
+}
+
+.scope-add-icon {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 5px;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  border-radius: 50%;
+  background: #2c2c2e;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.scope-cluster-chips-custom {
+  align-items: center;
+}
+
+.scope-add-editor {
+  width: 158px;
+  min-width: 0;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #8e8e93;
+  border-radius: 999px;
+  background: #fff;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 
 .scope-add-editor[hidden] {
   display: none;
 }
 
-.scope-add-editor input {
+.context-panel-fixed .brief-scope-field .scope-add-editor input,
+.context-panel-fixed .brief-scope-field .scope-add-editor input:focus {
   min-width: 0;
-  height: 30px;
-  padding: 0 8px;
-  border: 1px solid #c7c7cc;
-  border-radius: 7px;
-  background: #fff;
+  width: 100%;
+  height: 26px;
+  min-height: 0;
+  padding: 0 10px;
+  border: 0;
+  border-radius: inherit;
+  outline: 0;
+  background: transparent;
+  box-shadow: none;
   color: #1d1d1f;
   font-size: 10.5px;
+  font-weight: 600;
 }
 
-.scope-add-confirm,
-.scope-add-cancel {
-  height: 30px;
-  padding: 0 9px;
-  border: 1px solid #c7c7cc;
-  border-radius: 7px;
-  background: #fff;
-  color: #3a3a3c;
-  font-size: 10.5px;
-  font-weight: 650;
-  cursor: pointer;
+.context-panel-fixed .brief-scope-field .scope-add-editor input::placeholder {
+  color: #6e6e73;
+  opacity: 1;
 }
 
-.scope-add-confirm {
-  border-color: #3a3a3c;
-  background: #2c2c2e;
-  color: #fff;
-}
-
-.scope-add-cancel {
-  width: 30px;
-  padding: 0;
+.scope-add-editor:focus-within {
+  border-color: #515154;
+  box-shadow: 0 2px 7px rgb(0 0 0 / 10%);
 }
 
 .scope-add-error {
-  margin: 5px 0 0;
+  margin: 4px 0 0;
   color: #9f2d20;
   font-size: 10px;
   line-height: 1.3;
@@ -2645,6 +2670,10 @@ button { font: inherit; }
 
 .scope-add-error[hidden] {
   display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scope-add-editor { transition: none; }
 }
 
 .custom-type-tag {
@@ -7157,7 +7186,7 @@ body.panel-resizing * {
 }
 
 .context-panel-fixed .scope-add-control {
-  margin-top: 3px;
+  margin-top: 0;
 }
 
 .context-panel-fixed .btn-add-note {
@@ -7792,7 +7821,7 @@ body.panel-resizing * {
 }
 
 .context-panel-fixed .scope-add-control {
-  margin-top: 6px;
+  margin-top: 0;
 }
 
 .context-panel-fixed .context-note-composer #contextNoteInput,
@@ -8056,8 +8085,7 @@ body.panel-resizing * {
 
 .context-panel-fixed .brief-field textarea::placeholder,
 .context-panel-fixed .brief-field input::placeholder,
-.context-panel-fixed #contextNoteInput::placeholder,
-.context-panel-fixed #customScopeInput::placeholder {
+.context-panel-fixed #contextNoteInput::placeholder {
   color: #94949a;
   opacity: 1;
 }
@@ -9675,6 +9703,249 @@ body.panel-resizing * {
 .checkpoint-compare-controls > svg {
   width: 16px !important;
   height: 16px !important;
+}
+
+/* Reversible editing stays attached to the two places where authors make
+ * consequential decisions: the Working Draft bar and checkpoint detail. */
+.undo-working-draft-button,
+.checkpoint-restore-button {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid #c7c7cc;
+  border-radius: 7px;
+  background: #fff;
+  color: #3a3a3c;
+  font-size: 10.5px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+.undo-working-draft-button[hidden],
+.change-undo-toast-action[hidden] {
+  display: none;
+}
+
+.undo-working-draft-button svg,
+.checkpoint-restore-button svg,
+.checkpoint-restore-icon svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.45;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.undo-working-draft-button:hover:not(:disabled),
+.checkpoint-restore-button:hover:not(:disabled) {
+  border-color: #7c7c82;
+  background: #f2f2f4;
+  color: #1d1d1f;
+}
+
+.undo-working-draft-button:disabled,
+.checkpoint-restore-button:disabled {
+  border-color: #dedee2;
+  background: #f5f5f7;
+  color: #a0a0a5;
+  cursor: not-allowed;
+}
+
+.undo-working-draft-button:focus-visible,
+.checkpoint-restore-button:focus-visible,
+.change-undo-toast button:focus-visible,
+.checkpoint-restore-modal button:focus-visible {
+  outline: 2px solid #525257;
+  outline-offset: 2px;
+}
+
+.revision-detail-actions {
+  min-width: 0;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.checkpoint-restore-modal {
+  width: min(500px, 100%);
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: start;
+  gap: 4px 12px;
+}
+
+.checkpoint-restore-icon {
+  grid-row: 1 / span 2;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 10px;
+  background: #ededf0;
+  color: #2c2c2e;
+}
+
+.checkpoint-restore-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.checkpoint-restore-copy {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.checkpoint-restore-actions {
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.checkpoint-restore-discard {
+  border-color: #d4a6a9;
+  color: #8f2530;
+}
+
+.checkpoint-restore-discard:hover {
+  border-color: #b4232f;
+  background: #fff3f4;
+  color: #7a1721;
+}
+
+.change-undo-toast {
+  position: fixed;
+  z-index: 260;
+  left: 50%;
+  bottom: 30px;
+  width: min(520px, calc(100vw - 32px));
+  min-height: 50px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 9px 9px 14px;
+  border: 1px solid #515154;
+  border-radius: 10px;
+  background: #2c2c2e;
+  color: #fff;
+  box-shadow: 0 12px 30px #1d1d1f3d;
+  transform: translateX(-50%);
+  animation: changeUndoToastIn 180ms cubic-bezier(.16, 1, .3, 1);
+}
+
+.change-undo-toast[hidden] {
+  display: none;
+}
+
+.change-undo-toast[aria-busy="true"] {
+  cursor: wait;
+}
+
+.change-undo-toast-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.change-undo-toast-copy strong,
+.change-undo-toast-copy span {
+  overflow-wrap: anywhere;
+}
+
+.change-undo-toast-copy strong {
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.change-undo-toast-copy span {
+  color: #d2d2d7;
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
+.change-undo-toast-action,
+.change-undo-toast-dismiss {
+  border: 0;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+}
+
+.change-undo-toast-action {
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 6px;
+  background: #fff;
+  color: #1d1d1f;
+  font-size: 10.5px;
+  font-weight: 720;
+}
+
+.change-undo-toast-action:hover {
+  background: #ededf0;
+}
+
+.change-undo-toast-action:disabled,
+.change-undo-toast-dismiss:disabled {
+  cursor: wait;
+  opacity: .55;
+}
+
+.change-undo-toast-dismiss {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 6px;
+  color: #d2d2d7;
+  font-size: 18px;
+}
+
+.change-undo-toast-dismiss:hover {
+  background: #424245;
+  color: #fff;
+}
+
+@keyframes changeUndoToastIn {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@media (max-width: 760px) {
+  .revision-detail-head.comparison {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .revision-detail-actions {
+    justify-content: flex-start;
+  }
+
+  .change-undo-toast {
+    bottom: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .change-undo-toast { animation: none; }
+  .undo-working-draft-button,
+  .checkpoint-restore-button { transition: none; }
+}
+
+@media (forced-colors: active) {
+  .change-undo-toast,
+  .checkpoint-restore-icon { border: 1px solid CanvasText; }
 }
 
 /* Focused review is a review-scoped question, not another context card. The

@@ -188,6 +188,11 @@ export function groupCritiquesByAsk(critiques) {
 const NOT_APPLICABLE_PATTERN = /no material issue|no longer (present|applicable|needed|relevant)|not (present|applicable) (any more|anymore|any longer)|issue (is |has been )?(gone|resolved|fixed|addressed)|keep the current treatment/i;
 const SHORTER_TEXT_PATTERN = /\b(?:text|copy|title|label|wording)?\s*(?:is|are|feels?|seems?)?\s*too\s+(?:long|wordy|verbose)\b|\b(?:shorter|shorten|concise|condense|trim|less\s+text|reduce\s+(?:the\s+)?(?:text|copy|wording))\b|(?:文字|文本|标题|文案).*(?:太长|过长)|(?:缩短|精简|简短)/iu;
 const AUTHORED_TEXT_KEY_PATTERN = /^(?:label|title|subtitle|text|copy|caption|description)$/i;
+const COMPARISON_DIAGNOSIS_PATTERN = /\b(?:across|between|compare|comparison|difference|which\s+\w+|by\s+(?:department|team|group|category|region|segment|status))\b|跨(?:部门|团队|组别|类别|地区)|比较|对比|哪个(?:部门|团队|组别|类别|地区)/iu;
+const COMPARISON_CHANNELS = new Set([
+  "x", "x2", "y", "y2", "color", "row", "column", "facet", "detail",
+  "theta", "radius", "shape", "strokedash",
+]);
 
 function normalizedTextLength(value) {
   return Array.from(String(value || "").replace(/\s+/g, " ").trim()).length;
@@ -226,6 +231,51 @@ function proposalTextValues(proposal) {
   };
   visit(proposal);
   return values;
+}
+
+function critiqueRequiresComparison(critique) {
+  return COMPARISON_DIAGNOSIS_PATTERN.test([
+    critique?.title,
+    critique?.issue,
+    critique?.answer,
+    critique?.evidence,
+    critique?.suggestion,
+    critique?.reviewRequest,
+    critique?.requestContract?.request,
+  ].filter(Boolean).join("\n"));
+}
+
+function proposalComparisonFields(proposal) {
+  const fields = new Set();
+  const visit = (value, path = []) => {
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => visit(item, [...path, String(index)]));
+      return;
+    }
+    const channel = [...path].reverse().find((part) => COMPARISON_CHANNELS.has(String(part).toLowerCase()));
+    if (channel && typeof value.field === "string" && value.field.trim()) {
+      const type = String(value.type || "").toLowerCase();
+      // Quantitative measures may legitimately change from a named count field
+      // to an aggregate. The categorical/temporal dimensions are what preserve
+      // an accepted cross-group comparison.
+      if (type !== "quantitative") fields.add(value.field.trim());
+    }
+    Object.entries(value).forEach(([key, child]) => visit(child, [...path, key]));
+  };
+  for (const edit of proposal?.edits || []) {
+    if (edit?.op !== "set") continue;
+    visit(edit.value, Array.isArray(edit.path) ? edit.path.map(String) : []);
+  }
+  return fields;
+}
+
+function comparisonFieldsPreserved(previous, replacement) {
+  if (!critiqueRequiresComparison(previous)) return true;
+  const required = proposalComparisonFields(previous?.proposal);
+  if (!required.size) return true;
+  const proposed = proposalComparisonFields(replacement?.proposal);
+  return [...required].every((field) => proposed.has(field));
 }
 
 export function refinementDirectionRequiresShorterText(direction) {
@@ -276,6 +326,7 @@ export function solutionRefinementCandidateMatches(previous, replacement) {
   if (previous.dimension && replacement.dimension !== previous.dimension) return false;
   if (previous.object && replacement.object !== previous.object) return false;
   if (previous.problem && replacement.problem !== previous.problem) return false;
+  if (!comparisonFieldsPreserved(previous, replacement)) return false;
   return true;
 }
 
@@ -318,6 +369,9 @@ export function critiqueSolutionRefinementRequest(critique, direction, {
     target: critique?.target || null,
   });
   const previousProposal = JSON.stringify(critique?.proposal || null);
+  const comparisonFields = critiqueRequiresComparison(critique)
+    ? [...proposalComparisonFields(critique?.proposal)]
+    : [];
   const shorterTextConstraint = refinementDirectionRequiresShorterText(direction)
     ? [
         "HARD ACCEPTANCE CONSTRAINT: Make the recommendation wording and every proposed replacement text at least 20% shorter than the previous attempt.",
@@ -333,6 +387,12 @@ export function critiqueSolutionRefinementRequest(critique, direction, {
     "The author accepts the diagnosis. Keep the issue, evidence, target, and scope fixed.",
     `EXACT DIAGNOSIS AND TARGET CONTRACT: ${diagnosisContract}`,
     "Every returned option MUST repeat that exact object, problem, dimension, tileId, target granularity, and target ref. Do not modify any other tile or dashboard element.",
+    ...(comparisonFields.length
+      ? [
+          `REQUIRED COMPARISON FIELDS: ${comparisonFields.join(", ")}.`,
+          "Every option must keep these fields as visible comparison encodings. Filtering to one group or mentioning a field only in tooltip/filter data does not preserve the accepted comparison.",
+        ]
+      : []),
     "Do not start a full review, introduce a substitute issue, or repeat the previous solution unchanged.",
     "Treat the author's refinement direction as a hard acceptance constraint, not optional context.",
     `ALTERNATIVE STRATEGY: ${String(strategy || "").trim()}`,

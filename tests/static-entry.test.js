@@ -9,12 +9,13 @@ test("Vite entry does not contain an unevaluated server-side cache token", async
   assert.match(html, /<script type="module" src="\/src\/bootstrap\.js"><\/script>/);
 });
 
-test("checkpoint details remain comparison-only without a restore action", async () => {
+test("checkpoint details restore a saved state without deleting later history", async () => {
   const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
 
-  assert.doesNotMatch(source, /Restore this checkpoint/);
-  assert.doesNotMatch(source, /restoreCheckpointButton/);
-  assert.doesNotMatch(source, /restoreDashboardCheckpoint/);
+  assert.match(source, /data-restore-checkpoint/);
+  assert.match(source, /restoreCheckpointAsWorkingDraft/);
+  assert.match(source, /Existing checkpoints will not be deleted/);
+  assert.match(source, /undoWorkingDraftTransaction/);
 });
 
 test("frontend sends review scope instead of context-dependent generation modes", async () => {
@@ -133,6 +134,18 @@ test("all standard feedback scopes are selected by default", async () => {
   assert.match(source, /value="chart" checked/);
   assert.match(source, /value="design process" checked/);
   assert.doesNotMatch(source, /scope: \["visual", "narrative", "interaction", "data"\]/);
+});
+
+test("custom feedback scope edits in place as one compact pill", async () => {
+  const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+
+  assert.match(source, /<form class="scope-add-editor" id="scopeAddEditor" hidden>/);
+  assert.match(source, /scopeAddEditor\?\.addEventListener\("submit"/);
+  assert.match(source, /event\.key === "Enter" && !event\.isComposing[\s\S]*?addCustomFeedbackScope\(\)/);
+  assert.match(source, /if \(event\.key === "Escape"\)[\s\S]*?closeCustomScopeEditor\(\)/);
+  assert.doesNotMatch(source, /id="scopeAddConfirm"|id="scopeAddCancel"/);
+  assert.match(styles, /\.scope-add-editor \{[\s\S]*?display: inline-flex;[\s\S]*?border-radius: 999px;/);
 });
 
 test("shared dashboard library loads dynamic JSON through the canonical upload flow", async () => {
@@ -288,6 +301,8 @@ test("practice serves one cached overall review while scoped generation stays li
   assert.match(app, /if \(!practiceTutorialIsGuiding\(\)\) return streamApply/);
   assert.match(app, /practiceOverallReviewResponse\(practiceRuntime\.preset\)/);
   assert.match(app, /shouldUsePracticeOverallCache\(\{[\s\S]*?explicitlyRequested: options\.usePracticeOverallCache/);
+  assert.match(app, /scopeCustomized: !feedbackScopeUsesDefaultSelection\(\)/);
+  assert.match(app, /function markFeedbackScopeChanged\(\)[\s\S]*?practiceRuntime\.overallReviewCacheConsumed = false/);
   assert.match(app, /practiceOverallReview: true/);
   assert.match(app, /practiceRuntime\.overallReviewCacheConsumed = true/);
   assert.match(app, /overallReviewCacheConsumed: practiceRuntime\.overallReviewCacheConsumed/);
@@ -905,6 +920,20 @@ test("the active critique panel hides decided recommendations and moves them to 
   assert.match(styles, /\.critique-history-item \{/);
 });
 
+test("closing Search cannot leave an invisible critique filter active", async () => {
+  const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
+  const clearSearch = source.match(/function clearCritiqueSearch\(\)[\s\S]*?\n\}/)?.[0] || "";
+  const closePopovers = source.match(/function closeSidebarPopovers\([^]*?\n\}/)?.[0] || "";
+  const closeComponent = source.match(/function closeSidebarComponent\([^]*?\n\}/)?.[0] || "";
+
+  assert.match(clearSearch, /state\.search = ""/);
+  assert.match(clearSearch, /els\.searchInput\.value = ""/);
+  assert.match(clearSearch, /renderCritiques\(\)/);
+  assert.match(clearSearch, /renderMarkers\(\)/);
+  assert.match(closePopovers, /currentName === "search"\) clearCritiqueSearch\(\)/);
+  assert.match(closeComponent, /name === "search"\) clearCritiqueSearch\(\)/);
+});
+
 test("positive feedback renders as an inline card inside its topic group, not a separate panel", async () => {
   const source = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
@@ -999,7 +1028,7 @@ test("session end archives high-resolution PNG and reloadable JSON for checkpoin
 
   assert.match(source, /async function captureDashboardExport\(\)/);
   assert.match(source, /async function captureDashboardDisplaySvg\(\)/);
-  assert.match(source, /async function captureDashboardPngFromSvg\(/);
+  assert.match(source, /async function captureDashboardCanvasFromDom\(/);
   assert.match(source, /async function settleDashboardForCapture\(/);
   assert.match(source, /function buildDashboardCaptureSnapshot\(/);
   assert.match(source, /copyLiveControlState\(source, snapshot\)/);
@@ -1008,7 +1037,13 @@ test("session end archives high-resolution PNG and reloadable JSON for checkpoin
   assert.match(source, /toDataURL\("image\/webp", \.84\)/);
   const captureExport = source.match(/async function captureDashboardExport\(\)[\s\S]*?\n\}/)?.[0] || "";
   assert.match(captureExport, /const snapshot = buildDashboardCaptureSnapshot\(\)/);
-  assert.match(captureExport, /captureDashboardPngFromSvg\(svg, width, height\)/);
+  assert.match(captureExport, /captureDashboardCanvasFromDom\(width, height\)/);
+  assert.match(source, /await import\("html2canvas"\)/);
+  assert.match(source, /allowTaint: false/);
+  assert.match(source, /useCORS: true/);
+  assert.match(source, /function legacyCaptureColor\(value\)/);
+  assert.match(source, /copyCaptureSafeColors\(source, cloned\)/);
+  assert.doesNotMatch(captureExport, /captureDashboardPngFromSvg/);
   assert.doesNotMatch(captureExport, /captureLiveArtboardPng\(\)|captureDashboardPngFromViews\(\)/);
   assert.doesNotMatch(source, /function paintLiveArtboardChrome\(|async function captureLiveArtboardPng\(/);
   assert.match(source, /target\.afterPng = captured\.png/);

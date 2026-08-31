@@ -100,6 +100,8 @@ export function createWorkingDraft(baseCheckpointId = 1) {
   return {
     baseCheckpointId: Number(baseCheckpointId) || 1,
     dirty: false,
+    restoredFromCheckpointId: null,
+    transactions: [],
     appliedCritiques: [],
     applicationOrder: [],
     changedTargets: [],
@@ -122,6 +124,14 @@ function unique(values = []) {
   return [...new Set(values.filter(Boolean))];
 }
 
+const MAX_REVERSIBLE_TRANSACTIONS = 8;
+
+function workingDraftCoreSnapshot(draft) {
+  const snapshot = structuredClone(draft || createWorkingDraft());
+  delete snapshot.transactions;
+  return snapshot;
+}
+
 export function recordWorkingDraftApplication(draft, {
   appliedCritiques = [],
   result,
@@ -129,6 +139,7 @@ export function recordWorkingDraftApplication(draft, {
   afterSnapshot = null,
   beforeScreenshot = null,
   createdFromEventIds = [],
+  transaction = null,
 }) {
   const next = structuredClone(draft || createWorkingDraft());
   const existingCritiques = new Map(
@@ -161,7 +172,62 @@ export function recordWorkingDraftApplication(draft, {
   next.afterSnapshot = afterSnapshot ? structuredClone(afterSnapshot) : next.afterSnapshot;
   next.evaluationReport = structuredClone(result?.evaluationReport || next.evaluationReport);
   next.recommendationDelta = structuredClone(result?.recommendationDelta || next.recommendationDelta);
+  const priorTransactions = Array.isArray(draft?.transactions)
+    ? structuredClone(draft.transactions)
+    : [];
+  next.transactions = transaction
+    ? [
+        ...priorTransactions,
+        {
+          ...structuredClone(transaction),
+          type: transaction.type || "apply",
+          draftBefore: workingDraftCoreSnapshot(draft),
+        },
+      ].slice(-MAX_REVERSIBLE_TRANSACTIONS)
+    : priorTransactions;
   return next;
+}
+
+export function recordWorkingDraftRestore(draft, {
+  checkpointId,
+  beforeSnapshot,
+  afterSnapshot,
+  createdFromEventIds = [],
+  transaction = {},
+}) {
+  const previous = structuredClone(draft || createWorkingDraft());
+  const next = createWorkingDraft(previous.baseCheckpointId);
+  const priorTransactions = Array.isArray(previous.transactions)
+    ? structuredClone(previous.transactions)
+    : [];
+  next.dirty = true;
+  next.restoredFromCheckpointId = Number(checkpointId) || null;
+  next.beforeSnapshot = beforeSnapshot ? structuredClone(beforeSnapshot) : null;
+  next.afterSnapshot = afterSnapshot ? structuredClone(afterSnapshot) : null;
+  next.createdFromEventIds = unique(createdFromEventIds);
+  next.transactions = [
+    ...priorTransactions,
+    {
+      ...structuredClone(transaction),
+      type: "checkpoint_restore",
+      checkpointId: Number(checkpointId) || null,
+      draftBefore: workingDraftCoreSnapshot(previous),
+    },
+  ].slice(-MAX_REVERSIBLE_TRANSACTIONS);
+  return next;
+}
+
+export function undoWorkingDraftTransaction(draft) {
+  const current = structuredClone(draft || createWorkingDraft());
+  const transactions = Array.isArray(current.transactions) ? current.transactions : [];
+  const transaction = transactions.at(-1) || null;
+  if (!transaction) return { draft: current, transaction: null };
+  const restored = transaction.draftBefore
+    ? structuredClone(transaction.draftBefore)
+    : createWorkingDraft(current.baseCheckpointId);
+  restored.transactions = structuredClone(transactions.slice(0, -1));
+  if (!("restoredFromCheckpointId" in restored)) restored.restoredFromCheckpointId = null;
+  return { draft: restored, transaction: structuredClone(transaction) };
 }
 
 /** Preserve the critique semantics that gave an author's rationale meaning.

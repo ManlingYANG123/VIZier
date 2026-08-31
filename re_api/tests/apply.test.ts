@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { applyProposals, applyTooltip } from "../src/apply/index.ts";
-import { compileSpec, compileSpecMap } from "../src/apply/validate.ts";
+import { compileSpec, compileSpecMap } from "../src/apply/compile.ts";
 import { hasSelectionOnField, markHasPoint } from "../src/detect/specUtil.ts";
 import { dashboardSpecMap } from "../fixtures/specs.ts";
 import { critiquesFixture } from "./helpers.ts";
@@ -150,6 +150,41 @@ test("compile gate accepts good specs and rejects malformed ones", async () => {
     true,
   );
   assert.equal(compileSpec({ data: { values: [] }, encoding: {} }).ok, false);
+});
+
+test("render gate rejects newly introduced Vega-Lite warnings that discard proposal edits", () => {
+  const original = {
+    data: { values: [{ category: "A", value: 1 }] },
+    mark: { type: "text" },
+    encoding: {
+      text: { field: "category", type: "nominal" },
+      x: { field: "value", type: "quantitative" },
+    },
+  };
+  const lossy = structuredClone(original) as Record<string, unknown>;
+  (lossy.encoding as Record<string, unknown>).strokeDash = {
+    field: "category",
+    type: "nominal",
+  };
+
+  const result = compileSpec(lossy as never, original as never);
+  assert.equal(result.ok, false);
+  assert.ok(result.lossyWarnings.length > 0);
+  assert.match(result.error || "", /discard or override.*strokeDash.*incompatible.*text/is);
+});
+
+test("render gate permits a pre-existing lossy warning", () => {
+  const original = {
+    data: { values: [{ category: "A", value: 1 }] },
+    mark: { type: "text" },
+    encoding: {
+      text: { field: "category", type: "nominal" },
+      x: { field: "value", type: "quantitative" },
+      strokeDash: { field: "category", type: "nominal" },
+    },
+  };
+  const unchanged = structuredClone(original);
+  assert.equal(compileSpec(unchanged as never, original as never).ok, true);
 });
 
 test("render gate rejects a layered proposal whose compiled Vega has duplicate selection signals", async () => {
